@@ -1,0 +1,6 @@
+[common]
+
+[component_0]
+type = TargetGroup
+name = I8080
+parent = Target
