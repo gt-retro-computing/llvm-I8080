@@ -1,0 +1,4 @@
+[component_0]
+type = TargetGroup
+name = LC3
+parent = Target

@@ -16,7 +16,7 @@ foreach(item ${BENCHMARK_MAIN})
   list(REMOVE_ITEM SOURCE_FILES "${item}")
 endforeach()
 
-add_library(benchmark ${SOURCE_FILES})
+add_library(benchmark ${SOURCE_FILES} ../../../lib/Target/LC3/LC3FrameLowering.cpp ../../../lib/Target/LC3/LC3FrameLowering.h ../../../lib/Target/LC3/LC3.h ../../../lib/Target/LC3/LC3RegisterInfo.h)
 set_target_properties(benchmark PROPERTIES
   OUTPUT_NAME "benchmark"
   VERSION ${GENERIC_LIB_VERSION}

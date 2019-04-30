@@ -35,6 +35,7 @@ subdirectories =
  SystemZ
  WebAssembly
  X86
+ LC3
  XCore
 
 ; This is a special group whose required libraries are extended (by llvm-build)
