@@ -6,4 +6,7 @@ tablegen(LLVM LC3GenCallingConv.inc -gen-callingconv)
 
 add_public_tablegen_target(LC3CommonTableGen)
 
-add_llvm_target(LC3CodeGen LC3FrameLowering.cpp)
+add_llvm_target(
+        LC3CodeGen
+        LC3TargetMachine.cpp
+        LC3FrameLowering.cpp)

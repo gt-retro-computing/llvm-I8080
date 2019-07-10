@@ -5,4 +5,9 @@
 #ifndef LLVM_LC3_H
 #define LLVM_LC3_H
 
+namespace llvm {
+
+}
+
+
 #endif //LLVM_LC3_H

@@ -23,9 +23,6 @@ void LC3FrameLowering::emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB)
     if (!stackSize) {
         return;
     }
-
-    // Adj SP
-    unsigned stackReg = LC3::
 }
 
 void LC3FrameLowering::emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const {
