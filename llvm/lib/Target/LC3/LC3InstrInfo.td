@@ -39,7 +39,7 @@ class LC3_ALU2ri_Inst<bits<4> opcode, string opcodestr, SDNode opnode>
     let Inst{4-0} = imm;
 }
 
-def LC3_ADD3r : LC3_ALU3r_Inst<0b0001, "ADD", add>;
-def LC3_AND3r : LC3_ALU3r_Inst<0b0101, "ADD", and>;
-def LC3_ADD2ri : LC3_ALU2ri_Inst<0b0001, "ADD", add>;
-def LC3_AND2ri : LC3_ALU2ri_Inst<0b0101, "ADD", and>;
+def LC3_ADDrrr : LC3_ALU3r_Inst<0b0001, "ADD", add>;
+def LC3_ANDrrr : LC3_ALU3r_Inst<0b0101, "AND", and>;
+def LC3_ADDrri : LC3_ALU2ri_Inst<0b0001, "ADD", add>;
+def LC3_ANDrri : LC3_ALU2ri_Inst<0b0101, "AND", and>;
