@@ -507,22 +507,14 @@ bool TypeInfer::EnforceSmallerThan(TypeSetByHwMode &Small,
            (A.getScalarSizeInBits() == B.getScalarSizeInBits() &&
             A.getSizeInBits() < B.getSizeInBits());
   };
-  auto LE = [](MVT A, MVT B) -> bool {
+  auto LE = [&LT](MVT A, MVT B) -> bool {
     // This function is used when removing elements: when a vector is compared
     // to a non-vector, it should return false (to avoid removal).
     if (A.isVector() != B.isVector())
       return false;
 
-    // Note on the < comparison below:
-    // X86 has patterns like
-    //   (set VR128X:$dst, (v16i8 (X86vtrunc (v4i32 VR128X:$src1)))),
-    // where the truncated vector is given a type v16i8, while the source
-    // vector has type v4i32. They both have the same size in bits.
-    // The minimal type in the result is obviously v16i8, and when we remove
-    // all types from the source that are smaller-or-equal than v8i16, the
-    // only source type would also be removed (since it's equal in size).
-    return A.getScalarSizeInBits() <= B.getScalarSizeInBits() ||
-           A.getSizeInBits() < B.getSizeInBits();
+    return LT(A, B) || (A.getScalarSizeInBits() == B.getScalarSizeInBits() &&
+                        A.getSizeInBits() == B.getSizeInBits());
   };
 
   for (unsigned M : Modes) {
@@ -2140,7 +2132,7 @@ static TypeSetByHwMode getImplicitType(Record *R, unsigned ResNo,
 
   if (R->getName() == "node" || R->getName() == "srcvalue" ||
       R->getName() == "zero_reg" || R->getName() == "immAllOnesV" ||
-      R->getName() == "immAllZerosV") {
+      R->getName() == "immAllZerosV" || R->getName() == "undef_tied_input") {
     // Placeholder.
     return TypeSetByHwMode(); // Unknown.
   }
@@ -2445,18 +2437,32 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
       }
     }
 
+    // If one or more operands with a default value appear at the end of the
+    // formal operand list for an instruction, we allow them to be overridden
+    // by optional operands provided in the pattern.
+    //
+    // But if an operand B without a default appears at any point after an
+    // operand A with a default, then we don't allow A to be overridden,
+    // because there would be no way to specify whether the next operand in
+    // the pattern was intended to override A or skip it.
+    unsigned NonOverridableOperands = Inst.getNumOperands();
+    while (NonOverridableOperands > 0 &&
+           CDP.operandHasDefault(Inst.getOperand(NonOverridableOperands-1)))
+      --NonOverridableOperands;
+
     unsigned ChildNo = 0;
     for (unsigned i = 0, e = Inst.getNumOperands(); i != e; ++i) {
       Record *OperandNode = Inst.getOperand(i);
 
-      // If the instruction expects a predicate or optional def operand, we
-      // codegen this by setting the operand to it's default value if it has a
-      // non-empty DefaultOps field.
-      if (OperandNode->isSubClassOf("OperandWithDefaultOps") &&
-          !CDP.getDefaultOperand(OperandNode).DefaultOps.empty())
+      // If the operand has a default value, do we use it? We must use the
+      // default if we've run out of children of the pattern DAG to consume,
+      // or if the operand is followed by a non-defaulted one.
+      if (CDP.operandHasDefault(OperandNode) &&
+          (i < NonOverridableOperands || ChildNo >= getNumChildren()))
         continue;
 
-      // Verify that we didn't run out of provided operands.
+      // If we have run out of child nodes and there _isn't_ a default
+      // value we can use for the next operand, give an error.
       if (ChildNo >= getNumChildren()) {
         emitTooFewOperandsError(TP, getOperator()->getName(), getNumChildren());
         return false;

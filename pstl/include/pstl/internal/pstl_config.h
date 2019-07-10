@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-- pstl_config.h -----------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -16,21 +16,10 @@
 #define _PSTL_VERSION_MINOR ((_PSTL_VERSION % 1000) / 10)
 #define _PSTL_VERSION_PATCH (_PSTL_VERSION % 10)
 
-// Check the user-defined macro for parallel policies
-#if defined(PSTL_USE_PARALLEL_POLICIES)
-#    undef _PSTL_USE_PAR_POLICIES
-#    define _PSTL_USE_PAR_POLICIES PSTL_USE_PARALLEL_POLICIES
-// Check the internal macro for parallel policies
-#elif !defined(_PSTL_USE_PAR_POLICIES)
-#    define _PSTL_USE_PAR_POLICIES 1
-#endif
-
-#if _PSTL_USE_PAR_POLICIES
-#    if !defined(_PSTL_PAR_BACKEND_TBB)
-#        define _PSTL_PAR_BACKEND_TBB 1
-#    endif
-#else
-#    undef _PSTL_PAR_BACKEND_TBB
+#if !defined(_PSTL_PAR_BACKEND_SERIAL) && !defined(_PSTL_PAR_BACKEND_TBB)
+// TODO: In the future, we need to handle this setting using a configure-time
+//       option and something like a __config_site header.
+#    define _PSTL_PAR_BACKEND_SERIAL
 #endif
 
 // Check the user-defined macro for warnings
@@ -63,7 +52,7 @@
 #endif
 
 // Enable SIMD for compilers that support OpenMP 4.0
-#if (_OPENMP >= 201307) || (__INTEL_COMPILER >= 1600) || (!defined(__INTEL_COMPILER) && _PSTL_GCC_VERSION >= 40900)
+#if (_OPENMP >= 201307) || (__INTEL_COMPILER >= 1600) || (!defined(__INTEL_COMPILER) && _PSTL_GCC_VERSION >= 40900) || defined(__clang__)
 #    define _PSTL_PRAGMA_SIMD _PSTL_PRAGMA(omp simd)
 #    define _PSTL_PRAGMA_DECLARE_SIMD _PSTL_PRAGMA(omp declare simd)
 #    define _PSTL_PRAGMA_SIMD_REDUCTION(PRM) _PSTL_PRAGMA(omp simd reduction(PRM))

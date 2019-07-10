@@ -85,6 +85,9 @@ def NoCapture : EnumAttr<"nocapture">;
 /// Call cannot be duplicated.
 def NoDuplicate : EnumAttr<"noduplicate">;
 
+/// Function does not deallocate memory.
+def NoFree : EnumAttr<"nofree">;
+
 /// Disable implicit floating point insts.
 def NoImplicitFloat : EnumAttr<"noimplicitfloat">;
 
@@ -195,6 +198,9 @@ def SwiftSelf : EnumAttr<"swiftself">;
 
 /// Function must be in a unwind table.
 def UWTable : EnumAttr<"uwtable">;
+
+/// Function always comes back to callsite.
+def WillReturn : EnumAttr<"willreturn">;
 
 /// Function only writes to memory.
 def WriteOnly : EnumAttr<"writeonly">;

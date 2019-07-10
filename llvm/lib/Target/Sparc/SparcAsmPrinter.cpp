@@ -11,12 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstPrinter/SparcInstPrinter.h"
+#include "MCTargetDesc/SparcInstPrinter.h"
 #include "MCTargetDesc/SparcMCExpr.h"
 #include "MCTargetDesc/SparcTargetStreamer.h"
 #include "Sparc.h"
 #include "SparcInstrInfo.h"
 #include "SparcTargetMachine.h"
+#include "TargetInfo/SparcTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
@@ -357,7 +358,7 @@ void SparcAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
     MO.getMBB()->getSymbol()->print(O, MAI);
     return;
   case MachineOperand::MO_GlobalAddress:
-    getSymbol(MO.getGlobal())->print(O, MAI);
+    PrintSymbolOperand(MO, O);
     break;
   case MachineOperand::MO_BlockAddress:
     O <<  GetBlockAddressSymbol(MO.getBlockAddress())->getName();

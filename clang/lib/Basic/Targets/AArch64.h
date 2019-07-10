@@ -34,6 +34,7 @@ class LLVM_LIBRARY_VISIBILITY AArch64TargetInfo : public TargetInfo {
   unsigned HasFullFP16;
   unsigned HasDotProd;
   unsigned HasFP16FML;
+  unsigned HasMTE;
   llvm::AArch64::ArchKind ArchKind;
 
   static const Builtin::Info BuiltinInfo[];
@@ -122,12 +123,12 @@ public:
   MicrosoftARM64TargetInfo(const llvm::Triple &Triple,
                            const TargetOptions &Opts);
 
-  void getVisualStudioDefines(const LangOptions &Opts,
-                              MacroBuilder &Builder) const;
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
   TargetInfo::CallingConvKind
   getCallingConvKind(bool ClangABICompat4) const override;
+
+  unsigned getMinGlobalAlign(uint64_t TypeSize) const override;
 };
 
 // ARM64 MinGW target

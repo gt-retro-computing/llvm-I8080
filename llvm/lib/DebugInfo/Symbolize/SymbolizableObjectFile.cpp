@@ -42,8 +42,9 @@ getDILineInfoSpecifier(FunctionNameKind FNKind) {
 }
 
 ErrorOr<std::unique_ptr<SymbolizableObjectFile>>
-SymbolizableObjectFile::create(object::ObjectFile *Obj,
+SymbolizableObjectFile::create(const object::ObjectFile *Obj,
                                std::unique_ptr<DIContext> DICtx) {
+  assert(DICtx);
   std::unique_ptr<SymbolizableObjectFile> res(
       new SymbolizableObjectFile(Obj, std::move(DICtx)));
   std::unique_ptr<DataExtractor> OpdExtractor;
@@ -53,13 +54,13 @@ SymbolizableObjectFile::create(object::ObjectFile *Obj,
   if (Obj->getArch() == Triple::ppc64) {
     for (section_iterator Section : Obj->sections()) {
       StringRef Name;
-      StringRef Data;
       if (auto EC = Section->getName(Name))
         return EC;
       if (Name == ".opd") {
-        if (auto EC = Section->getContents(Data))
-          return EC;
-        OpdExtractor.reset(new DataExtractor(Data, Obj->isLittleEndian(),
+        Expected<StringRef> E = Section->getContents();
+        if (!E)
+          return errorToErrorCode(E.takeError());
+        OpdExtractor.reset(new DataExtractor(*E, Obj->isLittleEndian(),
                                              Obj->getBytesInAddress()));
         OpdAddress = Section->getAddress();
         break;
@@ -101,7 +102,7 @@ SymbolizableObjectFile::create(object::ObjectFile *Obj,
   return std::move(res);
 }
 
-SymbolizableObjectFile::SymbolizableObjectFile(ObjectFile *Obj,
+SymbolizableObjectFile::SymbolizableObjectFile(const ObjectFile *Obj,
                                                std::unique_ptr<DIContext> DICtx)
     : Module(Obj), DebugInfoContext(std::move(DICtx)) {}
 
@@ -244,16 +245,12 @@ DILineInfo
 SymbolizableObjectFile::symbolizeCode(object::SectionedAddress ModuleOffset,
                                       FunctionNameKind FNKind,
                                       bool UseSymbolTable) const {
-  DILineInfo LineInfo;
-
   if (ModuleOffset.SectionIndex == object::SectionedAddress::UndefSection)
     ModuleOffset.SectionIndex =
         getModuleSectionIndexForAddress(ModuleOffset.Address);
+  DILineInfo LineInfo = DebugInfoContext->getLineInfoForAddress(
+      ModuleOffset, getDILineInfoSpecifier(FNKind));
 
-  if (DebugInfoContext) {
-    LineInfo = DebugInfoContext->getLineInfoForAddress(
-        ModuleOffset, getDILineInfoSpecifier(FNKind));
-  }
   // Override function name from symbol table if necessary.
   if (shouldOverrideWithSymbolTable(FNKind, UseSymbolTable)) {
     std::string FunctionName;
@@ -269,15 +266,12 @@ SymbolizableObjectFile::symbolizeCode(object::SectionedAddress ModuleOffset,
 DIInliningInfo SymbolizableObjectFile::symbolizeInlinedCode(
     object::SectionedAddress ModuleOffset, FunctionNameKind FNKind,
     bool UseSymbolTable) const {
-  DIInliningInfo InlinedContext;
-
   if (ModuleOffset.SectionIndex == object::SectionedAddress::UndefSection)
     ModuleOffset.SectionIndex =
         getModuleSectionIndexForAddress(ModuleOffset.Address);
+  DIInliningInfo InlinedContext = DebugInfoContext->getInliningInfoForAddress(
+      ModuleOffset, getDILineInfoSpecifier(FNKind));
 
-  if (DebugInfoContext)
-    InlinedContext = DebugInfoContext->getInliningInfoForAddress(
-        ModuleOffset, getDILineInfoSpecifier(FNKind));
   // Make sure there is at least one frame in context.
   if (InlinedContext.getNumberOfFrames() == 0)
     InlinedContext.addFrame(DILineInfo());
@@ -304,6 +298,14 @@ DIGlobal SymbolizableObjectFile::symbolizeData(
   return Res;
 }
 
+std::vector<DILocal> SymbolizableObjectFile::symbolizeFrame(
+    object::SectionedAddress ModuleOffset) const {
+  if (ModuleOffset.SectionIndex == object::SectionedAddress::UndefSection)
+    ModuleOffset.SectionIndex =
+        getModuleSectionIndexForAddress(ModuleOffset.Address);
+  return DebugInfoContext->getLocalsForAddress(ModuleOffset);
+}
+
 /// Search for the first occurence of specified Address in ObjectFile.
 uint64_t SymbolizableObjectFile::getModuleSectionIndexForAddress(
     uint64_t Address) const {
@@ -313,9 +315,8 @@ uint64_t SymbolizableObjectFile::getModuleSectionIndexForAddress(
       continue;
 
     if (Address >= Sec.getAddress() &&
-        Address <= Sec.getAddress() + Sec.getSize()) {
+        Address < Sec.getAddress() + Sec.getSize())
       return Sec.getIndex();
-    }
   }
 
   return object::SectionedAddress::UndefSection;

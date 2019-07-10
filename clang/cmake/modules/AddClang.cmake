@@ -81,9 +81,18 @@ macro(add_clang_library name)
       )
   endif()
   if(ARG_SHARED)
-    set(ARG_ENABLE_SHARED SHARED)
+    set(LIBTYPE SHARED)
+  else()
+    # llvm_add_library ignores BUILD_SHARED_LIBS if STATIC is explicitly set,
+    # so we need to handle it here.
+    if(BUILD_SHARED_LIBS)
+      set(LIBTYPE SHARED OBJECT)
+    else()
+      set(LIBTYPE STATIC OBJECT)
+    endif()
+    set_property(GLOBAL APPEND PROPERTY CLANG_STATIC_LIBS ${name})
   endif()
-  llvm_add_library(${name} ${ARG_ENABLE_SHARED} ${ARG_UNPARSED_ARGUMENTS} ${srcs})
+  llvm_add_library(${name} ${LIBTYPE} ${ARG_UNPARSED_ARGUMENTS} ${srcs})
 
   if(TARGET ${name})
     target_link_libraries(${name} INTERFACE ${LLVM_COMMON_LIBS})
@@ -163,3 +172,12 @@ macro(add_clang_symlink name dest)
   # Always generate install targets
   llvm_install_symlink(${name} ${dest} ALWAYS_GENERATE)
 endmacro()
+
+function(clang_target_link_libraries target type)
+  if (CLANG_LINK_CLANG_DYLIB)
+    target_link_libraries(${target} ${type} clang_shared)
+  else()
+    target_link_libraries(${target} ${type} ${ARGN})
+  endif()
+
+endfunction()

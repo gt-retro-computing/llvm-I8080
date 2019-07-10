@@ -60,39 +60,43 @@ StringRef AMDGPUTargetStreamer::getArchNameFromElfMach(unsigned ElfMach) {
   AMDGPU::GPUKind AK;
 
   switch (ElfMach) {
-  case ELF::EF_AMDGPU_MACH_R600_R600:     AK = GK_R600;    break;
-  case ELF::EF_AMDGPU_MACH_R600_R630:     AK = GK_R630;    break;
-  case ELF::EF_AMDGPU_MACH_R600_RS880:    AK = GK_RS880;   break;
-  case ELF::EF_AMDGPU_MACH_R600_RV670:    AK = GK_RV670;   break;
-  case ELF::EF_AMDGPU_MACH_R600_RV710:    AK = GK_RV710;   break;
-  case ELF::EF_AMDGPU_MACH_R600_RV730:    AK = GK_RV730;   break;
-  case ELF::EF_AMDGPU_MACH_R600_RV770:    AK = GK_RV770;   break;
-  case ELF::EF_AMDGPU_MACH_R600_CEDAR:    AK = GK_CEDAR;   break;
-  case ELF::EF_AMDGPU_MACH_R600_CYPRESS:  AK = GK_CYPRESS; break;
-  case ELF::EF_AMDGPU_MACH_R600_JUNIPER:  AK = GK_JUNIPER; break;
-  case ELF::EF_AMDGPU_MACH_R600_REDWOOD:  AK = GK_REDWOOD; break;
-  case ELF::EF_AMDGPU_MACH_R600_SUMO:     AK = GK_SUMO;    break;
-  case ELF::EF_AMDGPU_MACH_R600_BARTS:    AK = GK_BARTS;   break;
-  case ELF::EF_AMDGPU_MACH_R600_CAICOS:   AK = GK_CAICOS;  break;
-  case ELF::EF_AMDGPU_MACH_R600_CAYMAN:   AK = GK_CAYMAN;  break;
-  case ELF::EF_AMDGPU_MACH_R600_TURKS:    AK = GK_TURKS;   break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX600: AK = GK_GFX600;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX601: AK = GK_GFX601;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX700: AK = GK_GFX700;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX701: AK = GK_GFX701;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX702: AK = GK_GFX702;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703: AK = GK_GFX703;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704: AK = GK_GFX704;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801: AK = GK_GFX801;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802: AK = GK_GFX802;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803: AK = GK_GFX803;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810: AK = GK_GFX810;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900: AK = GK_GFX900;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902: AK = GK_GFX902;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904: AK = GK_GFX904;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906: AK = GK_GFX906;  break;
-  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909: AK = GK_GFX909;  break;
-  case ELF::EF_AMDGPU_MACH_NONE:          AK = GK_NONE;    break;
+  case ELF::EF_AMDGPU_MACH_R600_R600:      AK = GK_R600;    break;
+  case ELF::EF_AMDGPU_MACH_R600_R630:      AK = GK_R630;    break;
+  case ELF::EF_AMDGPU_MACH_R600_RS880:     AK = GK_RS880;   break;
+  case ELF::EF_AMDGPU_MACH_R600_RV670:     AK = GK_RV670;   break;
+  case ELF::EF_AMDGPU_MACH_R600_RV710:     AK = GK_RV710;   break;
+  case ELF::EF_AMDGPU_MACH_R600_RV730:     AK = GK_RV730;   break;
+  case ELF::EF_AMDGPU_MACH_R600_RV770:     AK = GK_RV770;   break;
+  case ELF::EF_AMDGPU_MACH_R600_CEDAR:     AK = GK_CEDAR;   break;
+  case ELF::EF_AMDGPU_MACH_R600_CYPRESS:   AK = GK_CYPRESS; break;
+  case ELF::EF_AMDGPU_MACH_R600_JUNIPER:   AK = GK_JUNIPER; break;
+  case ELF::EF_AMDGPU_MACH_R600_REDWOOD:   AK = GK_REDWOOD; break;
+  case ELF::EF_AMDGPU_MACH_R600_SUMO:      AK = GK_SUMO;    break;
+  case ELF::EF_AMDGPU_MACH_R600_BARTS:     AK = GK_BARTS;   break;
+  case ELF::EF_AMDGPU_MACH_R600_CAICOS:    AK = GK_CAICOS;  break;
+  case ELF::EF_AMDGPU_MACH_R600_CAYMAN:    AK = GK_CAYMAN;  break;
+  case ELF::EF_AMDGPU_MACH_R600_TURKS:     AK = GK_TURKS;   break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX600:  AK = GK_GFX600;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX601:  AK = GK_GFX601;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX700:  AK = GK_GFX700;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX701:  AK = GK_GFX701;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX702:  AK = GK_GFX702;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703:  AK = GK_GFX703;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704:  AK = GK_GFX704;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  AK = GK_GFX801;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802:  AK = GK_GFX802;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803:  AK = GK_GFX803;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  AK = GK_GFX810;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  AK = GK_GFX900;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  AK = GK_GFX902;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  AK = GK_GFX904;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  AK = GK_GFX906;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  AK = GK_GFX908;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909:  AK = GK_GFX909;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: AK = GK_GFX1010; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: AK = GK_GFX1011; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: AK = GK_GFX1012; break;
+  case ELF::EF_AMDGPU_MACH_NONE:           AK = GK_NONE;    break;
   }
 
   StringRef GPUName = getArchNameAMDGCN(AK);
@@ -138,7 +142,11 @@ unsigned AMDGPUTargetStreamer::getElfMach(StringRef GPU) {
   case GK_GFX902:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX902;
   case GK_GFX904:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX904;
   case GK_GFX906:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX906;
+  case GK_GFX908:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX908;
   case GK_GFX909:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX909;
+  case GK_GFX1010: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010;
+  case GK_GFX1011: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011;
+  case GK_GFX1012: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012;
   case GK_NONE:    return ELF::EF_AMDGPU_MACH_NONE;
   }
 
@@ -200,6 +208,12 @@ void AMDGPUTargetAsmStreamer::EmitAMDGPUSymbolType(StringRef SymbolName,
   }
 }
 
+void AMDGPUTargetAsmStreamer::emitAMDGPULDS(MCSymbol *Symbol, unsigned Size,
+                                            unsigned Align) {
+  OS << "\t.amdgpu_lds " << Symbol->getName() << ", " << Size << ", " << Align
+     << '\n';
+}
+
 bool AMDGPUTargetAsmStreamer::EmitISAVersion(StringRef IsaVersionString) {
   OS << "\t.amd_amdgpu_isa \"" << IsaVersionString << "\"\n";
   return true;
@@ -230,6 +244,13 @@ bool AMDGPUTargetAsmStreamer::EmitHSAMetadata(
   OS << '\t' << V3::AssemblerDirectiveBegin << '\n';
   OS << StrOS.str() << '\n';
   OS << '\t' << V3::AssemblerDirectiveEnd << '\n';
+  return true;
+}
+
+bool AMDGPUTargetAsmStreamer::EmitCodeEnd() {
+  const uint32_t Encoded_s_code_end = 0xbf9f0000;
+  OS << "\t.p2alignl 6, " << Encoded_s_code_end << '\n';
+  OS << "\t.fill 32, 4, " << Encoded_s_code_end << '\n';
   return true;
 }
 
@@ -271,6 +292,10 @@ void AMDGPUTargetAsmStreamer::EmitAmdhsaKernelDescriptor(
   PRINT_FIELD(OS, ".amdhsa_user_sgpr_private_segment_size", KD,
               kernel_code_properties,
               amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE);
+  if (IVersion.Major >= 10)
+    PRINT_FIELD(OS, ".amdhsa_wavefront_size32", KD,
+                kernel_code_properties,
+                amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
   PRINT_FIELD(
       OS, ".amdhsa_system_sgpr_private_segment_wavefront_offset", KD,
       compute_pgm_rsrc2,
@@ -324,6 +349,17 @@ void AMDGPUTargetAsmStreamer::EmitAmdhsaKernelDescriptor(
     PRINT_FIELD(OS, ".amdhsa_fp16_overflow", KD,
                 compute_pgm_rsrc1,
                 amdhsa::COMPUTE_PGM_RSRC1_FP16_OVFL);
+  if (IVersion.Major >= 10) {
+    PRINT_FIELD(OS, ".amdhsa_workgroup_processor_mode", KD,
+                compute_pgm_rsrc1,
+                amdhsa::COMPUTE_PGM_RSRC1_WGP_MODE);
+    PRINT_FIELD(OS, ".amdhsa_memory_ordered", KD,
+                compute_pgm_rsrc1,
+                amdhsa::COMPUTE_PGM_RSRC1_MEM_ORDERED);
+    PRINT_FIELD(OS, ".amdhsa_forward_progress", KD,
+                compute_pgm_rsrc1,
+                amdhsa::COMPUTE_PGM_RSRC1_FWD_PROGRESS);
+  }
   PRINT_FIELD(
       OS, ".amdhsa_exception_fp_ieee_invalid_op", KD,
       compute_pgm_rsrc2,
@@ -469,6 +505,27 @@ void AMDGPUTargetELFStreamer::EmitAMDGPUSymbolType(StringRef SymbolName,
   Symbol->setType(Type);
 }
 
+void AMDGPUTargetELFStreamer::emitAMDGPULDS(MCSymbol *Symbol, unsigned Size,
+                                            unsigned Align) {
+  assert(isPowerOf2_32(Align));
+
+  MCSymbolELF *SymbolELF = cast<MCSymbolELF>(Symbol);
+  SymbolELF->setType(ELF::STT_OBJECT);
+
+  if (!SymbolELF->isBindingSet()) {
+    SymbolELF->setBinding(ELF::STB_GLOBAL);
+    SymbolELF->setExternal(true);
+  }
+
+  if (SymbolELF->declareCommon(Size, Align, true)) {
+    report_fatal_error("Symbol: " + Symbol->getName() +
+                       " redeclared as different type");
+  }
+
+  SymbolELF->setIndex(ELF::SHN_AMDGPU_LDS);
+  SymbolELF->setSize(MCConstantExpr::create(Size, getContext()));
+}
+
 bool AMDGPUTargetELFStreamer::EmitISAVersion(StringRef IsaVersionString) {
   // Create two labels to mark the beginning and end of the desc field
   // and a MCExpr to calculate the size of the desc field.
@@ -536,6 +593,18 @@ bool AMDGPUTargetELFStreamer::EmitHSAMetadata(
              OS.EmitBytes(HSAMetadataString);
              OS.EmitLabel(DescEnd);
            });
+  return true;
+}
+
+bool AMDGPUTargetELFStreamer::EmitCodeEnd() {
+  const uint32_t Encoded_s_code_end = 0xbf9f0000;
+
+  MCStreamer &OS = getStreamer();
+  OS.PushSection();
+  OS.EmitValueToAlignment(64, Encoded_s_code_end, 4);
+  for (unsigned I = 0; I < 32; ++I)
+    OS.EmitIntValue(Encoded_s_code_end, 4);
+  OS.PopSection();
   return true;
 }
 

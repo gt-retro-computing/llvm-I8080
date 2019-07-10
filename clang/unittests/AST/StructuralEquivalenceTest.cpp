@@ -300,8 +300,7 @@ TEST_F(StructuralEquivalenceFunctionTest, ThrowVsNoexceptTrue) {
   EXPECT_FALSE(testStructuralMatch(t));
 }
 
-TEST_F(StructuralEquivalenceFunctionTest, DISABLED_NoexceptNonMatch) {
-  // The expression is not checked yet.
+TEST_F(StructuralEquivalenceFunctionTest, NoexceptNonMatch) {
   auto t = makeNamedDecls("void foo() noexcept(false);",
                           "void foo() noexcept(true);", Lang_CXX11);
   EXPECT_FALSE(testStructuralMatch(t));
@@ -806,6 +805,26 @@ TEST_F(StructuralEquivalenceTest, CompareSameDeclWithMultiple) {
   EXPECT_FALSE(testStructuralMatch(t));
 }
 
+TEST_F(StructuralEquivalenceTest, ExplicitBoolDifferent) {
+  auto Decls = makeNamedDecls("struct foo {explicit(false) foo(int);};",
+                              "struct foo {explicit(true) foo(int);};", Lang_CXX2a);
+  CXXConstructorDecl *First = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<0>(Decls), cxxConstructorDecl(hasName("foo")));
+  CXXConstructorDecl *Second = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<1>(Decls), cxxConstructorDecl(hasName("foo")));
+  EXPECT_FALSE(testStructuralMatch(First, Second));
+}
+
+TEST_F(StructuralEquivalenceTest, ExplicitBoolSame) {
+  auto Decls = makeNamedDecls("struct foo {explicit(true) foo(int);};",
+                              "struct foo {explicit(true) foo(int);};", Lang_CXX2a);
+  CXXConstructorDecl *First = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<0>(Decls), cxxConstructorDecl(hasName("foo")));
+  CXXConstructorDecl *Second = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<1>(Decls), cxxConstructorDecl(hasName("foo")));
+  EXPECT_TRUE(testStructuralMatch(First, Second));
+}
+
 struct StructuralEquivalenceEnumTest : StructuralEquivalenceTest {};
 
 TEST_F(StructuralEquivalenceEnumTest, FwdDeclEnumShouldBeEqualWithFwdDeclEnum) {
@@ -850,6 +869,164 @@ TEST_F(StructuralEquivalenceTemplateTest, DifferentTemplateArgName) {
 TEST_F(StructuralEquivalenceTemplateTest, DifferentTemplateArgKind) {
   auto t = makeNamedDecls("template <class T> struct foo;",
                           "template <int T> struct foo;", Lang_CXX);
+  EXPECT_FALSE(testStructuralMatch(t));
+}
+
+TEST_F(StructuralEquivalenceTemplateTest, ExplicitBoolSame) {
+  auto Decls = makeNamedDecls("template <bool b> struct foo {explicit(b) foo(int);};",
+                              "template <bool b> struct foo {explicit(b) foo(int);};", Lang_CXX2a);
+  CXXConstructorDecl *First = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<0>(Decls), cxxConstructorDecl(hasName("foo<b>")));
+  CXXConstructorDecl *Second = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<1>(Decls), cxxConstructorDecl(hasName("foo<b>")));
+  EXPECT_TRUE(testStructuralMatch(First, Second));
+}
+
+TEST_F(StructuralEquivalenceTemplateTest, ExplicitBoolDifference) {
+  auto Decls = makeNamedDecls("template <bool b> struct foo {explicit(b) foo(int);};",
+                              "template <bool b> struct foo {explicit(!b) foo(int);};", Lang_CXX2a);
+  CXXConstructorDecl *First = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<0>(Decls), cxxConstructorDecl(hasName("foo<b>")));
+  CXXConstructorDecl *Second = FirstDeclMatcher<CXXConstructorDecl>().match(
+      get<1>(Decls), cxxConstructorDecl(hasName("foo<b>")));
+  EXPECT_FALSE(testStructuralMatch(First, Second));
+}
+
+struct StructuralEquivalenceDependentTemplateArgsTest
+    : StructuralEquivalenceTemplateTest {};
+
+TEST_F(StructuralEquivalenceDependentTemplateArgsTest,
+       SameStructsInDependentArgs) {
+  std::string Code =
+      R"(
+      template <typename>
+      struct S1;
+
+      template <typename>
+      struct enable_if;
+
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>>::type>
+        void f();
+      };
+      )";
+  auto t = makeDecls<FunctionTemplateDecl>(Code, Code, Lang_CXX11,
+                                           functionTemplateDecl(hasName("f")));
+  EXPECT_TRUE(testStructuralMatch(t));
+}
+
+TEST_F(StructuralEquivalenceDependentTemplateArgsTest,
+       DifferentStructsInDependentArgs) {
+  std::string Code =
+      R"(
+      template <typename>
+      struct S1;
+
+      template <typename>
+      struct S2;
+
+      template <typename>
+      struct enable_if;
+      )";
+  auto t = makeDecls<FunctionTemplateDecl>(Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>>::type>
+        void f();
+      };
+      )",
+                                           Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S2<T>>::type>
+        void f();
+      };
+      )",
+                                           Lang_CXX11,
+                                           functionTemplateDecl(hasName("f")));
+  EXPECT_FALSE(testStructuralMatch(t));
+}
+
+TEST_F(StructuralEquivalenceDependentTemplateArgsTest,
+       SameStructsInDependentScopeDeclRefExpr) {
+  std::string Code =
+      R"(
+      template <typename>
+      struct S1;
+
+      template <bool>
+      struct enable_if;
+
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>::value>::type>
+        void f();   // DependentScopeDeclRefExpr:^^^^^^^^^^^^
+      };
+      )";
+  auto t = makeDecls<FunctionTemplateDecl>(Code, Code, Lang_CXX11,
+                                           functionTemplateDecl(hasName("f")));
+  EXPECT_TRUE(testStructuralMatch(t));
+}
+
+TEST_F(StructuralEquivalenceDependentTemplateArgsTest,
+       DifferentStructsInDependentScopeDeclRefExpr) {
+  std::string Code =
+      R"(
+      template <typename>
+      struct S1;
+
+      template <typename>
+      struct S2;
+
+      template <bool>
+      struct enable_if;
+      )";
+  auto t = makeDecls<FunctionTemplateDecl>(Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>::value>::type>
+        void f();   // DependentScopeDeclRefExpr:^^^^^^^^^^^^
+      };
+      )",
+                                           Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S2<T>::value>::type>
+        void f();
+      };
+      )",
+                                           Lang_CXX,
+                                           functionTemplateDecl(hasName("f")));
+  EXPECT_FALSE(testStructuralMatch(t));
+}
+
+TEST_F(StructuralEquivalenceDependentTemplateArgsTest,
+       DifferentValueInDependentScopeDeclRefExpr) {
+  std::string Code =
+      R"(
+      template <typename>
+      struct S1;
+
+      template <bool>
+      struct enable_if;
+      )";
+  auto t = makeDecls<FunctionTemplateDecl>(Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>::value1>::type>
+        void f();   // DependentScopeDeclRefExpr:^^^^^^^^^^^^
+      };
+      )",
+                                           Code + R"(
+      struct S
+      {
+        template <typename T, typename enable_if<S1<T>::value2>::type>
+        void f();
+      };
+      )",
+                                           Lang_CXX,
+                                           functionTemplateDecl(hasName("f")));
   EXPECT_FALSE(testStructuralMatch(t));
 }
 

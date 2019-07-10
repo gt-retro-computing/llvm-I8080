@@ -234,9 +234,11 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   // used to target i386.
   // FIXME: This seems unlikely to be Linux-specific.
   ToolChain::path_list &PPaths = getProgramPaths();
-  PPaths.push_back(Twine(GCCInstallation.getParentLibPath() + "/../" +
-                         GCCInstallation.getTriple().str() + "/bin")
-                       .str());
+  if (GCCInstallation.isValid()) {
+    PPaths.push_back(Twine(GCCInstallation.getParentLibPath() + "/../" +
+                           GCCInstallation.getTriple().str() + "/bin")
+                         .str());
+  }
 
   Distro Distro(D.getVFS());
 
@@ -274,8 +276,7 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   const bool IsAndroid = Triple.isAndroid();
   const bool IsMips = Triple.isMIPS();
   const bool IsHexagon = Arch == llvm::Triple::hexagon;
-  const bool IsRISCV =
-      Arch == llvm::Triple::riscv32 || Arch == llvm::Triple::riscv64;
+  const bool IsRISCV = Triple.isRISCV();
 
   if (IsMips && !SysRoot.empty())
     ExtraOpts.push_back("--sysroot=" + SysRoot);
@@ -887,7 +888,6 @@ void Linux::addLibCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
                                   llvm::opt::ArgStringList &CC1Args) const {
   const std::string& SysRoot = computeSysRoot();
   const std::string LibCXXIncludePathCandidates[] = {
-      DetectLibcxxIncludePath(getDriver().ResourceDir + "/include/c++"),
       DetectLibcxxIncludePath(getDriver().Dir + "/../include/c++"),
       // If this is a development, non-installed, clang, libcxx will
       // not be found at ../include/c++ but it likely to be found at

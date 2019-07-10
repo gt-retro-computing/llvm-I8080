@@ -40,10 +40,14 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* The optimizer will now convert calls to memcmp into a calls to bcmp in some
-  circumstances. Users who are building freestanding code (not depending on the
-  platform's libc) without specifying -ffreestanding may need to either pass
-  -fno-builtin-bcmp, or provide a bcmp function.
+* The optimizer will now convert calls to ``memcmp`` into a calls to ``bcmp`` in
+  some circumstances. Users who are building freestanding code (not depending on
+  the platform's libc) without specifying ``-ffreestanding`` may need to either
+  pass ``-fno-builtin-bcmp``, or provide a ``bcmp`` function.
+
+* Two new extension points, namely ``EP_FullLinkTimeOptimizationEarly`` and
+  ``EP_FullLinkTimeOptimizationLast`` are available for plugins to specialize
+  the legacy pass manager full LTO pipeline.
 
 .. NOTE
    If you would like to document a larger change, then you can add a
@@ -61,6 +65,21 @@ Changes to the LLVM IR
 * Added ``immarg`` parameter attribute. This indicates an intrinsic
   parameter is required to be a simple constant. This annotation must
   be accurate to avoid possible miscompiles.
+
+* The 2-field form of global variables ``@llvm.global_ctors`` and
+  ``@llvm.global_dtors`` has been deleted. The third field of their element
+  type is now mandatory. Specify `i8* null` to migrate from the obsoleted
+  2-field form.
+
+* The ``byval`` attribute can now take a type parameter:
+  ``byval(<ty>)``. If present it must be identical to the argument's
+  pointee type. In the next release we intend to make this parameter
+  mandatory in preparation for opaque pointer types.
+
+Changes to building LLVM
+------------------------
+
+* Building LLVM with Visual Studio now requires version 2017 or later.
 
 
 Changes to the ARM Backend
@@ -112,6 +131,17 @@ Changes to the C API
 
 Changes to the DAG infrastructure
 ---------------------------------
+
+Changes to LLDB
+===============
+
+* Backtraces are now color highlighting in the terminal.
+
+* DWARF4 (debug_types) and DWARF5 (debug_info) type units are now supported.
+
+* This release will be the last where ``lldb-mi`` is shipped as part of LLDB.
+  The tool will still be available in a `downstream repository on GitHub
+  <https://github.com/lldb-tools/lldb-mi>`_.
 
 External Open Source Projects Using LLVM 9
 ==========================================

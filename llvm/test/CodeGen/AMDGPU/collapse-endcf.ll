@@ -7,6 +7,7 @@
 ; GCN-NEXT: s_cbranch_execz [[ENDIF]]
 ; GCN:      s_and_b64 exec, exec, vcc
 ; GCN-NEXT: ; mask branch [[ENDIF]]
+; GCN-NEXT: s_cbranch_execz [[ENDIF]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: {{^}}[[ENDIF]]:
@@ -46,6 +47,7 @@ bb.outer.end:                                     ; preds = %bb.outer.then, %bb.
 ; GCN-NEXT: s_cbranch_execz [[ENDIF_OUTER]]
 ; GCN:      s_and_saveexec_b64 [[SAVEEXEC_INNER:s\[[0-9:]+\]]]
 ; GCN-NEXT: ; mask branch [[ENDIF_INNER:BB[0-9_]+]]
+; GCN-NEXT: s_cbranch_execz [[ENDIF_INNER]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: {{^}}[[ENDIF_INNER]]:
@@ -91,6 +93,7 @@ bb.outer.end:                                     ; preds = %bb.inner.then, %bb
 ; GCN:      s_and_saveexec_b64 [[SAVEEXEC_INNER:s\[[0-9:]+\]]]
 ; GCN-NEXT: s_xor_b64 [[SAVEEXEC_INNER2:s\[[0-9:]+\]]], exec, [[SAVEEXEC_INNER]]
 ; GCN-NEXT: ; mask branch [[THEN_INNER:BB[0-9_]+]]
+; GCN-NEXT: s_cbranch_execz [[THEN_INNER]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: {{^}}[[THEN_INNER]]:
@@ -140,6 +143,7 @@ bb.outer.end:                                        ; preds = %bb, %bb.then, %b
 ; GCN:      store_dword
 ; GCN-NEXT: s_and_saveexec_b64 [[SAVEEXEC_INNER_IF_OUTER_ELSE:s\[[0-9:]+\]]]
 ; GCN-NEXT: ; mask branch [[THEN_OUTER_FLOW:BB[0-9_]+]]
+; GCN-NEXT: s_cbranch_execz [[THEN_OUTER_FLOW]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: {{^}}[[THEN_OUTER_FLOW]]:
@@ -153,6 +157,7 @@ bb.outer.end:                                        ; preds = %bb, %bb.then, %b
 ; GCN:      store_dword
 ; GCN-NEXT: s_and_saveexec_b64 [[SAVEEXEC_INNER_IF_OUTER_THEN:s\[[0-9:]+\]]]
 ; GCN-NEXT: ; mask branch [[FLOW1:BB[0-9_]+]]
+; GCN-NEXT: s_cbranch_execz [[FLOW1]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: [[FLOW1]]:
@@ -199,6 +204,7 @@ bb.outer.end:
 ; ALL-LABEL: {{^}}s_endpgm_unsafe_barrier:
 ; GCN:      s_and_saveexec_b64 [[SAVEEXEC:s\[[0-9:]+\]]]
 ; GCN-NEXT: ; mask branch [[ENDIF:BB[0-9_]+]]
+; GCN-NEXT: s_cbranch_execz [[ENDIF]]
 ; GCN-NEXT: {{^BB[0-9_]+}}:
 ; GCN:      store_dword
 ; GCN-NEXT: {{^}}[[ENDIF]]:
@@ -224,6 +230,11 @@ bb.end:                                           ; preds = %bb.then, %bb
 ; Make sure scc liveness is updated if sor_b64 is removed
 ; ALL-LABEL: {{^}}scc_liveness:
 
+; GCN: %bb10
+; GCN: s_or_b64 exec, exec, s{{\[[0-9]+:[0-9]+\]}}
+; GCN: s_andn2_b64
+; GCN-NEXT: s_cbranch_execz
+
 ; GCN: [[BB1_LOOP:BB[0-9]+_[0-9]+]]:
 ; GCN: s_andn2_b64 exec, exec,
 ; GCN-NEXT: s_cbranch_execnz [[BB1_LOOP]]
@@ -232,10 +243,6 @@ bb.end:                                           ; preds = %bb.then, %bb
 ; GCN: s_and_b64 exec, exec, {{vcc|s\[[0-9:]+\]}}
 
 ; GCN-NOT: s_or_b64 exec, exec
-
-; GCN: s_or_b64 exec, exec, s{{\[[0-9]+:[0-9]+\]}}
-; GCN: s_andn2_b64
-; GCN-NEXT: s_cbranch_execnz
 
 ; GCN: s_or_b64 exec, exec, s{{\[[0-9]+:[0-9]+\]}}
 ; GCN: buffer_store_dword

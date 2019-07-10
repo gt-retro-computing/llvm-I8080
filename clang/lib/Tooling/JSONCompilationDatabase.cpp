@@ -14,7 +14,9 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/CompilationDatabasePluginRegistry.h"
+#include "clang/Tooling/Tooling.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -165,7 +167,9 @@ class JSONCompilationDatabasePlugin : public CompilationDatabasePlugin {
     llvm::sys::path::append(JSONDatabasePath, "compile_commands.json");
     auto Base = JSONCompilationDatabase::loadFromFile(
         JSONDatabasePath, ErrorMessage, JSONCommandLineSyntax::AutoDetect);
-    return Base ? inferMissingCompileCommands(std::move(Base)) : nullptr;
+    return Base ? inferTargetAndDriverMode(
+                      inferMissingCompileCommands(std::move(Base)))
+                : nullptr;
   }
 };
 
@@ -190,8 +194,11 @@ std::unique_ptr<JSONCompilationDatabase>
 JSONCompilationDatabase::loadFromFile(StringRef FilePath,
                                       std::string &ErrorMessage,
                                       JSONCommandLineSyntax Syntax) {
+  // Don't mmap: if we're a long-lived process, the build system may overwrite.
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> DatabaseBuffer =
-      llvm::MemoryBuffer::getFile(FilePath);
+      llvm::MemoryBuffer::getFile(FilePath, /*FileSize=*/-1,
+                                  /*RequiresNullTerminator=*/true,
+                                  /*IsVolatile=*/true);
   if (std::error_code Result = DatabaseBuffer.getError()) {
     ErrorMessage = "Error while opening JSON database: " + Result.message();
     return nullptr;

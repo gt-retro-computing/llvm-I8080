@@ -14,7 +14,7 @@
 using namespace llvm;
 
 template <size_t N> void parseGood(const char (&Buf)[N]) {
-  remarks::Parser Parser({Buf, N - 1});
+  remarks::Parser Parser(remarks::ParserFormat::YAML, {Buf, N - 1});
   Expected<const remarks::Remark *> Remark = Parser.getNext();
   EXPECT_FALSE(errorToBool(Remark.takeError())); // Check for parsing errors.
   EXPECT_TRUE(*Remark != nullptr);               // At least one remark.
@@ -25,7 +25,7 @@ template <size_t N> void parseGood(const char (&Buf)[N]) {
 
 template <size_t N>
 bool parseExpectError(const char (&Buf)[N], const char *Error) {
-  remarks::Parser Parser({Buf, N - 1});
+  remarks::Parser Parser(remarks::ParserFormat::YAML, {Buf, N - 1});
   Expected<const remarks::Remark *> Remark = Parser.getNext();
   EXPECT_FALSE(Remark); // Expect an error here.
 
@@ -354,7 +354,7 @@ TEST(YAMLRemarks, Contents) {
                   "  - String: ' because its definition is unavailable'\n"
                   "\n";
 
-  remarks::Parser Parser(Buf);
+  remarks::Parser Parser(remarks::ParserFormat::YAML, Buf);
   Expected<const remarks::Remark *> RemarkOrErr = Parser.getNext();
   EXPECT_FALSE(errorToBool(RemarkOrErr.takeError()));
   EXPECT_TRUE(*RemarkOrErr != nullptr);
@@ -491,4 +491,108 @@ TEST(YAMLRemarks, ContentsCAPI) {
 
   EXPECT_FALSE(LLVMRemarkParserHasError(Parser));
   LLVMRemarkParserDispose(Parser);
+}
+
+TEST(YAMLRemarks, ContentsStrTab) {
+  StringRef Buf = "\n"
+                  "--- !Missed\n"
+                  "Pass: 0\n"
+                  "Name: 1\n"
+                  "DebugLoc: { File: 2, Line: 3, Column: 12 }\n"
+                  "Function: 3\n"
+                  "Hotness: 4\n"
+                  "Args:\n"
+                  "  - Callee: 5\n"
+                  "  - String: 7\n"
+                  "  - Caller: 3\n"
+                  "    DebugLoc: { File: 2, Line: 2, Column: 0 }\n"
+                  "  - String: 8\n"
+                  "\n";
+
+  StringRef StrTabBuf =
+      StringRef("inline\0NoDefinition\0file.c\0foo\0Callee\0bar\0String\0 "
+                "will not be inlined into \0 because its definition is "
+                "unavailable",
+                115);
+
+  remarks::ParsedStringTable StrTab(StrTabBuf);
+  remarks::Parser Parser(remarks::ParserFormat::YAML, Buf, StrTab);
+  Expected<const remarks::Remark *> RemarkOrErr = Parser.getNext();
+  EXPECT_FALSE(errorToBool(RemarkOrErr.takeError()));
+  EXPECT_TRUE(*RemarkOrErr != nullptr);
+
+  const remarks::Remark &Remark = **RemarkOrErr;
+  EXPECT_EQ(Remark.RemarkType, remarks::Type::Missed);
+  EXPECT_EQ(checkStr(Remark.PassName, 6), "inline");
+  EXPECT_EQ(checkStr(Remark.RemarkName, 12), "NoDefinition");
+  EXPECT_EQ(checkStr(Remark.FunctionName, 3), "foo");
+  EXPECT_TRUE(Remark.Loc);
+  const remarks::RemarkLocation &RL = *Remark.Loc;
+  EXPECT_EQ(checkStr(RL.SourceFilePath, 6), "file.c");
+  EXPECT_EQ(RL.SourceLine, 3U);
+  EXPECT_EQ(RL.SourceColumn, 12U);
+  EXPECT_TRUE(Remark.Hotness);
+  EXPECT_EQ(*Remark.Hotness, 4U);
+  EXPECT_EQ(Remark.Args.size(), 4U);
+
+  unsigned ArgID = 0;
+  for (const remarks::Argument &Arg : Remark.Args) {
+    switch (ArgID) {
+    case 0:
+      EXPECT_EQ(checkStr(Arg.Key, 6), "Callee");
+      EXPECT_EQ(checkStr(Arg.Val, 3), "bar");
+      EXPECT_FALSE(Arg.Loc);
+      break;
+    case 1:
+      EXPECT_EQ(checkStr(Arg.Key, 6), "String");
+      EXPECT_EQ(checkStr(Arg.Val, 26), " will not be inlined into ");
+      EXPECT_FALSE(Arg.Loc);
+      break;
+    case 2: {
+      EXPECT_EQ(checkStr(Arg.Key, 6), "Caller");
+      EXPECT_EQ(checkStr(Arg.Val, 3), "foo");
+      EXPECT_TRUE(Arg.Loc);
+      const remarks::RemarkLocation &RL = *Arg.Loc;
+      EXPECT_EQ(checkStr(RL.SourceFilePath, 6), "file.c");
+      EXPECT_EQ(RL.SourceLine, 2U);
+      EXPECT_EQ(RL.SourceColumn, 0U);
+      break;
+    }
+    case 3:
+      EXPECT_EQ(checkStr(Arg.Key, 6), "String");
+      EXPECT_EQ(checkStr(Arg.Val, 38),
+                " because its definition is unavailable");
+      EXPECT_FALSE(Arg.Loc);
+      break;
+    default:
+      break;
+    }
+    ++ArgID;
+  }
+
+  RemarkOrErr = Parser.getNext();
+  EXPECT_FALSE(errorToBool(RemarkOrErr.takeError()));
+  EXPECT_EQ(*RemarkOrErr, nullptr);
+}
+
+TEST(YAMLRemarks, ParsingBadStringTableIndex) {
+  StringRef Buf = "\n"
+                  "--- !Missed\n"
+                  "Pass: 50\n"
+                  "\n";
+
+  StringRef StrTabBuf = StringRef("inline");
+
+  remarks::ParsedStringTable StrTab(StrTabBuf);
+  remarks::Parser Parser(remarks::ParserFormat::YAML, Buf, StrTab);
+  Expected<const remarks::Remark *> Remark = Parser.getNext();
+  EXPECT_FALSE(Remark); // Expect an error here.
+
+  std::string ErrorStr;
+  raw_string_ostream Stream(ErrorStr);
+  handleAllErrors(Remark.takeError(),
+                  [&](const ErrorInfoBase &EIB) { EIB.log(Stream); });
+  EXPECT_TRUE(
+      StringRef(Stream.str())
+          .contains("String with index 50 is out of bounds (size = 1)."));
 }

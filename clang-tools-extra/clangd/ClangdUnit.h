@@ -24,6 +24,7 @@
 #include "clang/Serialization/ASTBitCodes.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Core/Replacement.h"
+#include "clang/Tooling/Syntax/Tokens.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,6 +49,7 @@ namespace clangd {
 struct PreambleData {
   PreambleData(PrecompiledPreamble Preamble, std::vector<Diag> Diags,
                IncludeStructure Includes,
+               std::vector<std::string> MainFileMacros,
                std::unique_ptr<PreambleFileStatusCache> StatCache,
                CanonicalIncludes CanonIncludes);
 
@@ -57,6 +59,10 @@ struct PreambleData {
   // Processes like code completions and go-to-definitions will need #include
   // information, and their compile action skips preamble range.
   IncludeStructure Includes;
+  // Macros defined in the preamble section of the main file.
+  // Users care about headers vs main-file, not preamble vs non-preamble.
+  // These should be treated as main-file entities e.g. for code completion.
+  std::vector<std::string> MainFileMacros;
   // Cache of FS operations performed when building the preamble.
   // When reusing a preamble, this cache can be consumed to save IO.
   std::unique_ptr<PreambleFileStatusCache> StatCache;
@@ -90,6 +96,13 @@ public:
   std::shared_ptr<Preprocessor> getPreprocessorPtr();
   const Preprocessor &getPreprocessor() const;
 
+  SourceManager &getSourceManager() {
+    return getASTContext().getSourceManager();
+  }
+  const SourceManager &getSourceManager() const {
+    return getASTContext().getSourceManager();
+  }
+
   /// This function returns top-level decls present in the main file of the AST.
   /// The result does not include the decls that come from the preamble.
   /// (These should be const, but RecursiveASTVisitor requires Decl*).
@@ -103,10 +116,14 @@ public:
   const IncludeStructure &getIncludeStructure() const;
   const CanonicalIncludes &getCanonicalIncludes() const;
 
+  /// Tokens recorded while parsing the main file.
+  /// (!) does not have tokens from the preamble.
+  const syntax::TokenBuffer &getTokens() const { return Tokens; }
+
 private:
   ParsedAST(std::shared_ptr<const PreambleData> Preamble,
             std::unique_ptr<CompilerInstance> Clang,
-            std::unique_ptr<FrontendAction> Action,
+            std::unique_ptr<FrontendAction> Action, syntax::TokenBuffer Tokens,
             std::vector<Decl *> LocalTopLevelDecls, std::vector<Diag> Diags,
             IncludeStructure Includes, CanonicalIncludes CanonIncludes);
 
@@ -120,6 +137,11 @@ private:
   // FrontendAction.EndSourceFile).
   std::unique_ptr<CompilerInstance> Clang;
   std::unique_ptr<FrontendAction> Action;
+  /// Tokens recorded after the preamble finished.
+  ///   - Includes all spelled tokens for the main file.
+  ///   - Includes expanded tokens produced **after** preabmle.
+  ///   - Does not have spelled or expanded tokens for files from preamble.
+  syntax::TokenBuffer Tokens;
 
   // Data, stored after parsing.
   std::vector<Diag> Diags;
@@ -157,8 +179,8 @@ buildAST(PathRef FileName, std::unique_ptr<CompilerInvocation> Invocation,
 
 /// Get the beginning SourceLocation at a specified \p Pos.
 /// May be invalid if Pos is, or if there's no identifier.
-SourceLocation getBeginningOfIdentifier(ParsedAST &Unit, const Position &Pos,
-                                        const FileID FID);
+SourceLocation getBeginningOfIdentifier(const ParsedAST &Unit,
+                                        const Position &Pos, const FileID FID);
 
 /// For testing/debugging purposes. Note that this method deserializes all
 /// unserialized Decls, so use with care.

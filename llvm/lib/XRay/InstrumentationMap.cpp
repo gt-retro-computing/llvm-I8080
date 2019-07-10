@@ -78,9 +78,10 @@ loadObj(StringRef Filename, object::OwningBinary<object::ObjectFile> &ObjFile,
         "Failed to find XRay instrumentation map.",
         std::make_error_code(std::errc::executable_format_error));
 
-  if (I->getContents(Contents))
-    return errorCodeToError(
-        std::make_error_code(std::errc::executable_format_error));
+  if (Expected<StringRef> E = I->getContents())
+    Contents = *E;
+  else
+    return E.takeError();
 
   RelocMap Relocs;
   if (ObjFile.getBinary()->isELF()) {
@@ -177,7 +178,8 @@ loadYAML(int Fd, size_t FileSize, StringRef Filename,
          InstrumentationMap::FunctionAddressReverseMap &FunctionIds) {
   std::error_code EC;
   sys::fs::mapped_file_region MappedFile(
-      Fd, sys::fs::mapped_file_region::mapmode::readonly, FileSize, 0, EC);
+      sys::fs::convertFDToNativeFile(Fd),
+      sys::fs::mapped_file_region::mapmode::readonly, FileSize, 0, EC);
   if (EC)
     return make_error<StringError>(
         Twine("Failed memory-mapping file '") + Filename + "'.", EC);

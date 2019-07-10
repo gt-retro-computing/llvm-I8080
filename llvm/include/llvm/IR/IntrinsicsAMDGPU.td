@@ -187,6 +187,10 @@ def int_amdgcn_init_exec_from_input : Intrinsic<[],
    llvm_i32_ty],      // bit offset of the thread count
   [IntrConvergent]>;
 
+def int_amdgcn_wavefrontsize :
+  GCCBuiltin<"__builtin_amdgcn_wavefrontsize">,
+  Intrinsic<[llvm_i32_ty], [], [IntrNoMem, IntrSpeculatable]>;
+
 
 //===----------------------------------------------------------------------===//
 // Instruction Intrinsics
@@ -391,6 +395,7 @@ class AMDGPULDSF32Intrin<string clang_builtin> :
     [IntrArgMemOnly, NoCapture<0>, ImmArg<2>, ImmArg<3>, ImmArg<4>]
 >;
 
+// FIXME: The m0 argument should be moved after the normal arguments
 class AMDGPUDSOrderedIntrinsic : Intrinsic<
   [llvm_i32_ty],
   // M0 = {hi16:address, lo16:waveID}. Allow passing M0 as a pointer, so that
@@ -401,6 +406,7 @@ class AMDGPUDSOrderedIntrinsic : Intrinsic<
    llvm_i32_ty, // scope
    llvm_i1_ty,  // isVolatile
    llvm_i32_ty, // ordered count index (OA index), also added to the address
+                // gfx10: bits 24-27 indicate the number of active threads/dwords
    llvm_i1_ty,  // wave release, usually set to 1
    llvm_i1_ty], // wave done, set to 1 for the last ordered instruction
   [NoCapture<0>,
@@ -413,7 +419,9 @@ class AMDGPUDSAppendConsumedIntrinsic : Intrinsic<
   [llvm_i32_ty],
   [llvm_anyptr_ty, // LDS or GDS ptr
    llvm_i1_ty], // isVolatile
-   [IntrConvergent, IntrArgMemOnly, NoCapture<0>, ImmArg<1>]
+   [IntrConvergent, IntrArgMemOnly, NoCapture<0>, ImmArg<1>],
+   "",
+   [SDNPMemOperand]
 >;
 
 def int_amdgcn_ds_ordered_add : AMDGPUDSOrderedIntrinsic;
@@ -473,9 +481,12 @@ class arglistconcat<list<list<AMDGPUArg>> arglists, int shift = 0> {
 }
 
 // Represent texture/image types / dimensionality.
-class AMDGPUDimProps<string name, list<string> coord_names, list<string> slice_names> {
+class AMDGPUDimProps<bits<3> enc, string name, string asmsuffix,
+                     list<string> coord_names, list<string> slice_names> {
   AMDGPUDimProps Dim = !cast<AMDGPUDimProps>(NAME);
   string Name = name; // e.g. "2darraymsaa"
+  string AsmSuffix = asmsuffix; // e.g. 2D_MSAA_ARRAY (used in assembly strings)
+  bits<3> Encoding = enc;
   bit DA = 0; // DA bit in MIMG encoding
 
   list<AMDGPUArg> CoordSliceArgs =
@@ -491,17 +502,17 @@ class AMDGPUDimProps<string name, list<string> coord_names, list<string> slice_n
   bits<8> NumGradients = !size(GradientArgs);
 }
 
-def AMDGPUDim1D : AMDGPUDimProps<"1d", ["s"], []>;
-def AMDGPUDim2D : AMDGPUDimProps<"2d", ["s", "t"], []>;
-def AMDGPUDim3D : AMDGPUDimProps<"3d", ["s", "t", "r"], []>;
+def AMDGPUDim1D : AMDGPUDimProps<0x0, "1d", "1D", ["s"], []>;
+def AMDGPUDim2D : AMDGPUDimProps<0x1, "2d", "2D", ["s", "t"], []>;
+def AMDGPUDim3D : AMDGPUDimProps<0x2, "3d", "3D", ["s", "t", "r"], []>;
 let DA = 1 in {
-  def AMDGPUDimCube : AMDGPUDimProps<"cube", ["s", "t"], ["face"]>;
-  def AMDGPUDim1DArray : AMDGPUDimProps<"1darray", ["s"], ["slice"]>;
-  def AMDGPUDim2DArray : AMDGPUDimProps<"2darray", ["s", "t"], ["slice"]>;
+  def AMDGPUDimCube : AMDGPUDimProps<0x3, "cube", "CUBE", ["s", "t"], ["face"]>;
+  def AMDGPUDim1DArray : AMDGPUDimProps<0x4, "1darray", "1D_ARRAY", ["s"], ["slice"]>;
+  def AMDGPUDim2DArray : AMDGPUDimProps<0x5, "2darray", "2D_ARRAY", ["s", "t"], ["slice"]>;
 }
-def AMDGPUDim2DMsaa : AMDGPUDimProps<"2dmsaa", ["s", "t"], ["fragid"]>;
+def AMDGPUDim2DMsaa : AMDGPUDimProps<0x6, "2dmsaa", "2D_MSAA", ["s", "t"], ["fragid"]>;
 let DA = 1 in {
-  def AMDGPUDim2DArrayMsaa : AMDGPUDimProps<"2darraymsaa", ["s", "t"], ["slice", "fragid"]>;
+  def AMDGPUDim2DArrayMsaa : AMDGPUDimProps<0x7, "2darraymsaa", "2D_MSAA_ARRAY", ["s", "t"], ["slice", "fragid"]>;
 }
 
 def AMDGPUDims {
@@ -678,7 +689,7 @@ class AMDGPUImageDimIntrinsic<AMDGPUDimProfile P_,
       !if(P_.IsSample, [llvm_v4i32_ty,           // samp(SGPR)
                         llvm_i1_ty], []),        // unorm(imm)
       [llvm_i32_ty,                              // texfailctrl(imm; bit 0 = tfe, bit 1 = lwe)
-       llvm_i32_ty]),                            // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+       llvm_i32_ty]),                            // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc)
      !listconcat(props,
           !if(P_.IsAtomic, [], [ImmArg<AMDGPUImageDimIntrinsicEval<P_>.DmaskArgIndex>]),
           !if(P_.IsSample, [ImmArg<AMDGPUImageDimIntrinsicEval<P_>.UnormArgIndex>], []),
@@ -855,7 +866,7 @@ def int_amdgcn_s_buffer_load : Intrinsic <
   [llvm_any_ty],
   [llvm_v4i32_ty,     // rsrc(SGPR)
    llvm_i32_ty,       // byte offset(SGPR/imm)
-   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc)
+   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 2 = dlc)
   [IntrNoMem, ImmArg<2>]>,
   AMDGPURsrcIntrinsic<0>;
 
@@ -884,7 +895,7 @@ class AMDGPURawBufferLoad : Intrinsic <
   [llvm_v4i32_ty,     // rsrc(SGPR)
    llvm_i32_ty,       // offset(VGPR/imm, included in bounds checking and swizzling)
    llvm_i32_ty,       // soffset(SGPR/imm, excluded from bounds checking and swizzling)
-   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
   [IntrReadMem, ImmArg<3>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<0>;
 def int_amdgcn_raw_buffer_load_format : AMDGPURawBufferLoad;
@@ -896,7 +907,7 @@ class AMDGPUStructBufferLoad : Intrinsic <
    llvm_i32_ty,       // vindex(VGPR)
    llvm_i32_ty,       // offset(VGPR/imm, included in bounds checking and swizzling)
    llvm_i32_ty,       // soffset(SGPR/imm, excluded from bounds checking and swizzling)
-   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
   [IntrReadMem, ImmArg<4>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<0>;
 def int_amdgcn_struct_buffer_load_format : AMDGPUStructBufferLoad;
@@ -908,7 +919,7 @@ class AMDGPURawBufferStore : Intrinsic <
    llvm_v4i32_ty,     // rsrc(SGPR)
    llvm_i32_ty,       // offset(VGPR/imm, included in bounds checking and swizzling)
    llvm_i32_ty,       // soffset(SGPR/imm, excluded from bounds checking and swizzling)
-   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
   [IntrWriteMem, ImmArg<4>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<1>;
 def int_amdgcn_raw_buffer_store_format : AMDGPURawBufferStore;
@@ -921,7 +932,7 @@ class AMDGPUStructBufferStore : Intrinsic <
    llvm_i32_ty,       // vindex(VGPR)
    llvm_i32_ty,       // offset(VGPR/imm, included in bounds checking and swizzling)
    llvm_i32_ty,       // soffset(SGPR/imm, excluded from bounds checking and swizzling)
-   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+   llvm_i32_ty],      // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
   [IntrWriteMem, ImmArg<5>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<1>;
 def int_amdgcn_struct_buffer_store_format : AMDGPUStructBufferStore;
@@ -1031,7 +1042,7 @@ def int_amdgcn_raw_tbuffer_load : Intrinsic <
      llvm_i32_ty,     // offset(VGPR/imm, included in bounds checking and swizzling)
      llvm_i32_ty,     // soffset(SGPR/imm, excluded from bounds checking and swizzling)
      llvm_i32_ty,     // format(imm; bits 3..0 = dfmt, bits 6..4 = nfmt)
-     llvm_i32_ty],    // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+     llvm_i32_ty],    // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
     [IntrReadMem, ImmArg<3>, ImmArg<4>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<0>;
 
@@ -1042,7 +1053,7 @@ def int_amdgcn_raw_tbuffer_store : Intrinsic <
      llvm_i32_ty,    // offset(VGPR/imm, included in bounds checking and swizzling)
      llvm_i32_ty,    // soffset(SGPR/imm, excluded from bounds checking and swizzling)
      llvm_i32_ty,    // format(imm; bits 3..0 = dfmt, bits 6..4 = nfmt)
-     llvm_i32_ty],   // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+     llvm_i32_ty],   // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
     [IntrWriteMem, ImmArg<4>, ImmArg<5>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<1>;
 
@@ -1053,7 +1064,7 @@ def int_amdgcn_struct_tbuffer_load : Intrinsic <
      llvm_i32_ty,     // offset(VGPR/imm, included in bounds checking and swizzling)
      llvm_i32_ty,     // soffset(SGPR/imm, excluded from bounds checking and swizzling)
      llvm_i32_ty,     // format(imm; bits 3..0 = dfmt, bits 6..4 = nfmt)
-     llvm_i32_ty],    // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+     llvm_i32_ty],    // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
     [IntrReadMem, ImmArg<4>, ImmArg<5>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<0>;
 
@@ -1065,7 +1076,7 @@ def int_amdgcn_struct_tbuffer_store : Intrinsic <
      llvm_i32_ty,    // offset(VGPR/imm, included in bounds checking and swizzling)
      llvm_i32_ty,    // soffset(SGPR/imm, excluded from bounds checking and swizzling)
      llvm_i32_ty,    // format(imm; bits 3..0 = dfmt, bits 6..4 = nfmt)
-     llvm_i32_ty],   // cachepolicy(imm; bit 0 = glc, bit 1 = slc)
+     llvm_i32_ty],   // cachepolicy(imm; bit 0 = glc, bit 1 = slc, bit 2 = dlc on gfx10+)
     [IntrWriteMem, ImmArg<5>, ImmArg<6>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<1>;
 
@@ -1113,7 +1124,7 @@ def int_amdgcn_exp : Intrinsic <[], [
   llvm_i1_ty,        // done
   llvm_i1_ty         // vm
   ],
-  [ImmArg<0>, ImmArg<1>, ImmArg<6>, ImmArg<7>]
+  [ImmArg<0>, ImmArg<1>, ImmArg<6>, ImmArg<7>, IntrInaccessibleMemOnly]
 >;
 
 // exp with compr bit set.
@@ -1124,7 +1135,7 @@ def int_amdgcn_exp_compr : Intrinsic <[], [
   LLVMMatchType<0>,  // src1
   llvm_i1_ty,        // done
   llvm_i1_ty],       // vm
-  [ImmArg<0>, ImmArg<1>, ImmArg<4>, ImmArg<5>]
+  [ImmArg<0>, ImmArg<1>, ImmArg<4>, ImmArg<5>, IntrInaccessibleMemOnly]
 >;
 
 def int_amdgcn_buffer_wbinvl1_sc :
@@ -1161,7 +1172,7 @@ def int_amdgcn_s_decperflevel :
 def int_amdgcn_s_getreg :
   GCCBuiltin<"__builtin_amdgcn_s_getreg">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty],
-  [IntrReadMem, IntrSpeculatable, ImmArg<0>]
+  [IntrInaccessibleMemOnly, IntrReadMem, IntrSpeculatable, ImmArg<0>]
 >;
 
 // int_amdgcn_s_getpc is provided to allow a specific style of position
@@ -1299,11 +1310,11 @@ def int_amdgcn_cvt_pk_u8_f32 :
 >;
 
 def int_amdgcn_icmp :
-  Intrinsic<[llvm_i64_ty], [llvm_anyint_ty, LLVMMatchType<0>, llvm_i32_ty],
+  Intrinsic<[llvm_anyint_ty], [llvm_anyint_ty, LLVMMatchType<1>, llvm_i32_ty],
             [IntrNoMem, IntrConvergent, ImmArg<2>]>;
 
 def int_amdgcn_fcmp :
-  Intrinsic<[llvm_i64_ty], [llvm_anyfloat_ty, LLVMMatchType<0>, llvm_i32_ty],
+  Intrinsic<[llvm_anyint_ty], [llvm_anyfloat_ty, LLVMMatchType<1>, llvm_i32_ty],
             [IntrNoMem, IntrConvergent, ImmArg<2>]>;
 
 def int_amdgcn_readfirstlane :
@@ -1337,6 +1348,65 @@ def int_amdgcn_alignbit : Intrinsic<[llvm_i32_ty],
 def int_amdgcn_alignbyte : Intrinsic<[llvm_i32_ty],
   [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable]
+>;
+
+// llvm.amdgcn.ds.gws.init(i32 bar_val, i32 resource_id)
+//
+// bar_val is the total number of waves that will wait on this
+// barrier, minus 1.
+def int_amdgcn_ds_gws_init :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_init">,
+  Intrinsic<[],
+  [llvm_i32_ty, llvm_i32_ty],
+  [IntrConvergent, IntrWriteMem, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
+>;
+
+// llvm.amdgcn.ds.gws.barrier(i32 vsrc0, i32 resource_id)
+// bar_val is the total number of waves that will wait on this
+// barrier, minus 1.
+def int_amdgcn_ds_gws_barrier :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_barrier">,
+  Intrinsic<[],
+  [llvm_i32_ty, llvm_i32_ty],
+  [IntrConvergent, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
+>;
+
+// llvm.amdgcn.ds.gws.sema.v(i32 resource_id)
+def int_amdgcn_ds_gws_sema_v :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_sema_v">,
+  Intrinsic<[],
+  [llvm_i32_ty],
+  [IntrConvergent, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
+>;
+
+// llvm.amdgcn.ds.gws.sema.br(i32 vsrc, i32 resource_id)
+def int_amdgcn_ds_gws_sema_br :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_sema_br">,
+  Intrinsic<[],
+  [llvm_i32_ty, llvm_i32_ty],
+  [IntrConvergent, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
+>;
+
+// llvm.amdgcn.ds.gws.sema.p(i32 resource_id)
+def int_amdgcn_ds_gws_sema_p :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_sema_p">,
+  Intrinsic<[],
+  [llvm_i32_ty],
+  [IntrConvergent, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
+>;
+
+// llvm.amdgcn.ds.gws.sema.release.all(i32 resource_id)
+def int_amdgcn_ds_gws_sema_release_all :
+  GCCBuiltin<"__builtin_amdgcn_ds_gws_sema_release_all">,
+  Intrinsic<[],
+  [llvm_i32_ty],
+  [IntrConvergent, IntrInaccessibleMemOnly], "",
+  [SDNPMemOperand]
 >;
 
 
@@ -1429,6 +1499,34 @@ def int_amdgcn_ds_permute :
 def int_amdgcn_ds_bpermute :
   GCCBuiltin<"__builtin_amdgcn_ds_bpermute">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem, IntrConvergent]>;
+
+//===----------------------------------------------------------------------===//
+// GFX10 Intrinsics
+//===----------------------------------------------------------------------===//
+
+// llvm.amdgcn.permlane16 <old> <src0> <src1> <src2> <fi> <bound_control>
+def int_amdgcn_permlane16 :
+  Intrinsic<[llvm_i32_ty],
+            [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i1_ty, llvm_i1_ty],
+            [IntrNoMem, IntrConvergent, ImmArg<4>, ImmArg<5>]>;
+
+// llvm.amdgcn.permlanex16 <old> <src0> <src1> <src2> <fi> <bound_control>
+def int_amdgcn_permlanex16 :
+  Intrinsic<[llvm_i32_ty],
+            [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i1_ty, llvm_i1_ty],
+            [IntrNoMem, IntrConvergent, ImmArg<4>, ImmArg<5>]>;
+
+// llvm.amdgcn.mov.dpp8.i32 <src> <sel>
+// <sel> is a 32-bit constant whose high 8 bits must be zero which selects
+// the lanes to read from.
+def int_amdgcn_mov_dpp8 :
+  Intrinsic<[llvm_anyint_ty],
+            [LLVMMatchType<0>, llvm_i32_ty],
+            [IntrNoMem, IntrConvergent, ImmArg<1>]>;
+
+def int_amdgcn_s_get_waveid_in_workgroup :
+  GCCBuiltin<"__builtin_amdgcn_s_get_waveid_in_workgroup">,
+  Intrinsic<[llvm_i32_ty], [], [IntrReadMem, IntrInaccessibleMemOnly]>;
 
 //===----------------------------------------------------------------------===//
 // Deep learning intrinsics.
@@ -1542,26 +1640,110 @@ def int_amdgcn_udot8 :
   >;
 
 //===----------------------------------------------------------------------===//
+// MI-100 intrinsics
+// ===----------------------------------------------------------------------===//
+// llvm.amdgcn.mfma.f32.* vdst, srcA, srcB, srcC, cbsz, abid, blgp
+def int_amdgcn_mfma_f32_32x32x1f32 : Intrinsic<[llvm_v32i32_ty],
+  [llvm_float_ty, llvm_float_ty, llvm_v32i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x1f32 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_float_ty, llvm_float_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_4x4x1f32 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_float_ty, llvm_float_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_32x32x2f32 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_float_ty, llvm_float_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x4f32 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_float_ty, llvm_float_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_32x32x4f16 : Intrinsic<[llvm_v32i32_ty],
+  [llvm_v4f16_ty, llvm_v4f16_ty, llvm_v32i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x4f16 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_v4f16_ty, llvm_v4f16_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_4x4x4f16 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_v4f16_ty, llvm_v4f16_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_32x32x8f16 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_v4f16_ty, llvm_v4f16_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x16f16 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_v4f16_ty, llvm_v4f16_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_i32_32x32x4i8 : Intrinsic<[llvm_v32i32_ty],
+  [llvm_i32_ty, llvm_i32_ty, llvm_v32i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_i32_16x16x4i8 : Intrinsic<[llvm_v16i32_ty],
+  [llvm_i32_ty, llvm_i32_ty, llvm_v16i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_i32_4x4x4i8 : Intrinsic<[llvm_v4i32_ty],
+  [llvm_i32_ty, llvm_i32_ty, llvm_v4i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_i32_32x32x8i8 : Intrinsic<[llvm_v16i32_ty],
+  [llvm_i32_ty, llvm_i32_ty, llvm_v16i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_i32_16x16x16i8 : Intrinsic<[llvm_v4i32_ty],
+  [llvm_i32_ty, llvm_i32_ty, llvm_v4i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_32x32x2bf16 : Intrinsic<[llvm_v32i32_ty],
+  [llvm_v2i16_ty, llvm_v2i16_ty, llvm_v32i32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x2bf16 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_v2i16_ty, llvm_v2i16_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_4x4x2bf16 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_v2i16_ty, llvm_v2i16_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_32x32x4bf16 : Intrinsic<[llvm_v16f32_ty],
+  [llvm_v2i16_ty, llvm_v2i16_ty, llvm_v16f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+def int_amdgcn_mfma_f32_16x16x8bf16 : Intrinsic<[llvm_v4f32_ty],
+  [llvm_v2i16_ty, llvm_v2i16_ty, llvm_v4f32_ty,
+   llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrConvergent, IntrNoMem]>;
+
+//===----------------------------------------------------------------------===//
 // Special Intrinsics for backend internal use only. No frontend
 // should emit calls to these.
 // ===----------------------------------------------------------------------===//
-def int_amdgcn_if : Intrinsic<[llvm_i1_ty, llvm_i64_ty],
+def int_amdgcn_if : Intrinsic<[llvm_i1_ty, llvm_anyint_ty],
   [llvm_i1_ty], [IntrConvergent]
 >;
 
-def int_amdgcn_else : Intrinsic<[llvm_i1_ty, llvm_i64_ty],
-  [llvm_i64_ty], [IntrConvergent]
+def int_amdgcn_else : Intrinsic<[llvm_i1_ty, llvm_anyint_ty],
+  [llvm_anyint_ty], [IntrConvergent]
 >;
 
-def int_amdgcn_if_break : Intrinsic<[llvm_i64_ty],
-  [llvm_i1_ty, llvm_i64_ty], [IntrNoMem, IntrConvergent]
+def int_amdgcn_if_break : Intrinsic<[llvm_anyint_ty],
+  [llvm_i1_ty, llvm_anyint_ty], [IntrNoMem, IntrConvergent]
 >;
 
 def int_amdgcn_loop : Intrinsic<[llvm_i1_ty],
-  [llvm_i64_ty], [IntrConvergent]
+  [llvm_anyint_ty], [IntrConvergent]
 >;
 
-def int_amdgcn_end_cf : Intrinsic<[], [llvm_i64_ty], [IntrConvergent]>;
+def int_amdgcn_end_cf : Intrinsic<[], [llvm_anyint_ty], [IntrConvergent]>;
 
 // Represent unreachable in a divergent region.
 def int_amdgcn_unreachable : Intrinsic<[], [], [IntrConvergent]>;

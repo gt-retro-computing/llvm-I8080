@@ -14,9 +14,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "WebAssemblyAsmPrinter.h"
-#include "InstPrinter/WebAssemblyInstPrinter.h"
+#include "MCTargetDesc/WebAssemblyInstPrinter.h"
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
 #include "MCTargetDesc/WebAssemblyTargetStreamer.h"
+#include "TargetInfo/WebAssemblyTargetInfo.h"
 #include "WebAssembly.h"
 #include "WebAssemblyMCInstLower.h"
 #include "WebAssemblyMachineFunctionInfo.h"
@@ -368,6 +369,10 @@ void WebAssemblyAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       OutStreamer->AddBlankLine();
     }
     break;
+  case WebAssembly::COMPILER_FENCE:
+    // This is a compiler barrier that prevents instruction reordering during
+    // backend compilation, and should not be emitted.
+    break;
   case WebAssembly::EXTRACT_EXCEPTION_I32:
   case WebAssembly::EXTRACT_EXCEPTION_I32_S:
     // These are pseudo instructions that simulates popping values from stack.
@@ -407,8 +412,7 @@ bool WebAssemblyAsmPrinter::PrintAsmOperand(const MachineInstr *MI,
       OS << regToString(MO);
       return false;
     case MachineOperand::MO_GlobalAddress:
-      getSymbol(MO.getGlobal())->print(OS, MAI);
-      printOffset(MO.getOffset(), OS);
+      PrintSymbolOperand(MO, OS);
       return false;
     case MachineOperand::MO_ExternalSymbol:
       GetExternalSymbolSymbol(MO.getSymbolName())->print(OS, MAI);

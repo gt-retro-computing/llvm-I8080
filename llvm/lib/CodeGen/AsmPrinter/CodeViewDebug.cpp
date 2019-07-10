@@ -41,6 +41,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/DebugInfo/CodeView/CVTypeVisitor.h"
 #include "llvm/DebugInfo/CodeView/CodeView.h"
+#include "llvm/DebugInfo/CodeView/CodeViewRecordIO.h"
 #include "llvm/DebugInfo/CodeView/ContinuationRecordBuilder.h"
 #include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/EnumTables.h"
@@ -50,6 +51,7 @@
 #include "llvm/DebugInfo/CodeView/TypeIndex.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/DebugInfo/CodeView/TypeTableCollection.h"
+#include "llvm/DebugInfo/CodeView/TypeVisitorCallbackPipeline.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -66,6 +68,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/BinaryByteStream.h"
 #include "llvm/Support/BinaryStreamReader.h"
+#include "llvm/Support/BinaryStreamWriter.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
@@ -91,6 +94,24 @@
 
 using namespace llvm;
 using namespace llvm::codeview;
+
+namespace {
+class CVMCAdapter : public CodeViewRecordStreamer {
+public:
+  CVMCAdapter(MCStreamer &OS) : OS(&OS) {}
+
+  void EmitBytes(StringRef Data) { OS->EmitBytes(Data); }
+
+  void EmitIntValue(uint64_t Value, unsigned Size) {
+    OS->EmitIntValue(Value, Size);
+  }
+
+  void EmitBinaryData(StringRef Data) { OS->EmitBinaryData(Data); }
+
+private:
+  MCStreamer *OS = nullptr;
+};
+} // namespace
 
 static CPUType mapArchToCVCPUType(Triple::ArchType Type) {
   switch (Type) {
@@ -272,7 +293,7 @@ static const DISubprogram *getQualifiedNameComponents(
     StringRef ScopeName = getPrettyScopeName(Scope);
     if (!ScopeName.empty())
       QualifiedNameComponents.push_back(ScopeName);
-    Scope = Scope->getScope().resolve();
+    Scope = Scope->getScope();
   }
   return ClosestSubprogram;
 }
@@ -308,7 +329,7 @@ struct CodeViewDebug::TypeLoweringScope {
 };
 
 static std::string getFullyQualifiedName(const DIScope *Ty) {
-  const DIScope *Scope = Ty->getScope().resolve();
+  const DIScope *Scope = Ty->getScope();
   return getFullyQualifiedName(Scope, getPrettyScopeName(Ty));
 }
 
@@ -343,7 +364,7 @@ TypeIndex CodeViewDebug::getFuncIdForSubprogram(const DISubprogram *SP) {
   // MSVC.
   StringRef DisplayName = SP->getName().split('<').first;
 
-  const DIScope *Scope = SP->getScope().resolve();
+  const DIScope *Scope = SP->getScope();
   TypeIndex TI;
   if (const auto *Class = dyn_cast_or_null<DICompositeType>(Scope)) {
     // If the scope is a DICompositeType, then this must be a method. Member
@@ -375,7 +396,7 @@ getFunctionOptions(const DISubroutineType *Ty,
   const DIType *ReturnTy = nullptr;
   if (auto TypeArray = Ty->getTypeArray()) {
     if (TypeArray.size())
-      ReturnTy = TypeArray[0].resolve();
+      ReturnTy = TypeArray[0];
   }
 
   if (auto *ReturnDCTy = dyn_cast_or_null<DICompositeType>(ReturnTy)) {
@@ -581,8 +602,9 @@ void CodeViewDebug::endModule() {
   clear();
 }
 
-static void emitNullTerminatedSymbolName(MCStreamer &OS, StringRef S,
-    unsigned MaxFixedRecordLength = 0xF00) {
+static void
+emitNullTerminatedSymbolName(MCStreamer &OS, StringRef S,
+                             unsigned MaxFixedRecordLength = 0xF00) {
   // The maximum CV record length is 0xFF00. Most of the strings we emit appear
   // after a fixed length portion of the record. The fixed length portion should
   // always be less than 0xF00 (3840) bytes, so truncate the string so that the
@@ -609,31 +631,51 @@ void CodeViewDebug::emitTypeInformation() {
   }
 
   TypeTableCollection Table(TypeTable.records());
+  SmallString<512> CommentBlock;
+  raw_svector_ostream CommentOS(CommentBlock);
+  std::unique_ptr<ScopedPrinter> SP;
+  std::unique_ptr<TypeDumpVisitor> TDV;
+  TypeVisitorCallbackPipeline Pipeline;
+
+  if (OS.isVerboseAsm()) {
+    // To construct block comment describing the type record for readability.
+    SP = llvm::make_unique<ScopedPrinter>(CommentOS);
+    SP->setPrefix(CommentPrefix);
+    TDV = llvm::make_unique<TypeDumpVisitor>(Table, SP.get(), false);
+    Pipeline.addCallbackToPipeline(*TDV);
+  }
+
+  // To emit type record using Codeview MCStreamer adapter
+  CVMCAdapter CVMCOS(OS);
+  TypeRecordMapping typeMapping(CVMCOS);
+  Pipeline.addCallbackToPipeline(typeMapping);
+
   Optional<TypeIndex> B = Table.getFirst();
   while (B) {
     // This will fail if the record data is invalid.
     CVType Record = Table.getType(*B);
 
-    if (OS.isVerboseAsm()) {
-      // Emit a block comment describing the type record for readability.
-      SmallString<512> CommentBlock;
-      raw_svector_ostream CommentOS(CommentBlock);
-      ScopedPrinter SP(CommentOS);
-      SP.setPrefix(CommentPrefix);
-      TypeDumpVisitor TDV(Table, &SP, false);
+    CommentBlock.clear();
 
-      Error E = codeview::visitTypeRecord(Record, *B, TDV);
-      if (E) {
-        logAllUnhandledErrors(std::move(E), errs(), "error: ");
-        llvm_unreachable("produced malformed type record");
-      }
+    auto RecordLen = Record.length();
+    auto RecordKind = Record.kind();
+    OS.EmitIntValue(RecordLen - 2, 2);
+    OS.EmitIntValue(RecordKind, sizeof(RecordKind));
+
+    Error E = codeview::visitTypeRecord(Record, *B, Pipeline);
+
+    if (E) {
+      logAllUnhandledErrors(std::move(E), errs(), "error: ");
+      llvm_unreachable("produced malformed type record");
+    }
+
+    if (OS.isVerboseAsm()) {
       // emitRawComment will insert its own tab and comment string before
       // the first line, so strip off our first one. It also prints its own
       // newline.
       OS.emitRawComment(
           CommentOS.str().drop_front(CommentPrefix.size() - 1).rtrim());
     }
-    OS.EmitBinaryData(Record.str_data());
     B = Table.getNext(*B);
   }
 }
@@ -974,8 +1016,7 @@ void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
   // If we have a display name, build the fully qualified name by walking the
   // chain of scopes.
   if (!SP->getName().empty())
-    FuncName =
-        getFullyQualifiedName(SP->getScope().resolve(), SP->getName());
+    FuncName = getFullyQualifiedName(SP->getScope(), SP->getName());
 
   // If our DISubprogram name is empty, use the mangled name.
   if (FuncName.empty())
@@ -1072,6 +1113,28 @@ void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
       endSymbolRecord(AnnotEnd);
     }
 
+    for (auto HeapAllocSite : FI.HeapAllocSites) {
+      MCSymbol *BeginLabel = std::get<0>(HeapAllocSite);
+      MCSymbol *EndLabel = std::get<1>(HeapAllocSite);
+
+      // The labels might not be defined if the instruction was replaced
+      // somewhere in the codegen pipeline.
+      if (!BeginLabel->isDefined() || !EndLabel->isDefined())
+        continue;
+
+      DIType *DITy = std::get<2>(HeapAllocSite);
+      MCSymbol *HeapAllocEnd = beginSymbolRecord(SymbolKind::S_HEAPALLOCSITE);
+      OS.AddComment("Call site offset");
+      OS.EmitCOFFSecRel32(BeginLabel, /*Offset=*/0);
+      OS.AddComment("Call site section index");
+      OS.EmitCOFFSectionIndex(BeginLabel);
+      OS.AddComment("Call instruction length");
+      OS.emitAbsoluteSymbolDiff(EndLabel, BeginLabel, 2);
+      OS.AddComment("Type index");
+      OS.EmitIntValue(getCompleteTypeIndex(DITy).getIndex(), 4);
+      endSymbolRecord(HeapAllocEnd);
+    }
+
     if (SP != nullptr)
       emitDebugInfoForUDTs(LocalUDTs);
 
@@ -1119,9 +1182,15 @@ void CodeViewDebug::collectVariableInfoFromMFTable(
     // If the variable has an attached offset expression, extract it.
     // FIXME: Try to handle DW_OP_deref as well.
     int64_t ExprOffset = 0;
-    if (VI.Expr)
-      if (!VI.Expr->extractIfOffset(ExprOffset))
+    bool Deref = false;
+    if (VI.Expr) {
+      // If there is one DW_OP_deref element, use offset of 0 and keep going.
+      if (VI.Expr->getNumElements() == 1 &&
+          VI.Expr->getElement(0) == llvm::dwarf::DW_OP_deref)
+        Deref = true;
+      else if (!VI.Expr->extractIfOffset(ExprOffset))
         continue;
+    }
 
     // Get the frame register used and the offset.
     unsigned FrameReg = 0;
@@ -1131,6 +1200,7 @@ void CodeViewDebug::collectVariableInfoFromMFTable(
     // Calculate the label ranges.
     LocalVarDefRange DefRange =
         createDefRangeMem(CVReg, FrameOffset + ExprOffset);
+
     for (const InsnRange &Range : Scope->getRanges()) {
       const MCSymbol *Begin = getLabelBeforeInsn(Range.first);
       const MCSymbol *End = getLabelAfterInsn(Range.second);
@@ -1141,6 +1211,9 @@ void CodeViewDebug::collectVariableInfoFromMFTable(
     LocalVariable Var;
     Var.DIVar = VI.Var;
     Var.DefRanges.emplace_back(std::move(DefRange));
+    if (Deref)
+      Var.UseReferenceType = true;
+
     recordLocalVariable(std::move(Var), Scope);
   }
 }
@@ -1376,7 +1449,7 @@ static bool shouldEmitUdt(const DIType *T) {
 
   // MSVC does not emit UDTs for typedefs that are scoped to classes.
   if (T->getTag() == dwarf::DW_TAG_typedef) {
-    if (DIScope *Scope = T->getScope().resolve()) {
+    if (DIScope *Scope = T->getScope()) {
       switch (Scope->getTag()) {
       case dwarf::DW_TAG_structure_type:
       case dwarf::DW_TAG_class_type:
@@ -1393,7 +1466,7 @@ static bool shouldEmitUdt(const DIType *T) {
     const DIDerivedType *DT = dyn_cast<DIDerivedType>(T);
     if (!DT)
       return true;
-    T = DT->getBaseType().resolve();
+    T = DT->getBaseType();
   }
   return true;
 }
@@ -1406,8 +1479,8 @@ void CodeViewDebug::addToUDTs(const DIType *Ty) {
     return;
 
   SmallVector<StringRef, 5> QualifiedNameComponents;
-  const DISubprogram *ClosestSubprogram = getQualifiedNameComponents(
-      Ty->getScope().resolve(), QualifiedNameComponents);
+  const DISubprogram *ClosestSubprogram =
+      getQualifiedNameComponents(Ty->getScope(), QualifiedNameComponents);
 
   std::string FullyQualifiedName =
       getQualifiedName(QualifiedNameComponents, getPrettyScopeName(Ty));
@@ -1476,8 +1549,7 @@ TypeIndex CodeViewDebug::lowerType(const DIType *Ty, const DIType *ClassTy) {
 }
 
 TypeIndex CodeViewDebug::lowerTypeAlias(const DIDerivedType *Ty) {
-  DITypeRef UnderlyingTypeRef = Ty->getBaseType();
-  TypeIndex UnderlyingTypeIndex = getTypeIndex(UnderlyingTypeRef);
+  TypeIndex UnderlyingTypeIndex = getTypeIndex(Ty->getBaseType());
   StringRef TypeName = Ty->getName();
 
   addToUDTs(Ty);
@@ -1493,14 +1565,14 @@ TypeIndex CodeViewDebug::lowerTypeAlias(const DIDerivedType *Ty) {
 }
 
 TypeIndex CodeViewDebug::lowerTypeArray(const DICompositeType *Ty) {
-  DITypeRef ElementTypeRef = Ty->getBaseType();
-  TypeIndex ElementTypeIndex = getTypeIndex(ElementTypeRef);
+  const DIType *ElementType = Ty->getBaseType();
+  TypeIndex ElementTypeIndex = getTypeIndex(ElementType);
   // IndexType is size_t, which depends on the bitness of the target.
   TypeIndex IndexType = getPointerSizeInBytes() == 8
                             ? TypeIndex(SimpleTypeKind::UInt64Quad)
                             : TypeIndex(SimpleTypeKind::UInt32Long);
 
-  uint64_t ElementSize = getBaseTypeSize(ElementTypeRef) / 8;
+  uint64_t ElementSize = getBaseTypeSize(ElementType) / 8;
 
   // Add subranges to array type.
   DINodeArray Elements = Ty->getElements();
@@ -1761,7 +1833,7 @@ TypeIndex CodeViewDebug::lowerTypeModifier(const DIDerivedType *Ty) {
       break;
     }
     if (IsModifier)
-      BaseTy = cast<DIDerivedType>(BaseTy)->getBaseType().resolve();
+      BaseTy = cast<DIDerivedType>(BaseTy)->getBaseType();
   }
 
   // Check if the inner type will use an LF_POINTER record. If so, the
@@ -1794,8 +1866,8 @@ TypeIndex CodeViewDebug::lowerTypeModifier(const DIDerivedType *Ty) {
 
 TypeIndex CodeViewDebug::lowerTypeFunction(const DISubroutineType *Ty) {
   SmallVector<TypeIndex, 8> ReturnAndArgTypeIndices;
-  for (DITypeRef ArgTypeRef : Ty->getTypeArray())
-    ReturnAndArgTypeIndices.push_back(getTypeIndex(ArgTypeRef));
+  for (const DIType *ArgType : Ty->getTypeArray())
+    ReturnAndArgTypeIndices.push_back(getTypeIndex(ArgType));
 
   // MSVC uses type none for variadic argument.
   if (ReturnAndArgTypeIndices.size() > 1 &&
@@ -1844,7 +1916,7 @@ TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
   TypeIndex ThisTypeIndex;
   if (!IsStaticMethod && ReturnAndArgs.size() > Index) {
     if (const DIDerivedType *PtrTy =
-            dyn_cast_or_null<DIDerivedType>(ReturnAndArgs[Index].resolve())) {
+            dyn_cast_or_null<DIDerivedType>(ReturnAndArgs[Index])) {
       if (PtrTy->getTag() == dwarf::DW_TAG_pointer_type) {
         ThisTypeIndex = getTypeIndexForThisPtr(PtrTy, Ty);
         Index++;
@@ -1942,7 +2014,7 @@ static ClassOptions getCommonClassOptions(const DICompositeType *Ty) {
   // Put the Nested flag on a type if it appears immediately inside a tag type.
   // Do not walk the scope chain. Do not attempt to compute ContainsNestedClass
   // here. That flag is only set on definitions, and not forward declarations.
-  const DIScope *ImmediateScope = Ty->getScope().resolve();
+  const DIScope *ImmediateScope = Ty->getScope();
   if (ImmediateScope && isa<DICompositeType>(ImmediateScope))
     CO |= ClassOptions::Nested;
 
@@ -1955,7 +2027,7 @@ static ClassOptions getCommonClassOptions(const DICompositeType *Ty) {
       CO |= ClassOptions::Scoped;
   } else {
     for (const DIScope *Scope = ImmediateScope; Scope != nullptr;
-         Scope = Scope->getScope().resolve()) {
+         Scope = Scope->getScope()) {
       if (isa<DISubprogram>(Scope)) {
         CO |= ClassOptions::Scoped;
         break;
@@ -2075,7 +2147,7 @@ void CodeViewDebug::collectMemberInfo(ClassInfo &Info,
   // succeeds, and drop the member if that fails.
   assert((DDTy->getOffsetInBits() % 8) == 0 && "Unnamed bitfield member!");
   uint64_t Offset = DDTy->getOffsetInBits();
-  const DIType *Ty = DDTy->getBaseType().resolve();
+  const DIType *Ty = DDTy->getBaseType();
   bool FullyResolved = false;
   while (!FullyResolved) {
     switch (Ty->getTag()) {
@@ -2083,7 +2155,7 @@ void CodeViewDebug::collectMemberInfo(ClassInfo &Info,
     case dwarf::DW_TAG_volatile_type:
       // FIXME: we should apply the qualifier types to the indirect fields
       // rather than dropping them.
-      Ty = cast<DIDerivedType>(Ty)->getBaseType().resolve();
+      Ty = cast<DIDerivedType>(Ty)->getBaseType();
       break;
     default:
       FullyResolved = true;
@@ -2366,7 +2438,7 @@ CodeViewDebug::lowerRecordFieldList(const DICompositeType *Ty) {
 
   // Create nested classes.
   for (const DIType *Nested : Info.NestedTypes) {
-    NestedTypeRecord R(getTypeIndex(DITypeRef(Nested)), Nested->getName());
+    NestedTypeRecord R(getTypeIndex(Nested), Nested->getName());
     ContinuationBuilder.writeMemberType(R);
     MemberCount++;
   }
@@ -2393,10 +2465,7 @@ TypeIndex CodeViewDebug::getVBPTypeIndex() {
   return VBPType;
 }
 
-TypeIndex CodeViewDebug::getTypeIndex(DITypeRef TypeRef, DITypeRef ClassTyRef) {
-  const DIType *Ty = TypeRef.resolve();
-  const DIType *ClassTy = ClassTyRef.resolve();
-
+TypeIndex CodeViewDebug::getTypeIndex(const DIType *Ty, const DIType *ClassTy) {
   // The null DIType is the void type. Don't try to hash it.
   if (!Ty)
     return TypeIndex::Void();
@@ -2439,8 +2508,7 @@ CodeViewDebug::getTypeIndexForThisPtr(const DIDerivedType *PtrTy,
   return recordTypeIndexForDINode(PtrTy, TI, SubroutineTy);
 }
 
-TypeIndex CodeViewDebug::getTypeIndexForReferenceTo(DITypeRef TypeRef) {
-  DIType *Ty = TypeRef.resolve();
+TypeIndex CodeViewDebug::getTypeIndexForReferenceTo(const DIType *Ty) {
   PointerRecord PR(getTypeIndex(Ty),
                    getPointerSizeInBytes() == 8 ? PointerKind::Near64
                                                 : PointerKind::Near32,
@@ -2449,9 +2517,7 @@ TypeIndex CodeViewDebug::getTypeIndexForReferenceTo(DITypeRef TypeRef) {
   return TypeTable.writeLeafType(PR);
 }
 
-TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
-  const DIType *Ty = TypeRef.resolve();
-
+TypeIndex CodeViewDebug::getCompleteTypeIndex(const DIType *Ty) {
   // The null DIType is the void type. Don't try to hash it.
   if (!Ty)
     return TypeIndex::Void();
@@ -2462,7 +2528,7 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
   if (Ty->getTag() == dwarf::DW_TAG_typedef)
     (void)getTypeIndex(Ty);
   while (Ty->getTag() == dwarf::DW_TAG_typedef)
-    Ty = cast<DIDerivedType>(Ty)->getBaseType().resolve();
+    Ty = cast<DIDerivedType>(Ty)->getBaseType();
 
   // If this is a non-record type, the complete type index is the same as the
   // normal type index. Just call getTypeIndex.
@@ -2475,11 +2541,7 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
     return getTypeIndex(Ty);
   }
 
-  // Check if we've already translated the complete record type.
   const auto *CTy = cast<DICompositeType>(Ty);
-  auto InsertResult = CompleteTypeIndices.insert({CTy, TypeIndex()});
-  if (!InsertResult.second)
-    return InsertResult.first->second;
 
   TypeLoweringScope S(*this);
 
@@ -2496,6 +2558,13 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
     if (CTy->isForwardDecl())
       return FwdDeclTI;
   }
+
+  // Check if we've already translated the complete record type.
+  // Insert the type with a null TypeIndex to signify that the type is currently
+  // being lowered.
+  auto InsertResult = CompleteTypeIndices.insert({CTy, TypeIndex()});
+  if (!InsertResult.second)
+    return InsertResult.first->second;
 
   TypeIndex TI;
   switch (CTy->getTag()) {
@@ -2807,6 +2876,7 @@ void CodeViewDebug::endFunctionImpl(const MachineFunction *MF) {
   }
 
   CurFn->Annotations = MF->getCodeViewAnnotations();
+  CurFn->HeapAllocSites = MF->getCodeViewHeapAllocSites();
 
   CurFn->End = Asm->getFunctionEnd();
 
@@ -2922,10 +2992,19 @@ void CodeViewDebug::collectGlobalVariableInfo() {
   for (const MDNode *Node : CUs->operands()) {
     const auto *CU = cast<DICompileUnit>(Node);
     for (const auto *GVE : CU->getGlobalVariables()) {
+      const DIGlobalVariable *DIGV = GVE->getVariable();
+      const DIExpression *DIE = GVE->getExpression();
+
+      // Emit constant global variables in a global symbol section.
+      if (GlobalMap.count(GVE) == 0 && DIE->isConstant()) {
+        CVGlobalVariable CVGV = {DIGV, DIE};
+        GlobalVariables.emplace_back(std::move(CVGV));
+      }
+
       const auto *GV = GlobalMap.lookup(GVE);
       if (!GV || GV->isDeclarationForLinker())
         continue;
-      const DIGlobalVariable *DIGV = GVE->getVariable();
+
       DIScope *Scope = DIGV->getScope();
       SmallVector<CVGlobalVariable, 1> *VariableList;
       if (Scope && isa<DILocalScope>(Scope)) {
@@ -2940,7 +3019,7 @@ void CodeViewDebug::collectGlobalVariableInfo() {
         // Emit this global variable into a COMDAT section.
         VariableList = &ComdatVariables;
       else
-        // Emit this globla variable in a single global symbol section.
+        // Emit this global variable in a single global symbol section.
         VariableList = &GlobalVariables;
       CVGlobalVariable CVGV = {DIGV, GV};
       VariableList->emplace_back(std::move(CVGV));
@@ -2963,13 +3042,14 @@ void CodeViewDebug::emitDebugInfoForGlobals() {
   // Second, emit each global that is in a comdat into its own .debug$S
   // section along with its own symbol substream.
   for (const CVGlobalVariable &CVGV : ComdatVariables) {
-    MCSymbol *GVSym = Asm->getSymbol(CVGV.GV);
+    const GlobalVariable *GV = CVGV.GVInfo.get<const GlobalVariable *>();
+    MCSymbol *GVSym = Asm->getSymbol(GV);
     OS.AddComment("Symbol subsection for " +
-            Twine(GlobalValue::dropLLVMManglingEscape(CVGV.GV->getName())));
+                  Twine(GlobalValue::dropLLVMManglingEscape(GV->getName())));
     switchToDebugSectionForSymbol(GVSym);
     MCSymbol *EndLabel = beginCVSubsection(DebugSubsectionKind::Symbols);
     // FIXME: emitDebugInfoForGlobal() doesn't handle DIExpressions.
-    emitDebugInfoForGlobal(CVGV.DIGV, CVGV.GV, GVSym);
+    emitDebugInfoForGlobal(CVGV);
     endCVSubsection(EndLabel);
   }
 }
@@ -2989,31 +3069,63 @@ void CodeViewDebug::emitDebugInfoForRetainedTypes() {
 // Emit each global variable in the specified array.
 void CodeViewDebug::emitGlobalVariableList(ArrayRef<CVGlobalVariable> Globals) {
   for (const CVGlobalVariable &CVGV : Globals) {
-    MCSymbol *GVSym = Asm->getSymbol(CVGV.GV);
     // FIXME: emitDebugInfoForGlobal() doesn't handle DIExpressions.
-    emitDebugInfoForGlobal(CVGV.DIGV, CVGV.GV, GVSym);
+    emitDebugInfoForGlobal(CVGV);
   }
 }
 
-void CodeViewDebug::emitDebugInfoForGlobal(const DIGlobalVariable *DIGV,
-                                           const GlobalVariable *GV,
-                                           MCSymbol *GVSym) {
-  // DataSym record, see SymbolRecord.h for more info. Thread local data
-  // happens to have the same format as global data.
-  SymbolKind DataSym = GV->isThreadLocal()
-                           ? (DIGV->isLocalToUnit() ? SymbolKind::S_LTHREAD32
-                                                    : SymbolKind::S_GTHREAD32)
-                           : (DIGV->isLocalToUnit() ? SymbolKind::S_LDATA32
-                                                    : SymbolKind::S_GDATA32);
-  MCSymbol *DataEnd = beginSymbolRecord(DataSym);
-  OS.AddComment("Type");
-  OS.EmitIntValue(getCompleteTypeIndex(DIGV->getType()).getIndex(), 4);
-  OS.AddComment("DataOffset");
-  OS.EmitCOFFSecRel32(GVSym, /*Offset=*/0);
-  OS.AddComment("Segment");
-  OS.EmitCOFFSectionIndex(GVSym);
-  OS.AddComment("Name");
-  const unsigned LengthOfDataRecord = 12;
-  emitNullTerminatedSymbolName(OS, DIGV->getName(), LengthOfDataRecord);
-  endSymbolRecord(DataEnd);
+void CodeViewDebug::emitDebugInfoForGlobal(const CVGlobalVariable &CVGV) {
+  const DIGlobalVariable *DIGV = CVGV.DIGV;
+  if (const GlobalVariable *GV =
+          CVGV.GVInfo.dyn_cast<const GlobalVariable *>()) {
+    // DataSym record, see SymbolRecord.h for more info. Thread local data
+    // happens to have the same format as global data.
+    MCSymbol *GVSym = Asm->getSymbol(GV);
+    SymbolKind DataSym = GV->isThreadLocal()
+                             ? (DIGV->isLocalToUnit() ? SymbolKind::S_LTHREAD32
+                                                      : SymbolKind::S_GTHREAD32)
+                             : (DIGV->isLocalToUnit() ? SymbolKind::S_LDATA32
+                                                      : SymbolKind::S_GDATA32);
+    MCSymbol *DataEnd = beginSymbolRecord(DataSym);
+    OS.AddComment("Type");
+    OS.EmitIntValue(getCompleteTypeIndex(DIGV->getType()).getIndex(), 4);
+    OS.AddComment("DataOffset");
+    OS.EmitCOFFSecRel32(GVSym, /*Offset=*/0);
+    OS.AddComment("Segment");
+    OS.EmitCOFFSectionIndex(GVSym);
+    OS.AddComment("Name");
+    const unsigned LengthOfDataRecord = 12;
+    emitNullTerminatedSymbolName(OS, DIGV->getName(), LengthOfDataRecord);
+    endSymbolRecord(DataEnd);
+  } else {
+    // FIXME: Currently this only emits the global variables in the IR metadata.
+    // This should also emit enums and static data members.
+    const DIExpression *DIE = CVGV.GVInfo.get<const DIExpression *>();
+    assert(DIE->isConstant() &&
+           "Global constant variables must contain a constant expression.");
+    uint64_t Val = DIE->getElement(1);
+
+    MCSymbol *SConstantEnd = beginSymbolRecord(SymbolKind::S_CONSTANT);
+    OS.AddComment("Type");
+    OS.EmitIntValue(getTypeIndex(DIGV->getType()).getIndex(), 4);
+    OS.AddComment("Value");
+
+    // Encoded integers shouldn't need more than 10 bytes.
+    uint8_t data[10];
+    BinaryStreamWriter Writer(data, llvm::support::endianness::little);
+    CodeViewRecordIO IO(Writer);
+    cantFail(IO.mapEncodedInteger(Val));
+    StringRef SRef((char *)data, Writer.getOffset());
+    OS.EmitBinaryData(SRef);
+
+    OS.AddComment("Name");
+    const DIScope *Scope = DIGV->getScope();
+    // For static data members, get the scope from the declaration.
+    if (const auto *MemberDecl = dyn_cast_or_null<DIDerivedType>(
+            DIGV->getRawStaticDataMemberDeclaration()))
+      Scope = MemberDecl->getScope();
+    emitNullTerminatedSymbolName(OS,
+                                 getFullyQualifiedName(Scope, DIGV->getName()));
+    endSymbolRecord(SConstantEnd);
+  }
 }

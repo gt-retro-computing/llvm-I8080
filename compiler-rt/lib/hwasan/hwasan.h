@@ -44,6 +44,11 @@ const uptr kAddressTagMask = 0xFFUL << kAddressTagShift;
 // for threads and stack histories. This is an ABI constant.
 const unsigned kShadowBaseAlignment = 32;
 
+const unsigned kRecordAddrBaseTagShift = 3;
+const unsigned kRecordFPShift = 48;
+const unsigned kRecordFPLShift = 4;
+const unsigned kRecordFPModulus = 1 << (64 - kRecordFPShift + kRecordFPLShift);
+
 static inline tag_t GetTagFromPointer(uptr p) {
   return p >> kAddressTagShift;
 }
@@ -81,6 +86,7 @@ void HwasanAllocatorThreadFinish();
 void *hwasan_malloc(uptr size, StackTrace *stack);
 void *hwasan_calloc(uptr nmemb, uptr size, StackTrace *stack);
 void *hwasan_realloc(void *ptr, uptr size, StackTrace *stack);
+void *hwasan_reallocarray(void *ptr, uptr nmemb, uptr size, StackTrace *stack);
 void *hwasan_valloc(uptr size, StackTrace *stack);
 void *hwasan_pvalloc(uptr size, StackTrace *stack);
 void *hwasan_aligned_alloc(uptr alignment, uptr size, StackTrace *stack);
@@ -91,9 +97,6 @@ void hwasan_free(void *ptr, StackTrace *stack);
 
 void InstallTrapHandler();
 void InstallAtExitHandler();
-
-const char *GetStackOriginDescr(u32 id, uptr *pc);
-const char *GetStackFrameDescr(uptr pc);
 
 void EnterSymbolizer();
 void ExitSymbolizer();

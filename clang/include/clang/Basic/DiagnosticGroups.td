@@ -48,8 +48,10 @@ def BitFieldWidth : DiagGroup<"bitfield-width">;
 def CoroutineMissingUnhandledException :
   DiagGroup<"coroutine-missing-unhandled-exception">;
 def Coroutine : DiagGroup<"coroutine", [CoroutineMissingUnhandledException]>;
-def ConstantConversion :
-  DiagGroup<"constant-conversion", [ BitFieldConstantConversion ] >;
+def ObjCBoolConstantConversion : DiagGroup<"objc-bool-constant-conversion">;
+def ConstantConversion : DiagGroup<"constant-conversion",
+                                   [BitFieldConstantConversion,
+                                    ObjCBoolConstantConversion]>;
 def LiteralConversion : DiagGroup<"literal-conversion">;
 def StringConversion : DiagGroup<"string-conversion">;
 def SignConversion : DiagGroup<"sign-conversion">;
@@ -168,6 +170,7 @@ def ExtraTokens : DiagGroup<"extra-tokens">;
 def CXX98CompatExtraSemi : DiagGroup<"c++98-compat-extra-semi">;
 def CXX11ExtraSemi : DiagGroup<"c++11-extra-semi">;
 def EmptyInitStatement : DiagGroup<"empty-init-stmt">;
+def ExportUnnamed : DiagGroup<"export-unnamed">;
 def ExtraSemiStmt : DiagGroup<"extra-semi-stmt", [EmptyInitStatement]>;
 def ExtraSemi : DiagGroup<"extra-semi", [CXX98CompatExtraSemi,
                                          CXX11ExtraSemi]>;
@@ -407,6 +410,7 @@ def ObjCMultipleMethodNames : DiagGroup<"objc-multiple-method-names">;
 def ObjCFlexibleArray : DiagGroup<"objc-flexible-array">;
 def ObjCBoxing : DiagGroup<"objc-boxing">;
 def OpenCLUnsupportedRGBA: DiagGroup<"opencl-unsupported-rgba">;
+def UnderalignedExceptionObject : DiagGroup<"underaligned-exception-object">;
 def DeprecatedObjCIsaUsage : DiagGroup<"deprecated-objc-isa-usage">;
 def ExplicitInitializeCall : DiagGroup<"explicit-initialize-call">;
 def Packed : DiagGroup<"packed">;
@@ -484,17 +488,21 @@ def TautologicalInRangeCompare : DiagGroup<"tautological-constant-in-range-compa
                                            [TautologicalTypeLimitCompare,
                                             TautologicalUnsignedZeroCompare,
                                             TautologicalUnsignedEnumZeroCompare]>;
+// For compatibility with GCC; -Wtype-limits = -Wtautological-constant-in-range-compare
+def TypeLimits : DiagGroup<"type-limits", [TautologicalInRangeCompare]>;
 def TautologicalOutOfRangeCompare : DiagGroup<"tautological-constant-out-of-range-compare">;
 def TautologicalConstantCompare : DiagGroup<"tautological-constant-compare",
                                             [TautologicalOutOfRangeCompare]>;
 def TautologicalPointerCompare : DiagGroup<"tautological-pointer-compare">;
 def TautologicalOverlapCompare : DiagGroup<"tautological-overlap-compare">;
 def TautologicalUndefinedCompare : DiagGroup<"tautological-undefined-compare">;
+def TautologicalObjCBoolCompare : DiagGroup<"tautological-objc-bool-compare">;
 def TautologicalCompare : DiagGroup<"tautological-compare",
                                     [TautologicalConstantCompare,
                                      TautologicalPointerCompare,
                                      TautologicalOverlapCompare,
-                                     TautologicalUndefinedCompare]>;
+                                     TautologicalUndefinedCompare,
+                                     TautologicalObjCBoolCompare]>;
 def HeaderHygiene : DiagGroup<"header-hygiene">;
 def DuplicateDeclSpecifier : DiagGroup<"duplicate-decl-specifier">;
 def CompareDistinctPointerType : DiagGroup<"compare-distinct-pointer-types">;
@@ -919,6 +927,7 @@ def GccCompat : DiagGroup<"gcc-compat">;
 
 // Warnings for Microsoft extensions.
 def MicrosoftCharize : DiagGroup<"microsoft-charize">;
+def MicrosoftDrectveSection : DiagGroup<"microsoft-drectve-section">;
 def MicrosoftInclude : DiagGroup<"microsoft-include">;
 def MicrosoftCppMacro : DiagGroup<"microsoft-cpp-macro">;
 def MicrosoftFixedEnum : DiagGroup<"microsoft-fixed-enum">;
@@ -956,9 +965,10 @@ def : DiagGroup<"msvc-include", [MicrosoftInclude]>;
 
 // Warnings group for warnings about Microsoft extensions.
 def Microsoft : DiagGroup<"microsoft",
-    [MicrosoftCharize, MicrosoftInclude, MicrosoftCppMacro, MicrosoftFixedEnum,
-     MicrosoftSealed, MicrosoftUnqualifiedFriend, MicrosoftExceptionSpec,
-     MicrosoftUsingDecl, MicrosoftMutableReference, MicrosoftPureDefinition,
+    [MicrosoftCharize, MicrosoftDrectveSection, MicrosoftInclude,
+     MicrosoftCppMacro, MicrosoftFixedEnum, MicrosoftSealed,
+     MicrosoftUnqualifiedFriend, MicrosoftExceptionSpec, MicrosoftUsingDecl,
+     MicrosoftMutableReference, MicrosoftPureDefinition,
      MicrosoftUnionMemberReference, MicrosoftExplicitConstructorCall,
      MicrosoftEnumValue, MicrosoftDefaultArgRedefinition, MicrosoftTemplate,
      MicrosoftRedeclareStatic, MicrosoftEnumForwardReference, MicrosoftGoto,
@@ -1028,6 +1038,10 @@ def SerializedDiagnostics : DiagGroup<"serialized-diagnostics">;
 // A warning group for warnings about code that clang accepts when
 // compiling CUDA C/C++ but which is not compatible with the CUDA spec.
 def CudaCompat : DiagGroup<"cuda-compat">;
+
+// Warnings which cause linking of the runtime libraries like
+// libc and the CRT to be skipped.
+def AVRRtlibLinkingQuirks : DiagGroup<"avr-rtlib-linking-quirks">;
 
 // A warning group for things that will change semantics in the future.
 def FutureCompat : DiagGroup<"future-compat">;

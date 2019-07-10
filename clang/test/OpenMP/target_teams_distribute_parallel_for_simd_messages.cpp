@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -verify -fopenmp -std=c++11 %s
+// RUN: %clang_cc1 -verify -fopenmp -std=c++11 %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd -std=c++11 %s
+// RUN: %clang_cc1 -verify -fopenmp-simd -std=c++11 %s -Wuninitialized
 
 void foo() {
 }
@@ -62,7 +62,7 @@ L1:
       break;
     }
   }
-#pragma omp target teams distribute parallel for simd default(none)
+#pragma omp target teams distribute parallel for simd default(none) // expected-note {{explicit data sharing attribute requested here}}
   for (int i = 0; i < 10; ++i)
     ++argc; // expected-error {{ariable 'argc' must have explicitly specified data sharing attributes}}
 

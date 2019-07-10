@@ -232,7 +232,7 @@ public:
   ///
   /// \return
   ///     A support file list object.
-  FileSpecList &GetSupportFiles();
+  const FileSpecList &GetSupportFiles();
 
   /// Get the compile unit's imported module list.
   ///
@@ -240,7 +240,7 @@ public:
   /// current module.
   ///
   /// \return
-  ///     A list of imported module names.
+  ///     A list of imported modules.
   const std::vector<SourceModule> &GetImportedModules();
 
   /// Get the SymbolFile plug-in user data.

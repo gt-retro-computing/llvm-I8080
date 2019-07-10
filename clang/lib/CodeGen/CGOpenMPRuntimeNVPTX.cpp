@@ -221,16 +221,13 @@ static const ValueDecl *getPrivateItem(const Expr *RefExpr) {
   return cast<ValueDecl>(ME->getMemberDecl()->getCanonicalDecl());
 }
 
-typedef std::pair<CharUnits /*Align*/, const ValueDecl *> VarsDataTy;
-static bool stable_sort_comparator(const VarsDataTy P1, const VarsDataTy P2) {
-  return P1.first > P2.first;
-}
 
 static RecordDecl *buildRecordForGlobalizedVars(
     ASTContext &C, ArrayRef<const ValueDecl *> EscapedDecls,
     ArrayRef<const ValueDecl *> EscapedDeclsForTeams,
     llvm::SmallDenseMap<const ValueDecl *, const FieldDecl *>
         &MappedDeclsFields, int BufSize) {
+  using VarsDataTy = std::pair<CharUnits /*Align*/, const ValueDecl *>;
   if (EscapedDecls.empty() && EscapedDeclsForTeams.empty())
     return nullptr;
   SmallVector<VarsDataTy, 4> GlobalizedVars;
@@ -242,8 +239,10 @@ static RecordDecl *buildRecordForGlobalizedVars(
         D);
   for (const ValueDecl *D : EscapedDeclsForTeams)
     GlobalizedVars.emplace_back(C.getDeclAlign(D), D);
-  std::stable_sort(GlobalizedVars.begin(), GlobalizedVars.end(),
-                   stable_sort_comparator);
+  llvm::stable_sort(GlobalizedVars, [](VarsDataTy L, VarsDataTy R) {
+    return L.first > R.first;
+  });
+
   // Build struct _globalized_locals_ty {
   //         /*  globalized vars  */[WarSize] align (max(decl_align,
   //         GlobalMemoryAlignment))
@@ -714,24 +713,6 @@ getDataSharingMode(CodeGenModule &CGM) {
                                           : CGOpenMPRuntimeNVPTX::Generic;
 }
 
-/// Check if the parallel directive has an 'if' clause with non-constant or
-/// false condition.
-static bool hasParallelIfClause(ASTContext &Ctx,
-                                const OMPExecutableDirective &D,
-                                bool StandaloneParallel) {
-  for (const auto *C : D.getClausesOfKind<OMPIfClause>()) {
-    OpenMPDirectiveKind NameModifier = C->getNameModifier();
-    if (NameModifier != OMPD_parallel &&
-        (!StandaloneParallel || NameModifier != OMPD_unknown))
-      continue;
-    const Expr *Cond = C->getCondition();
-    bool Result;
-    if (!Cond->EvaluateAsBooleanCondition(Result, Ctx) || !Result)
-      return true;
-  }
-  return false;
-}
-
 /// Check for inner (nested) SPMD construct, if any
 static bool hasNestedSPMDDirective(ASTContext &Ctx,
                                    const OMPExecutableDirective &D) {
@@ -745,8 +726,7 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
     OpenMPDirectiveKind DKind = NestedDir->getDirectiveKind();
     switch (D.getDirectiveKind()) {
     case OMPD_target:
-      if (isOpenMPParallelDirective(DKind) &&
-          !hasParallelIfClause(Ctx, *NestedDir, /*StandaloneParallel=*/true))
+      if (isOpenMPParallelDirective(DKind))
         return true;
       if (DKind == OMPD_teams) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
@@ -757,15 +737,13 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
         if (const auto *NND =
                 dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
-          if (isOpenMPParallelDirective(DKind) &&
-              !hasParallelIfClause(Ctx, *NND, /*StandaloneParallel=*/true))
+          if (isOpenMPParallelDirective(DKind))
             return true;
         }
       }
       return false;
     case OMPD_target_teams:
-      return isOpenMPParallelDirective(DKind) &&
-             !hasParallelIfClause(Ctx, *NestedDir, /*StandaloneParallel=*/true);
+      return isOpenMPParallelDirective(DKind);
     case OMPD_target_simd:
     case OMPD_target_parallel:
     case OMPD_target_parallel_for:
@@ -839,10 +817,10 @@ static bool supportsSPMDExecutionMode(ASTContext &Ctx,
   case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
-    return !hasParallelIfClause(Ctx, D, /*StandaloneParallel=*/false);
   case OMPD_target_simd:
-  case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
+    return true;
+  case OMPD_target_teams_distribute:
     return false;
   case OMPD_parallel:
   case OMPD_for:
@@ -928,6 +906,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
           isOpenMPWorksharingDirective(DKind) && isOpenMPLoopDirective(DKind) &&
           hasStaticScheduling(*NestedDir))
         return true;
+      if (DKind == OMPD_teams_distribute_simd || DKind == OMPD_simd)
+        return true;
       if (DKind == OMPD_parallel) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
             /*IgnoreCaptured=*/true);
@@ -976,6 +956,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
           isOpenMPWorksharingDirective(DKind) && isOpenMPLoopDirective(DKind) &&
           hasStaticScheduling(*NestedDir))
         return true;
+      if (DKind == OMPD_distribute_simd || DKind == OMPD_simd)
+        return true;
       if (DKind == OMPD_parallel) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
             /*IgnoreCaptured=*/true);
@@ -992,6 +974,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
       }
       return false;
     case OMPD_target_parallel:
+      if (DKind == OMPD_simd)
+        return true;
       return isOpenMPWorksharingDirective(DKind) &&
              isOpenMPLoopDirective(DKind) && hasStaticScheduling(*NestedDir);
     case OMPD_target_teams_distribute:
@@ -1073,8 +1057,9 @@ static bool supportsLightweightRuntime(ASTContext &Ctx,
     // (Last|First)-privates must be shared in parallel region.
     return hasStaticScheduling(D);
   case OMPD_target_simd:
-  case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
+    return true;
+  case OMPD_target_teams_distribute:
     return false;
   case OMPD_parallel:
   case OMPD_for:
@@ -1944,6 +1929,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitParallelOutlinedFunction(
   auto *OutlinedFun =
       cast<llvm::Function>(CGOpenMPRuntime::emitParallelOutlinedFunction(
           D, ThreadIDVar, InnermostKind, CodeGen));
+  if (CGM.getLangOpts().Optimize) {
+    OutlinedFun->removeFnAttr(llvm::Attribute::NoInline);
+    OutlinedFun->removeFnAttr(llvm::Attribute::OptimizeNone);
+    OutlinedFun->addFnAttr(llvm::Attribute::AlwaysInline);
+  }
   IsInTargetMasterThreadRegion = PrevIsInTargetMasterThreadRegion;
   IsInTTDRegion = PrevIsInTTDRegion;
   if (getExecutionMode() != CGOpenMPRuntimeNVPTX::EM_SPMD &&
@@ -2060,9 +2050,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitTeamsOutlinedFunction(
   CodeGen.setAction(Action);
   llvm::Function *OutlinedFun = CGOpenMPRuntime::emitTeamsOutlinedFunction(
       D, ThreadIDVar, InnermostKind, CodeGen);
-  OutlinedFun->removeFnAttr(llvm::Attribute::NoInline);
-  OutlinedFun->removeFnAttr(llvm::Attribute::OptimizeNone);
-  OutlinedFun->addFnAttr(llvm::Attribute::AlwaysInline);
+  if (CGM.getLangOpts().Optimize) {
+    OutlinedFun->removeFnAttr(llvm::Attribute::NoInline);
+    OutlinedFun->removeFnAttr(llvm::Attribute::OptimizeNone);
+    OutlinedFun->addFnAttr(llvm::Attribute::AlwaysInline);
+  }
 
   return OutlinedFun;
 }
@@ -3437,6 +3429,12 @@ static llvm::Function *emitShuffleAndReduceFunction(
       "_omp_reduction_shuffle_and_reduce_func", &CGM.getModule());
   CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, CGFI);
   Fn->setDoesNotRecurse();
+  if (CGM.getLangOpts().Optimize) {
+    Fn->removeFnAttr(llvm::Attribute::NoInline);
+    Fn->removeFnAttr(llvm::Attribute::OptimizeNone);
+    Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  }
+
   CodeGenFunction CGF(CGM);
   CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args, Loc, Loc);
 
@@ -4893,7 +4891,7 @@ static CudaArch getCudaArch(CodeGenModule &CGM) {
 /// Check to see if target architecture supports unified addressing which is
 /// a restriction for OpenMP requires clause "unified_shared_memory".
 void CGOpenMPRuntimeNVPTX::checkArchForUnifiedAddressing(
-    const OMPRequiresDecl *D) const {
+    const OMPRequiresDecl *D) {
   for (const OMPClause *Clause : D->clauselists()) {
     if (Clause->getClauseKind() == OMPC_unified_shared_memory) {
       switch (getCudaArch(CGM)) {
@@ -4930,6 +4928,7 @@ void CGOpenMPRuntimeNVPTX::checkArchForUnifiedAddressing(
       case CudaArch::GFX902:
       case CudaArch::GFX904:
       case CudaArch::GFX906:
+      case CudaArch::GFX908:
       case CudaArch::GFX909:
       case CudaArch::UNKNOWN:
         break;
@@ -4938,6 +4937,7 @@ void CGOpenMPRuntimeNVPTX::checkArchForUnifiedAddressing(
       }
     }
   }
+  CGOpenMPRuntime::checkArchForUnifiedAddressing(D);
 }
 
 /// Get number of SMs and number of blocks per SM.
@@ -4983,6 +4983,7 @@ static std::pair<unsigned, unsigned> getSMsBlocksPerSM(CodeGenModule &CGM) {
   case CudaArch::GFX902:
   case CudaArch::GFX904:
   case CudaArch::GFX906:
+  case CudaArch::GFX908:
   case CudaArch::GFX909:
   case CudaArch::UNKNOWN:
     break;

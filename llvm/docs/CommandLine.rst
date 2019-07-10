@@ -1234,6 +1234,14 @@ specify boolean properties that modify the option.
   option is allowed to accept one or more values (i.e. it is a `cl::list`_
   option).
 
+.. _cl::DefaultOption:
+
+* The **cl::DefaultOption** modifier is used to specify that the option is a
+  default that can be overridden by application specific parsers. For example,
+  the ``-help`` alias, ``-h``, is registered this way, so it can be overridden
+  by applications that need to use the ``-h`` option for another purpose,
+  either as a regular option or an alias for another option.
+
 .. _cl::PositionalEatsArgs:
 
 * The **cl::PositionalEatsArgs** modifier (which only applies to positional
@@ -1252,14 +1260,6 @@ specify boolean properties that modify the option.
   unrecognized option strings to it as values instead of signaling an error. As
   with ``cl::CommaSeparated``, this modifier only makes sense with a `cl::list`_
   option.
-
-.. _cl::DefaultOption:
-
-* The **cl::DefaultOption** modifier is used to specify that the option is a
-  default that can be overridden by application specific parsers. For example,
-  the ``-help`` alias, ``-h``, is registered this way, so it can be overridden
-  by applications that need to use the ``-h`` option for another purpose,
-  either as a regular option or an alias for another option.
 
 .. _response files:
 
@@ -1294,7 +1294,7 @@ it cannot be guaranteed that all options will have been initialised. Hence it
 should be called from ``main``.
 
 This function can be used to gain access to options declared in libraries that
-the tool writter may not have direct access to.
+the tool writer may not have direct access to.
 
 The function retrieves a :ref:`StringMap <dss_stringmap>` that maps the option
 string (e.g. ``-help``) to an ``Option*``.

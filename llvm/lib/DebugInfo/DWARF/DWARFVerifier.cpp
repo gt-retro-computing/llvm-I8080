@@ -100,7 +100,7 @@ bool DWARFVerifier::DieRangeInfo::intersects(const DieRangeInfo &RHS) const {
 bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
                                      uint32_t *Offset, unsigned UnitIndex,
                                      uint8_t &UnitType, bool &isUnitDWARF64) {
-  uint32_t AbbrOffset, Length;
+  uint64_t AbbrOffset, Length;
   uint8_t AddrSize = 0;
   uint16_t Version;
   bool Success = true;
@@ -114,22 +114,19 @@ bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
   uint32_t OffsetStart = *Offset;
   Length = DebugInfoData.getU32(Offset);
   if (Length == UINT32_MAX) {
+    Length = DebugInfoData.getU64(Offset);
     isUnitDWARF64 = true;
-    OS << format(
-        "Unit[%d] is in 64-bit DWARF format; cannot verify from this point.\n",
-        UnitIndex);
-    return false;
   }
   Version = DebugInfoData.getU16(Offset);
 
   if (Version >= 5) {
     UnitType = DebugInfoData.getU8(Offset);
     AddrSize = DebugInfoData.getU8(Offset);
-    AbbrOffset = DebugInfoData.getU32(Offset);
+    AbbrOffset = isUnitDWARF64 ? DebugInfoData.getU64(Offset) : DebugInfoData.getU32(Offset);
     ValidType = dwarf::isUnitType(UnitType);
   } else {
     UnitType = 0;
-    AbbrOffset = DebugInfoData.getU32(Offset);
+    AbbrOffset = isUnitDWARF64 ? DebugInfoData.getU64(Offset) : DebugInfoData.getU32(Offset);
     AddrSize = DebugInfoData.getU8(Offset);
   }
 
@@ -157,7 +154,7 @@ bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
     if (!ValidAddrSize)
       note() << "The address size is unsupported.\n";
   }
-  *Offset = OffsetStart + Length + 4;
+  *Offset = OffsetStart + Length + (isUnitDWARF64 ? 12 : 4);
   return Success;
 }
 
@@ -705,7 +702,6 @@ void DWARFVerifier::verifyDebugLineRows() {
       continue;
 
     // Verify prologue.
-    uint32_t MaxFileIndex = LineTable->Prologue.FileNames.size();
     uint32_t MaxDirIndex = LineTable->Prologue.IncludeDirectories.size();
     uint32_t FileIndex = 1;
     StringMap<uint16_t> FullPathMap;
@@ -763,13 +759,16 @@ void DWARFVerifier::verifyDebugLineRows() {
       }
 
       // Verify file index.
-      if (Row.File > MaxFileIndex) {
+      if (!LineTable->hasFileAtIndex(Row.File)) {
         ++NumDebugLineErrors;
+        bool isDWARF5 = LineTable->Prologue.getVersion() >= 5;
         error() << ".debug_line["
                 << format("0x%08" PRIx64,
                           *toSectionOffset(Die.find(DW_AT_stmt_list)))
                 << "][" << RowIndex << "] has invalid file index " << Row.File
-                << " (valid values are [1," << MaxFileIndex << "]):\n";
+                << " (valid values are [" << (isDWARF5 ? "0," : "1,")
+                << LineTable->Prologue.FileNames.size()
+                << (isDWARF5 ? ")" : "]") << "):\n";
         DWARFDebugLine::Row::dumpTableHeader(OS);
         Row.dump(OS);
         OS << '\n';

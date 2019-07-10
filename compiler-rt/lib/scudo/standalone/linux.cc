@@ -44,7 +44,7 @@ uptr getPageSize() { return static_cast<uptr>(sysconf(_SC_PAGESIZE)); }
 void NORETURN die() { abort(); }
 
 void *map(void *Addr, uptr Size, UNUSED const char *Name, uptr Flags,
-          UNUSED u64 *Extra) {
+          UNUSED MapPlatformData *Data) {
   int MmapFlags = MAP_PRIVATE | MAP_ANON;
   if (Flags & MAP_NOACCESS)
     MmapFlags |= MAP_NORESERVE;
@@ -68,13 +68,14 @@ void *map(void *Addr, uptr Size, UNUSED const char *Name, uptr Flags,
   return P;
 }
 
-void unmap(void *Addr, uptr Size, UNUSED uptr Flags, UNUSED u64 *Extra) {
+void unmap(void *Addr, uptr Size, UNUSED uptr Flags,
+           UNUSED MapPlatformData *Data) {
   if (munmap(Addr, Size) != 0)
     dieOnMapUnmapError();
 }
 
 void releasePagesToOS(uptr BaseAddress, uptr Offset, uptr Size,
-                      UNUSED u64 *Extra) {
+                      UNUSED MapPlatformData *Data) {
   void *Addr = reinterpret_cast<void *>(BaseAddress + Offset);
   while (madvise(Addr, Size, MADV_DONTNEED) == -1 && errno == EAGAIN) {
   }
@@ -83,14 +84,22 @@ void releasePagesToOS(uptr BaseAddress, uptr Offset, uptr Size,
 // Calling getenv should be fine (c)(tm) at any time.
 const char *getEnv(const char *Name) { return getenv(Name); }
 
-void BlockingMutex::wait() {
-  syscall(SYS_futex, reinterpret_cast<uptr>(OpaqueStorage), FUTEX_WAIT_PRIVATE,
-          MtxSleeping, nullptr, nullptr, 0);
+void BlockingMutex::lock() {
+  atomic_u32 *M = reinterpret_cast<atomic_u32 *>(&OpaqueStorage);
+  if (atomic_exchange(M, MtxLocked, memory_order_acquire) == MtxUnlocked)
+    return;
+  while (atomic_exchange(M, MtxSleeping, memory_order_acquire) != MtxUnlocked)
+    syscall(SYS_futex, reinterpret_cast<uptr>(OpaqueStorage),
+            FUTEX_WAIT_PRIVATE, MtxSleeping, nullptr, nullptr, 0);
 }
 
-void BlockingMutex::wake() {
-  syscall(SYS_futex, reinterpret_cast<uptr>(OpaqueStorage), FUTEX_WAKE_PRIVATE,
-          1, nullptr, nullptr, 0);
+void BlockingMutex::unlock() {
+  atomic_u32 *M = reinterpret_cast<atomic_u32 *>(&OpaqueStorage);
+  const u32 V = atomic_exchange(M, MtxUnlocked, memory_order_release);
+  DCHECK_NE(V, MtxUnlocked);
+  if (V == MtxSleeping)
+    syscall(SYS_futex, reinterpret_cast<uptr>(OpaqueStorage),
+            FUTEX_WAKE_PRIVATE, 1, nullptr, nullptr, 0);
 }
 
 u64 getMonotonicTime() {

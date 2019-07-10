@@ -71,6 +71,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "loop-unroll"
 
+cl::opt<bool> llvm::ForgetSCEVInLoopUnroll(
+    "forget-scev-loop-unroll", cl::init(false), cl::Hidden,
+    cl::desc("Forget everything in SCEV when doing LoopUnroll, instead of just"
+             " the current top-most loop. This is somtimes preferred to reduce"
+             " compile time."));
+
 static cl::opt<unsigned>
     UnrollThreshold("unroll-threshold", cl::Hidden,
                     cl::desc("The cost threshold for loop unrolling"));
@@ -207,6 +213,7 @@ TargetTransformInfo::UnrollingPreferences llvm::gatherUnrollingPreferences(
   if (OptForSize) {
     UP.Threshold = UP.OptSizeThreshold;
     UP.PartialThreshold = UP.PartialOptSizeThreshold;
+    UP.MaxPercentThresholdBoost = 100;
   }
 
   // Apply any user values specified by cl::opt
@@ -993,6 +1000,7 @@ static LoopUnrollResult tryToUnrollLoop(
   if (OnlyWhenForced && !(TM & TM_Enable))
     return LoopUnrollResult::Unmodified;
 
+  bool OptForSize = L->getHeader()->getParent()->hasOptSize();
   unsigned NumInlineCandidates;
   bool NotDuplicatable;
   bool Convergent;
@@ -1000,8 +1008,11 @@ static LoopUnrollResult tryToUnrollLoop(
       L, SE, TTI, BFI, PSI, OptLevel, ProvidedThreshold, ProvidedCount,
       ProvidedAllowPartial, ProvidedRuntime, ProvidedUpperBound,
       ProvidedAllowPeeling);
-  // Exit early if unrolling is disabled.
-  if (UP.Threshold == 0 && (!UP.Partial || UP.PartialThreshold == 0))
+
+  // Exit early if unrolling is disabled. For OptForSize, we pick the loop size
+  // as threshold later on.
+  if (UP.Threshold == 0 && (!UP.Partial || UP.PartialThreshold == 0) &&
+      !OptForSize)
     return LoopUnrollResult::Unmodified;
 
   SmallPtrSet<const Value *, 32> EphValues;
@@ -1016,6 +1027,12 @@ static LoopUnrollResult tryToUnrollLoop(
                       << " instructions.\n");
     return LoopUnrollResult::Unmodified;
   }
+
+  // When optimizing for size, use LoopSize as threshold, to (fully) unroll
+  // loops, if it does not increase code size.
+  if (OptForSize)
+    UP.Threshold = std::max(UP.Threshold, LoopSize);
+
   if (NumInlineCandidates != 0) {
     LLVM_DEBUG(dbgs() << "  Not unrolling loop with inlinable calls.\n");
     return LoopUnrollResult::Unmodified;
@@ -1088,9 +1105,11 @@ static LoopUnrollResult tryToUnrollLoop(
   // Unroll the loop.
   Loop *RemainderLoop = nullptr;
   LoopUnrollResult UnrollResult = UnrollLoop(
-      L, UP.Count, TripCount, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
-      UseUpperBound, MaxOrZero, TripMultiple, UP.PeelCount, UP.UnrollRemainder,
-      ForgetAllSCEV, LI, &SE, &DT, &AC, &ORE, PreserveLCSSA, &RemainderLoop);
+      L,
+      {UP.Count, TripCount, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
+       UseUpperBound, MaxOrZero, TripMultiple, UP.PeelCount, UP.UnrollRemainder,
+       ForgetAllSCEV},
+      LI, &SE, &DT, &AC, &ORE, PreserveLCSSA, &RemainderLoop);
   if (UnrollResult == LoopUnrollResult::Unmodified)
     return LoopUnrollResult::Unmodified;
 
@@ -1268,7 +1287,7 @@ PreservedAnalyses LoopFullUnrollPass::run(Loop &L, LoopAnalysisManager &AM,
       tryToUnrollLoop(&L, AR.DT, &AR.LI, AR.SE, AR.TTI, AR.AC, *ORE,
                       /*BFI*/ nullptr, /*PSI*/ nullptr,
                       /*PreserveLCSSA*/ true, OptLevel, OnlyWhenForced,
-                      /*ForgetAllSCEV*/ false, /*Count*/ None,
+                      ForgetSCEV, /*Count*/ None,
                       /*Threshold*/ None, /*AllowPartial*/ false,
                       /*Runtime*/ false, /*UpperBound*/ false,
                       /*AllowPeeling*/ false) != LoopUnrollResult::Unmodified;
@@ -1380,7 +1399,8 @@ PreservedAnalyses LoopUnrollPass::run(Function &F,
   // will simplify all loops, regardless of whether anything end up being
   // unrolled.
   for (auto &L : LI) {
-    Changed |= simplifyLoop(L, &DT, &LI, &SE, &AC, false /* PreserveLCSSA */);
+    Changed |=
+        simplifyLoop(L, &DT, &LI, &SE, &AC, nullptr, false /* PreserveLCSSA */);
     Changed |= formLCSSARecursively(*L, DT, &LI, &SE);
   }
 
@@ -1408,7 +1428,7 @@ PreservedAnalyses LoopUnrollPass::run(Function &F,
     LoopUnrollResult Result = tryToUnrollLoop(
         &L, DT, &LI, SE, TTI, AC, ORE, BFI, PSI,
         /*PreserveLCSSA*/ true, UnrollOpts.OptLevel, UnrollOpts.OnlyWhenForced,
-        /*ForgetAllSCEV*/ false, /*Count*/ None,
+        UnrollOpts.ForgetSCEV, /*Count*/ None,
         /*Threshold*/ None, UnrollOpts.AllowPartial, UnrollOpts.AllowRuntime,
         UnrollOpts.AllowUpperBound, LocalAllowPeeling);
     Changed |= Result != LoopUnrollResult::Unmodified;

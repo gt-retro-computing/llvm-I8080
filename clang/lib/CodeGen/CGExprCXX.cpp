@@ -681,9 +681,9 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
   // We multiply the size of all dimensions for NumElements.
   // e.g for 'int[2][3]', ElemType is 'int' and NumElements is 6.
   numElements =
-    ConstantEmitter(CGF).tryEmitAbstract(e->getArraySize(), e->getType());
+    ConstantEmitter(CGF).tryEmitAbstract(*e->getArraySize(), e->getType());
   if (!numElements)
-    numElements = CGF.EmitScalarExpr(e->getArraySize());
+    numElements = CGF.EmitScalarExpr(*e->getArraySize());
   assert(isa<llvm::IntegerType>(numElements->getType()));
 
   // The number of elements can be have an arbitrary integer type;
@@ -693,7 +693,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
   // important way: if the count is negative, it's an error even if
   // the cookie size would bring the total size >= 0.
   bool isSigned
-    = e->getArraySize()->getType()->isSignedIntegerOrEnumerationType();
+    = (*e->getArraySize())->getType()->isSignedIntegerOrEnumerationType();
   llvm::IntegerType *numElementsType
     = cast<llvm::IntegerType>(numElements->getType());
   unsigned numElementsWidth = numElementsType->getBitWidth();
@@ -1865,9 +1865,33 @@ static void EmitObjectDelete(CodeGenFunction &CGF,
       Dtor = RD->getDestructor();
 
       if (Dtor->isVirtual()) {
-        CGF.CGM.getCXXABI().emitVirtualObjectDelete(CGF, DE, Ptr, ElementType,
-                                                    Dtor);
-        return;
+        bool UseVirtualCall = true;
+        const Expr *Base = DE->getArgument();
+        if (auto *DevirtualizedDtor =
+                dyn_cast_or_null<const CXXDestructorDecl>(
+                    Dtor->getDevirtualizedMethod(
+                        Base, CGF.CGM.getLangOpts().AppleKext))) {
+          UseVirtualCall = false;
+          const CXXRecordDecl *DevirtualizedClass =
+              DevirtualizedDtor->getParent();
+          if (declaresSameEntity(getCXXRecord(Base), DevirtualizedClass)) {
+            // Devirtualized to the class of the base type (the type of the
+            // whole expression).
+            Dtor = DevirtualizedDtor;
+          } else {
+            // Devirtualized to some other type. Would need to cast the this
+            // pointer to that type but we don't have support for that yet, so
+            // do a virtual call. FIXME: handle the case where it is
+            // devirtualized to the derived type (the type of the inner
+            // expression) as in EmitCXXMemberOrOperatorMemberCallExpr.
+            UseVirtualCall = true;
+          }
+        }
+        if (UseVirtualCall) {
+          CGF.CGM.getCXXABI().emitVirtualObjectDelete(CGF, DE, Ptr, ElementType,
+                                                      Dtor);
+          return;
+        }
       }
     }
   }

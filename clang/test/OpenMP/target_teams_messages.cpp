@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -verify -fopenmp -std=c++11 -o - %s
+// RUN: %clang_cc1 -verify -fopenmp -std=c++11 -o - %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd -std=c++11 -o - %s
+// RUN: %clang_cc1 -verify -fopenmp-simd -std=c++11 -o - %s -Wuninitialized
 
 void foo() {
 }
@@ -47,14 +47,14 @@ int main(int argc, char **argv) {
        break;
     }
   }
-#pragma omp target teams default(none)
+#pragma omp target teams default(none) // expected-note {{explicit data sharing attribute requested here}}
   ++argc; // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
 
-#pragma omp target teams default(none)
+#pragma omp target teams default(none) // expected-note {{explicit data sharing attribute requested here}}
 #pragma omp parallel num_threads(argc) // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
   ;
 
-#pragma omp target teams default(none)
+#pragma omp target teams default(none) // expected-note {{explicit data sharing attribute requested here}}
   {
 #pragma omp parallel num_threads(argc) // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
     ;

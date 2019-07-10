@@ -12,9 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86AsmPrinter.h"
-#include "InstPrinter/X86ATTInstPrinter.h"
+#include "MCTargetDesc/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86TargetStreamer.h"
+#include "TargetInfo/X86TargetInfo.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
 #include "llvm/BinaryFormat/COFF.h"
@@ -299,6 +300,7 @@ void X86AsmPrinter::PrintLeaMemReference(const MachineInstr *MI, unsigned OpNo,
   case MachineOperand::MO_GlobalAddress:
   case MachineOperand::MO_ConstantPoolIndex:
     PrintSymbolOperand(DispSpec, O);
+    break;
   }
 
   if (Modifier && strcmp(Modifier, "H") == 0)

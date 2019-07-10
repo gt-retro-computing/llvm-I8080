@@ -104,6 +104,9 @@ public:
 
   clang::TargetInfo *getTargetInfo();
 
+  void setSema(clang::Sema *s);
+  clang::Sema *getSema() { return m_sema; }
+
   void Clear();
 
   const char *GetTargetTriple();
@@ -595,6 +598,8 @@ public:
 
   bool IsVoidType(lldb::opaque_compiler_type_t type) override;
 
+  bool CanPassInRegisters(const CompilerType &type) override;
+
   bool SupportsLanguage(lldb::LanguageType language) override;
 
   static bool GetCXXClassName(const CompilerType &type,
@@ -997,6 +1002,10 @@ protected:
     uint32_t                                        m_pointer_byte_size;
     bool                                            m_ast_owned;
     bool                                            m_can_evaluate_expressions;
+    /// The sema associated that is currently used to build this ASTContext.
+    /// May be null if we are already done parsing this ASTContext or the
+    /// ASTContext wasn't created by parsing source code.
+    clang::Sema *                                   m_sema = nullptr;
   // clang-format on
 private:
   // For ClangASTContext only

@@ -486,7 +486,7 @@ static void LoadLibCxxFormatters(lldb::TypeCategoryImplSP cpp_category_sp) {
       cpp_category_sp,
       lldb_private::formatters::LibcxxStdListSyntheticFrontEndCreator,
       "libc++ std::list synthetic children",
-      ConstString("^std::__[[:alnum:]]+::list<.+>(( )?&)?$"), stl_synth_flags,
+      ConstString("^std::__[[:alnum:]]+::list<.+>(( )?&)?$"), stl_deref_flags,
       true);
   AddCXXSynthetic(
       cpp_category_sp,
@@ -914,7 +914,7 @@ static void LoadSystemFormatters(lldb::TypeCategoryImplSP cpp_category_sp) {
 std::unique_ptr<Language::TypeScavenger> CPlusPlusLanguage::GetTypeScavenger() {
   class CPlusPlusTypeScavenger : public Language::ImageListTypeScavenger {
   public:
-    virtual CompilerType AdjustForInclusion(CompilerType &candidate) override {
+    CompilerType AdjustForInclusion(CompilerType &candidate) override {
       LanguageType lang_type(candidate.GetMinimumLanguage());
       if (!Language::LanguageIsC(lang_type) &&
           !Language::LanguageIsCPlusPlus(lang_type))

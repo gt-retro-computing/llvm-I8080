@@ -164,9 +164,9 @@ static cl::opt<unsigned> ComplexityLimit(
   cl::init(std::numeric_limits<uint16_t>::max()),
   cl::desc("LSR search space complexity limit"));
 
-static cl::opt<bool> EnableRecursiveSetupCost(
-  "lsr-recursive-setupcost", cl::Hidden, cl::init(true),
-  cl::desc("Enable more thorough lsr setup cost calculation"));
+static cl::opt<unsigned> SetupCostDepthLimit(
+    "lsr-setupcost-depth-limit", cl::Hidden, cl::init(7),
+    cl::desc("The limit on recursion depth for LSRs setup cost"));
 
 #ifndef NDEBUG
 // Stress test IV chain generation.
@@ -1212,22 +1212,23 @@ static bool isAMCompletelyFolded(const TargetTransformInfo &TTI,
                                  bool HasBaseReg, int64_t Scale,
                                  Instruction *Fixup = nullptr);
 
-static unsigned getSetupCost(const SCEV *Reg) {
+static unsigned getSetupCost(const SCEV *Reg, unsigned Depth) {
   if (isa<SCEVUnknown>(Reg) || isa<SCEVConstant>(Reg))
     return 1;
-  if (!EnableRecursiveSetupCost)
+  if (Depth == 0)
     return 0;
   if (const auto *S = dyn_cast<SCEVAddRecExpr>(Reg))
-    return getSetupCost(S->getStart());
+    return getSetupCost(S->getStart(), Depth - 1);
   if (auto S = dyn_cast<SCEVCastExpr>(Reg))
-    return getSetupCost(S->getOperand());
+    return getSetupCost(S->getOperand(), Depth - 1);
   if (auto S = dyn_cast<SCEVNAryExpr>(Reg))
     return std::accumulate(S->op_begin(), S->op_end(), 0,
-                           [](unsigned i, const SCEV *Reg) {
-                             return i + getSetupCost(Reg);
+                           [&](unsigned i, const SCEV *Reg) {
+                             return i + getSetupCost(Reg, Depth - 1);
                            });
   if (auto S = dyn_cast<SCEVUDivExpr>(Reg))
-    return getSetupCost(S->getLHS()) + getSetupCost(S->getRHS());
+    return getSetupCost(S->getLHS(), Depth - 1) +
+           getSetupCost(S->getRHS(), Depth - 1);
   return 0;
 }
 
@@ -1293,7 +1294,9 @@ void Cost::RateRegister(const Formula &F, const SCEV *Reg,
 
   // Rough heuristic; favor registers which don't require extra setup
   // instructions in the preheader.
-  C.SetupCost += getSetupCost(Reg);
+  C.SetupCost += getSetupCost(Reg, SetupCostDepthLimit);
+  // Ensure we don't, even with the recusion limit, produce invalid costs.
+  C.SetupCost = std::min<unsigned>(C.SetupCost, 1 << 16);
 
   C.NumIVMuls += isa<SCEVMulExpr>(Reg) &&
                SE->hasComputableLoopEvolution(Reg, L);
@@ -1906,6 +1909,8 @@ class LSRInstance {
   ScalarEvolution &SE;
   DominatorTree &DT;
   LoopInfo &LI;
+  AssumptionCache &AC;
+  TargetLibraryInfo &LibInfo;
   const TargetTransformInfo &TTI;
   Loop *const L;
   bool FavorBackedgeIndex = false;
@@ -2044,7 +2049,8 @@ class LSRInstance {
 
 public:
   LSRInstance(Loop *L, IVUsers &IU, ScalarEvolution &SE, DominatorTree &DT,
-              LoopInfo &LI, const TargetTransformInfo &TTI);
+              LoopInfo &LI, const TargetTransformInfo &TTI, AssumptionCache &AC,
+              TargetLibraryInfo &LibInfo);
 
   bool getChanged() const { return Changed; }
 
@@ -3229,6 +3235,9 @@ void LSRInstance::GenerateIVChain(const IVChain &Chain, SCEVExpander &Rewriter,
 }
 
 void LSRInstance::CollectFixupsAndInitialFormulae() {
+  BranchInst *ExitBranch = nullptr;
+  bool SaveCmp = TTI.canSaveCmp(L, &ExitBranch, &SE, &LI, &DT, &AC, &LibInfo);
+
   for (const IVStrideUse &U : IU) {
     Instruction *UserInst = U.getUser();
     // Skip IV users that are part of profitable IV Chains.
@@ -3258,6 +3267,10 @@ void LSRInstance::CollectFixupsAndInitialFormulae() {
     // equality icmps, thanks to IndVarSimplify.
     if (ICmpInst *CI = dyn_cast<ICmpInst>(UserInst))
       if (CI->isEquality()) {
+        // If CI can be saved in some target, like replaced inside hardware loop
+        // in PowerPC, no need to generate initial formulae for it.
+        if (SaveCmp && CI == dyn_cast<ICmpInst>(ExitBranch->getCondition()))
+          continue;
         // Swap the operands if needed to put the OperandValToReplace on the
         // left, for consistency.
         Value *NV = CI->getOperand(1);
@@ -5356,7 +5369,7 @@ void LSRInstance::RewriteForPHI(
         Pair.first->second = FullV;
       }
 
-      // If LSR split critical edge and phi node has other pending
+      // If LSR splits critical edge and phi node has other pending
       // fixup operands, we need to update those pending fixups. Otherwise
       // formulae will not be implemented completely and some instructions
       // will not be eliminated.
@@ -5476,8 +5489,9 @@ void LSRInstance::ImplementSolution(
 
 LSRInstance::LSRInstance(Loop *L, IVUsers &IU, ScalarEvolution &SE,
                          DominatorTree &DT, LoopInfo &LI,
-                         const TargetTransformInfo &TTI)
-    : IU(IU), SE(SE), DT(DT), LI(LI), TTI(TTI), L(L),
+                         const TargetTransformInfo &TTI, AssumptionCache &AC,
+                         TargetLibraryInfo &LibInfo)
+    : IU(IU), SE(SE), DT(DT), LI(LI), AC(AC), LibInfo(LibInfo), TTI(TTI), L(L),
       FavorBackedgeIndex(EnableBackedgeIndexing &&
                          TTI.shouldFavorBackedgeIndex(L)) {
   // If LoopSimplify form is not available, stay out of trouble.
@@ -5674,6 +5688,8 @@ void LoopStrengthReduce::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<DominatorTreeWrapperPass>();
   AU.addRequired<ScalarEvolutionWrapperPass>();
   AU.addPreserved<ScalarEvolutionWrapperPass>();
+  AU.addRequired<AssumptionCacheTracker>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   // Requiring LoopSimplify a second time here prevents IVUsers from running
   // twice, since LoopSimplify was invalidated by running ScalarEvolution.
   AU.addRequiredID(LoopSimplifyID);
@@ -5684,11 +5700,14 @@ void LoopStrengthReduce::getAnalysisUsage(AnalysisUsage &AU) const {
 
 static bool ReduceLoopStrength(Loop *L, IVUsers &IU, ScalarEvolution &SE,
                                DominatorTree &DT, LoopInfo &LI,
-                               const TargetTransformInfo &TTI) {
+                               const TargetTransformInfo &TTI,
+                               AssumptionCache &AC,
+                               TargetLibraryInfo &LibInfo) {
+
   bool Changed = false;
 
   // Run the main LSR transformation.
-  Changed |= LSRInstance(L, IU, SE, DT, LI, TTI).getChanged();
+  Changed |= LSRInstance(L, IU, SE, DT, LI, TTI, AC, LibInfo).getChanged();
 
   // Remove any extra phis created by processing inner loops.
   Changed |= DeleteDeadPHIs(L->getHeader());
@@ -5719,14 +5738,17 @@ bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
   auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   const auto &TTI = getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
       *L->getHeader()->getParent());
-  return ReduceLoopStrength(L, IU, SE, DT, LI, TTI);
+  auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(
+      *L->getHeader()->getParent());
+  auto &LibInfo = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  return ReduceLoopStrength(L, IU, SE, DT, LI, TTI, AC, LibInfo);
 }
 
 PreservedAnalyses LoopStrengthReducePass::run(Loop &L, LoopAnalysisManager &AM,
                                               LoopStandardAnalysisResults &AR,
                                               LPMUpdater &) {
   if (!ReduceLoopStrength(&L, AM.getResult<IVUsersAnalysis>(L, AR), AR.SE,
-                          AR.DT, AR.LI, AR.TTI))
+                          AR.DT, AR.LI, AR.TTI, AR.AC, AR.TLI))
     return PreservedAnalyses::all();
 
   return getLoopPassPreservedAnalyses();

@@ -818,7 +818,11 @@ class Configuration(object):
         elif cxx_abi == 'libsupc++':
             self.cxx.link_flags += ['-lsupc++']
         elif cxx_abi == 'libcxxabi':
-            if self.target_info.allow_cxxabi_link():
+            # If the C++ library requires explicitly linking to libc++abi, or
+            # if we're testing libc++abi itself (the test configs are shared),
+            # then link it.
+            testing_libcxxabi = self.get_lit_conf('name', '') == 'libc++abi'
+            if self.target_info.allow_cxxabi_link() or testing_libcxxabi:
                 libcxxabi_shared = self.get_lit_bool('libcxxabi_shared', default=True)
                 if libcxxabi_shared:
                     self.cxx.link_flags += ['-lc++abi']
@@ -1160,10 +1164,10 @@ class Configuration(object):
 
                 self.config.available_features.add('dylib-has-no-bad_any_cast')
                 self.lit_config.note("throwing bad_any_cast is not supported by the deployment target")
-            # Filesystem is not supported on Apple platforms yet
-            if name == 'macosx':
+            # Filesystem is support on Apple platforms starting with macosx10.15.
+            if name == 'macosx' and version in ('10.%s' % v for v in range(7, 15)):
                 self.config.available_features.add('dylib-has-no-filesystem')
-                self.lit_config.note("the deployment target does not support the dylib parts of <filesystem>")
+                self.lit_config.note("the deployment target does not support <filesystem>")
         else:
             self.cxx.flags += ['-D_LIBCPP_DISABLE_AVAILABILITY']
 

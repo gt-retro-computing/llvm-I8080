@@ -188,6 +188,7 @@ public:
     bool IsSwiftSelf : 1;
     bool IsSwiftError : 1;
     uint16_t Alignment = 0;
+    Type *ByValType = nullptr;
 
     ArgListEntry()
         : IsSExt(false), IsZExt(false), IsInReg(false), IsSRet(false),
@@ -238,7 +239,14 @@ public:
   /// Return the pointer type for the given address space, defaults to
   /// the pointer type from the data layout.
   /// FIXME: The default needs to be removed once all the code is updated.
-  MVT getPointerTy(const DataLayout &DL, uint32_t AS = 0) const {
+  virtual MVT getPointerTy(const DataLayout &DL, uint32_t AS = 0) const {
+    return MVT::getIntegerVT(DL.getPointerSizeInBits(AS));
+  }
+
+  /// Return the in-memory pointer type for the given address space, defaults to
+  /// the pointer type from the data layout.  FIXME: The default needs to be
+  /// removed once all the code is updated.
+  MVT getPointerMemTy(const DataLayout &DL, uint32_t AS = 0) const {
     return MVT::getIntegerVT(DL.getPointerSizeInBits(AS));
   }
 
@@ -393,8 +401,9 @@ public:
   /// efficiently, casting the load to a smaller vector of larger types and
   /// loading is more efficient, however, this can be undone by optimizations in
   /// dag combiner.
-  virtual bool isLoadBitCastBeneficial(EVT LoadVT,
-                                       EVT BitcastVT) const {
+  virtual bool isLoadBitCastBeneficial(EVT LoadVT, EVT BitcastVT,
+                                       const SelectionDAG &DAG,
+                                       const MachineMemOperand &MMO) const {
     // Don't do if we could do an indexed load on the original type, but not on
     // the new one.
     if (!LoadVT.isSimple() || !BitcastVT.isSimple())
@@ -408,14 +417,18 @@ public:
         getTypeToPromoteTo(ISD::LOAD, LoadMVT) == BitcastVT.getSimpleVT())
       return false;
 
-    return true;
+    bool Fast = false;
+    return allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), BitcastVT,
+                              MMO, &Fast) && Fast;
   }
 
   /// Return true if the following transform is beneficial:
   /// (store (y (conv x)), y*)) -> (store x, (x*))
-  virtual bool isStoreBitCastBeneficial(EVT StoreVT, EVT BitcastVT) const {
+  virtual bool isStoreBitCastBeneficial(EVT StoreVT, EVT BitcastVT,
+                                        const SelectionDAG &DAG,
+                                        const MachineMemOperand &MMO) const {
     // Default to the same logic as loads.
-    return isLoadBitCastBeneficial(StoreVT, BitcastVT);
+    return isLoadBitCastBeneficial(StoreVT, BitcastVT, DAG, MMO);
   }
 
   /// Return true if it is expected to be cheaper to do a store of a non-zero
@@ -427,10 +440,12 @@ public:
     return false;
   }
 
-  /// Allow store merging after legalization in addition to before legalization.
-  /// This may catch stores that do not exist earlier (eg, stores created from
-  /// intrinsics).
-  virtual bool mergeStoresAfterLegalization() const { return true; }
+  /// Allow store merging for the specified type after legalization in addition
+  /// to before legalization. This may transform stores that do not exist
+  /// earlier (for example, stores created from intrinsics).
+  virtual bool mergeStoresAfterLegalization(EVT MemVT) const {
+    return true;
+  }
 
   /// Returns if it's reasonable to merge stores to MemVT size.
   virtual bool canMergeStoresTo(unsigned AS, EVT MemVT,
@@ -556,6 +571,16 @@ public:
     return false;
   }
 
+  /// These two forms are equivalent:
+  ///   sub %y, (xor %x, -1)
+  ///   add (add %x, 1), %y
+  /// The variant with two add's is IR-canonical.
+  /// Some targets may prefer one to the other.
+  virtual bool preferIncOfAddToSubOfNot(EVT VT) const {
+    // By default, let's assume that everyone prefers the form with two add's.
+    return true;
+  }
+
   /// Return true if the target wants to use the optimization that
   /// turns ext(promotableInst1(...(promotableInstN(load)))) into
   /// promotedInst1(...(promotedInstN(ext(load)))).
@@ -573,11 +598,6 @@ public:
   /// vector is more efficiently handled by splatting the scalar instead.
   virtual bool shouldSplatInsEltVarIndex(EVT) const {
     return false;
-  }
-
-  /// Return true if target supports floating point exceptions.
-  bool hasFloatingPointExceptions() const {
-    return HasFloatingPointExceptions;
   }
 
   /// Return true if target always beneficiates from combining into FMA for a
@@ -634,10 +654,19 @@ public:
 
   /// Return the register class that should be used for the specified value
   /// type.
-  virtual const TargetRegisterClass *getRegClassFor(MVT VT) const {
+  virtual const TargetRegisterClass *getRegClassFor(MVT VT, bool isDivergent = false) const {
+    (void)isDivergent;
     const TargetRegisterClass *RC = RegClassForVT[VT.SimpleTy];
     assert(RC && "This value type is not natively supported!");
     return RC;
+  }
+
+  /// Allows target to decide about the register class of the
+  /// specific value that is live outside the defining block.
+  /// Returns true if the value needs uniform register class.
+  virtual bool requiresUniformRegister(MachineFunction &MF,
+                                       const Value *) const {
+    return false;
   }
 
   /// Return the 'representative' register class for the specified value
@@ -790,8 +819,8 @@ public:
   /// Returns true if the target can instruction select the specified FP
   /// immediate natively. If false, the legalizer will materialize the FP
   /// immediate as a load from a constant pool.
-  virtual bool isFPImmLegal(const APFloat &/*Imm*/, EVT /*VT*/,
-			    bool ForCodeSize = false) const {
+  virtual bool isFPImmLegal(const APFloat & /*Imm*/, EVT /*VT*/,
+                            bool ForCodeSize = false) const {
     return false;
   }
 
@@ -853,6 +882,7 @@ public:
     default:
       llvm_unreachable("Unexpected fixed point operation.");
     case ISD::SMULFIX:
+    case ISD::SMULFIXSAT:
     case ISD::UMULFIX:
       Supported = isSupportedFixedPointOperation(Op, VT, Scale);
       break;
@@ -889,6 +919,8 @@ public:
       case ISD::STRICT_FFLOOR: EqOpc = ISD::FFLOOR; break;
       case ISD::STRICT_FROUND: EqOpc = ISD::FROUND; break;
       case ISD::STRICT_FTRUNC: EqOpc = ISD::FTRUNC; break;
+      case ISD::STRICT_FP_ROUND: EqOpc = ISD::FP_ROUND; break;
+      case ISD::STRICT_FP_EXTEND: EqOpc = ISD::FP_EXTEND; break;
     }
 
     auto Action = getOperationAction(EqOpc, VT);
@@ -955,19 +987,20 @@ public:
 
   /// Return true if lowering to a jump table is suitable for a set of case
   /// clusters which may contain \p NumCases cases, \p Range range of values.
-  /// FIXME: This function check the maximum table size and density, but the
-  /// minimum size is not checked. It would be nice if the minimum size is
-  /// also combined within this function. Currently, the minimum size check is
-  /// performed in findJumpTable() in SelectionDAGBuiler and
-  /// getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
   virtual bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
                                       uint64_t Range) const {
+    // FIXME: This function check the maximum table size and density, but the
+    // minimum size is not checked. It would be nice if the minimum size is
+    // also combined within this function. Currently, the minimum size check is
+    // performed in findJumpTable() in SelectionDAGBuiler and
+    // getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
     const bool OptForSize = SI->getParent()->getParent()->hasOptSize();
     const unsigned MinDensity = getMinimumJumpTableDensity(OptForSize);
-    const unsigned MaxJumpTableSize =
-        OptForSize ? UINT_MAX : getMaximumJumpTableSize();
-    // Check whether a range of clusters is dense enough for a jump table.
-    if (Range <= MaxJumpTableSize &&
+    const unsigned MaxJumpTableSize = getMaximumJumpTableSize();
+    
+    // Check whether the number of cases is small enough and
+    // the range is dense enough for a jump table.
+    if ((OptForSize || Range <= MaxJumpTableSize) &&
         (NumCases * 100 >= Range * MinDensity)) {
       return true;
     }
@@ -1162,23 +1195,41 @@ public:
   EVT getValueType(const DataLayout &DL, Type *Ty,
                    bool AllowUnknown = false) const {
     // Lower scalar pointers to native pointer types.
-    if (PointerType *PTy = dyn_cast<PointerType>(Ty))
+    if (auto *PTy = dyn_cast<PointerType>(Ty))
       return getPointerTy(DL, PTy->getAddressSpace());
 
-    if (Ty->isVectorTy()) {
-      VectorType *VTy = cast<VectorType>(Ty);
-      Type *Elm = VTy->getElementType();
+    if (auto *VTy = dyn_cast<VectorType>(Ty)) {
+      Type *EltTy = VTy->getElementType();
       // Lower vectors of pointers to native pointer types.
+      if (auto *PTy = dyn_cast<PointerType>(EltTy)) {
+        EVT PointerTy(getPointerTy(DL, PTy->getAddressSpace()));
+        EltTy = PointerTy.getTypeForEVT(Ty->getContext());
+      }
+      return EVT::getVectorVT(Ty->getContext(), EVT::getEVT(EltTy, false),
+                              VTy->getNumElements());
+    }
+
+    return EVT::getEVT(Ty, AllowUnknown);
+  }
+
+  EVT getMemValueType(const DataLayout &DL, Type *Ty,
+                      bool AllowUnknown = false) const {
+    // Lower scalar pointers to native pointer types.
+    if (PointerType *PTy = dyn_cast<PointerType>(Ty))
+      return getPointerMemTy(DL, PTy->getAddressSpace());
+    else if (VectorType *VTy = dyn_cast<VectorType>(Ty)) {
+      Type *Elm = VTy->getElementType();
       if (PointerType *PT = dyn_cast<PointerType>(Elm)) {
-        EVT PointerTy(getPointerTy(DL, PT->getAddressSpace()));
+        EVT PointerTy(getPointerMemTy(DL, PT->getAddressSpace()));
         Elm = PointerTy.getTypeForEVT(Ty->getContext());
       }
-
       return EVT::getVectorVT(Ty->getContext(), EVT::getEVT(Elm, false),
                        VTy->getNumElements());
     }
-    return EVT::getEVT(Ty, AllowUnknown);
+
+    return getValueType(DL, Ty, AllowUnknown);
   }
+
 
   /// Return the MVT corresponding to this LLVM type. See getValueType.
   MVT getSimpleValueType(const DataLayout &DL, Type *Ty,
@@ -1349,18 +1400,6 @@ public:
     return OptSize ? MaxLoadsPerMemcmpOptSize : MaxLoadsPerMemcmp;
   }
 
-  /// For memcmp expansion when the memcmp result is only compared equal or
-  /// not-equal to 0, allow up to this number of load pairs per block. As an
-  /// example, this may allow 'memcmp(a, b, 3) == 0' in a single block:
-  ///   a0 = load2bytes &a[0]
-  ///   b0 = load2bytes &b[0]
-  ///   a2 = load1byte  &a[2]
-  ///   b2 = load1byte  &b[2]
-  ///   r  = cmp eq (a0 ^ b0 | a2 ^ b2), 0
-  virtual unsigned getMemcmpEqZeroLoadsPerBlock() const {
-    return 1;
-  }
-
   /// Get maximum # of store operations permitted for llvm.memmove
   ///
   /// This function returns the maximum number of store operations permitted
@@ -1380,10 +1419,10 @@ public:
   /// copy/move/set is converted to a sequence of store operations. Its use
   /// helps to ensure that such replacements don't generate code that causes an
   /// alignment error (trap) on the target machine.
-  virtual bool allowsMisalignedMemoryAccesses(EVT,
-                                              unsigned AddrSpace = 0,
-                                              unsigned Align = 1,
-                                              bool * /*Fast*/ = nullptr) const {
+  virtual bool allowsMisalignedMemoryAccesses(
+      EVT, unsigned AddrSpace = 0, unsigned Align = 1,
+      MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
+      bool * /*Fast*/ = nullptr) const {
     return false;
   }
 
@@ -1391,8 +1430,18 @@ public:
   /// given address space and alignment. If the access is allowed, the optional
   /// final parameter returns if the access is also fast (as defined by the
   /// target).
+  bool
+  allowsMemoryAccess(LLVMContext &Context, const DataLayout &DL, EVT VT,
+                     unsigned AddrSpace = 0, unsigned Alignment = 1,
+                     MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
+                     bool *Fast = nullptr) const;
+
+  /// Return true if the target supports a memory access of this type for the
+  /// given MachineMemOperand. If the access is allowed, the optional
+  /// final parameter returns if the access is also fast (as defined by the
+  /// target).
   bool allowsMemoryAccess(LLVMContext &Context, const DataLayout &DL, EVT VT,
-                          unsigned AddrSpace = 0, unsigned Alignment = 1,
+                          const MachineMemOperand &MMO,
                           bool *Fast = nullptr) const;
 
   /// Returns the target specific optimal type for load and store operations as
@@ -1406,12 +1455,11 @@ public:
   /// zero. 'MemcpyStrSrc' indicates whether the memcpy source is constant so it
   /// does not need to be loaded.  It returns EVT::Other if the type should be
   /// determined using generic target-independent logic.
-  virtual EVT getOptimalMemOpType(uint64_t /*Size*/,
-                                  unsigned /*DstAlign*/, unsigned /*SrcAlign*/,
-                                  bool /*IsMemset*/,
-                                  bool /*ZeroMemset*/,
-                                  bool /*MemcpyStrSrc*/,
-                                  MachineFunction &/*MF*/) const {
+  virtual EVT
+  getOptimalMemOpType(uint64_t /*Size*/, unsigned /*DstAlign*/,
+                      unsigned /*SrcAlign*/, bool /*IsMemset*/,
+                      bool /*ZeroMemset*/, bool /*MemcpyStrSrc*/,
+                      const AttributeList & /*FuncAttributes*/) const {
     return MVT::Other;
   }
 
@@ -1559,8 +1607,9 @@ public:
   }
 
   /// Returns true if a cast from SrcAS to DestAS is "cheap", such that e.g. we
-  /// are happy to sink it into basic blocks.
-  virtual bool isCheapAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
+  /// are happy to sink it into basic blocks. A cast may be free, but not
+  /// necessarily a no-op. e.g. a free truncate from a 64-bit to 32-bit pointer.
+  virtual bool isFreeAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
     return isNoopAddrSpaceCast(SrcAS, DestAS);
   }
 
@@ -1890,12 +1939,6 @@ protected:
   /// control.
   void setJumpIsExpensive(bool isExpensive = true);
 
-  /// Tells the code generator that this target supports floating point
-  /// exceptions and cares about preserving floating point exception behavior.
-  void setHasFloatingPointExceptions(bool FPExceptions = true) {
-    HasFloatingPointExceptions = FPExceptions;
-  }
-
   /// Tells the code generator which bitwidths to bypass.
   void addBypassSlowDiv(unsigned int SlowBitWidth, unsigned int FastBitWidth) {
     BypassSlowDivWidths[SlowBitWidth] = FastBitWidth;
@@ -2184,10 +2227,36 @@ public:
     case ISD::UADDSAT:
     case ISD::FMINNUM:
     case ISD::FMAXNUM:
+    case ISD::FMINNUM_IEEE:
+    case ISD::FMAXNUM_IEEE:
     case ISD::FMINIMUM:
     case ISD::FMAXIMUM:
       return true;
     default: return false;
+    }
+  }
+
+  /// Return true if the node is a math/logic binary operator.
+  virtual bool isBinOp(unsigned Opcode) const {
+    // A commutative binop must be a binop.
+    if (isCommutativeBinOp(Opcode))
+      return true;
+    // These are non-commutative binops.
+    switch (Opcode) {
+    case ISD::SUB:
+    case ISD::SHL:
+    case ISD::SRL:
+    case ISD::SRA:
+    case ISD::SDIV:
+    case ISD::UDIV:
+    case ISD::SREM:
+    case ISD::UREM:
+    case ISD::FSUB:
+    case ISD::FDIV:
+    case ISD::FREM:
+      return true;
+    default:
+      return false;
     }
   }
 
@@ -2554,10 +2623,6 @@ private:
   /// instructions and should attempt to combine flow control instructions via
   /// predication.
   bool JumpIsExpensive;
-
-  /// Whether the target supports or cares about preserving floating point
-  /// exception behavior.
-  bool HasFloatingPointExceptions;
 
   /// This target prefers to use _setjmp to implement llvm.setjmp.
   ///
@@ -2935,6 +3000,20 @@ public:
     }
   };
 
+  /// Determines the optimal series of memory ops to replace the memset / memcpy.
+  /// Return true if the number of memory ops is below the threshold (Limit).
+  /// It returns the types of the sequence of memory ops to perform
+  /// memset / memcpy by reference.
+  bool findOptimalMemOpLowering(std::vector<EVT> &MemOps,
+                                unsigned Limit, uint64_t Size,
+                                unsigned DstAlign, unsigned SrcAlign,
+                                bool IsMemset,
+                                bool ZeroMemset,
+                                bool MemcpyStrSrc,
+                                bool AllowOverlap,
+                                unsigned DstAS, unsigned SrcAS,
+                                const AttributeList &FuncAttributes) const;
+
   /// Check to see if the specified operand of the specified instruction is a
   /// constant integer.  If so, check to see if there are any bits set in the
   /// constant that are not demanded.  If so, shrink the constant and return
@@ -3059,6 +3138,10 @@ public:
                                                  KnownBits &Known,
                                                  TargetLoweringOpt &TLO,
                                                  unsigned Depth = 0) const;
+
+  /// This method returns the constant pool value that will be loaded by LD.
+  /// NOTE: You must check for implicit extensions of the constant by LD.
+  virtual const Constant *getTargetConstantFromLoad(LoadSDNode *LD) const;
 
   /// If \p SNaN is false, \returns true if \p Op is known to never be any
   /// NaN. If \p sNaN is true, returns if \p Op is known to never be a signaling
@@ -3480,6 +3563,15 @@ public:
     return false;
   }
 
+  /// For most targets, an LLVM type must be broken down into multiple
+  /// smaller types. Usually the halves are ordered according to the endianness
+  /// but for some platform that would break. So this method will default to
+  /// matching the endianness but can be overridden.
+  virtual bool
+  shouldSplitFunctionArgumentsAsLittleEndian(const DataLayout &DL) const {
+    return DL.isLittleEndian();
+  }
+
   /// Returns a 0 terminated array of registers that can be safely used as
   /// scratch registers.
   virtual const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const {
@@ -3898,6 +3990,16 @@ public:
   /// integers as its arguments.
   SDValue expandFixedPointMul(SDNode *Node, SelectionDAG &DAG) const;
 
+  /// Method for building the DAG expansion of ISD::U(ADD|SUB)O. Expansion
+  /// always suceeds and populates the Result and Overflow arguments.
+  void expandUADDSUBO(SDNode *Node, SDValue &Result, SDValue &Overflow,
+                      SelectionDAG &DAG) const;
+
+  /// Method for building the DAG expansion of ISD::S(ADD|SUB)O. Expansion
+  /// always suceeds and populates the Result and Overflow arguments.
+  void expandSADDSUBO(SDNode *Node, SDValue &Result, SDValue &Overflow,
+                      SelectionDAG &DAG) const;
+
   /// Method for building the DAG expansion of ISD::[US]MULO. Returns whether
   /// expansion was successful and populates the Result and Overflow arguments.
   bool expandMULO(SDNode *Node, SDValue &Result, SDValue &Overflow,
@@ -3967,6 +4069,14 @@ private:
                                                SDValue N1, ISD::CondCode Cond,
                                                DAGCombinerInfo &DCI,
                                                const SDLoc &DL) const;
+
+  SDValue prepareUREMEqFold(EVT SETCCVT, SDValue REMNode,
+                            SDValue CompTargetNode, ISD::CondCode Cond,
+                            DAGCombinerInfo &DCI, const SDLoc &DL,
+                            SmallVectorImpl<SDNode *> &Created) const;
+  SDValue buildUREMEqFold(EVT SETCCVT, SDValue REMNode, SDValue CompTargetNode,
+                          ISD::CondCode Cond, DAGCombinerInfo &DCI,
+                          const SDLoc &DL) const;
 };
 
 /// Given an LLVM IR type and return type attributes, compute the return value

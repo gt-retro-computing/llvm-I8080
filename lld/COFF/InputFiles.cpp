@@ -168,13 +168,15 @@ SectionChunk *ObjFile::readSection(uint32_t SectionNumber,
   const coff_section *Sec = getSection(SectionNumber);
 
   StringRef Name;
-  if (auto EC = COFFObj->getSectionName(Sec, Name))
+  if (Expected<StringRef> E = COFFObj->getSectionName(Sec))
+    Name = *E;
+  else
     fatal("getSectionName failed: #" + Twine(SectionNumber) + ": " +
-          EC.message());
+          toString(E.takeError()));
 
   if (Name == ".drectve") {
     ArrayRef<uint8_t> Data;
-    COFFObj->getSectionContents(Sec, Data);
+    cantFail(COFFObj->getSectionContents(Sec, Data));
     Directives = StringRef((const char *)Data.data(), Data.size());
     return nullptr;
   }
@@ -204,13 +206,17 @@ SectionChunk *ObjFile::readSection(uint32_t SectionNumber,
   if (Def)
     C->Checksum = Def->CheckSum;
 
+  // link.exe uses the presence of .rsrc$01 for LNK4078, so match that.
+  if (Name == ".rsrc$01")
+    IsResourceObjFile = true;
+
   // CodeView sections are stored to a different vector because they are not
   // linked in the regular manner.
   if (C->isCodeView())
     DebugChunks.push_back(C);
-  else if (Config->GuardCF != GuardCFLevel::Off && Name == ".gfids$y")
+  else if (Name == ".gfids$y")
     GuardFidChunks.push_back(C);
-  else if (Config->GuardCF != GuardCFLevel::Off && Name == ".gljmp$y")
+  else if (Name == ".gljmp$y")
     GuardLJmpChunks.push_back(C);
   else if (Name == ".sxdata")
     SXDataChunks.push_back(C);
@@ -242,7 +248,8 @@ void ObjFile::readAssociativeDefinition(COFFSymbolRef Sym,
     COFFObj->getSymbolName(Sym, Name);
 
     const coff_section *ParentSec = getSection(ParentIndex);
-    COFFObj->getSectionName(ParentSec, ParentName);
+    if (Expected<StringRef> E = COFFObj->getSectionName(ParentSec))
+      ParentName = *E;
     error(toString(this) + ": associative comdat " + Name + " (sec " +
           Twine(SectionNumber) + ") has invalid reference to section " +
           ParentName + " (sec " + Twine(ParentIndex) + ")");
@@ -281,6 +288,8 @@ void ObjFile::recordPrevailingSymbolForMingw(
   if (SC && SC->getOutputCharacteristics() & IMAGE_SCN_MEM_EXECUTE) {
     StringRef Name;
     COFFObj->getSymbolName(Sym, Name);
+    if (getMachineType() == I386)
+      Name.consume_front("_");
     PrevailingSectionMap[Name] = SectionNumber;
   }
 }
@@ -290,9 +299,10 @@ void ObjFile::maybeAssociateSEHForMingw(
     const DenseMap<StringRef, uint32_t> &PrevailingSectionMap) {
   StringRef Name;
   COFFObj->getSymbolName(Sym, Name);
-  if (Name.consume_front(".pdata$") || Name.consume_front(".xdata$")) {
-    // For MinGW, treat .[px]data$<func> as implicitly associative to
-    // the symbol <func>.
+  if (Name.consume_front(".pdata$") || Name.consume_front(".xdata$") ||
+      Name.consume_front(".eh_frame$")) {
+    // For MinGW, treat .[px]data$<func> and .eh_frame$<func> as implicitly
+    // associative to the symbol <func>.
     auto ParentSym = PrevailingSectionMap.find(Name);
     if (ParentSym != PrevailingSectionMap.end())
       readAssociativeDefinition(Sym, Def, ParentSym->second);
@@ -572,7 +582,7 @@ Optional<Symbol *> ObjFile::createDefined(
     }
     COMDATType Selection = (COMDATType)Def->Selection;
 
-    if (Leader->isCOMDAT())
+    if (Leader->IsCOMDAT)
       handleComdatSelection(Sym, Selection, Prevailing, Leader);
 
     if (Prevailing) {
@@ -664,7 +674,8 @@ void ObjFile::initializeFlags() {
 // types of external files: Precomp/PCH OBJs, when compiling with /Yc and /Yu.
 // And PDB type servers, when compiling with /Zi. This function extracts these
 // dependencies and makes them available as a TpiSource interface (see
-// DebugTypes.h).
+// DebugTypes.h). Both cases only happen with cl.exe: clang-cl produces regular
+// output even with /Yc and /Yu and with /Zi.
 void ObjFile::initializeDependencies() {
   if (!Config->Debug)
     return;
@@ -720,11 +731,10 @@ StringRef ltrim1(StringRef S, const char *Chars) {
 
 void ImportFile::parse() {
   const char *Buf = MB.getBufferStart();
-  const char *End = MB.getBufferEnd();
   const auto *Hdr = reinterpret_cast<const coff_import_header *>(Buf);
 
   // Check if the total size is valid.
-  if ((size_t)(End - Buf) != (sizeof(*Hdr) + Hdr->SizeOfData))
+  if (MB.getBufferSize() != sizeof(*Hdr) + Hdr->SizeOfData)
     fatal("broken import library");
 
   // Read names and create an __imp_ symbol.

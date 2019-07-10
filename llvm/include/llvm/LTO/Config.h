@@ -88,10 +88,16 @@ struct Config {
   /// The directory to store .dwo files.
   std::string DwoDir;
 
+  /// The name for the split debug info file used for the DW_AT_[GNU_]dwo_name
+  /// attribute in the skeleton CU. This should generally only be used when
+  /// running an individual backend directly via thinBackend(), as otherwise
+  /// all objects would use the same .dwo file. Not used as output path.
+  std::string SplitDwarfFile;
+
   /// The path to write a .dwo file to. This should generally only be used when
   /// running an individual backend directly via thinBackend(), as otherwise
-  /// all .dwo files will be written to the same path.
-  std::string DwoPath;
+  /// all .dwo files will be written to the same path. Not used in skeleton CU.
+  std::string SplitDwarfOutput;
 
   /// Optimization remarks file path.
   std::string RemarksFilename = "";
@@ -101,6 +107,9 @@ struct Config {
 
   /// Whether to emit optimization remarks with hotness informations.
   bool RemarksWithHotness = false;
+
+  /// The format used for serializing remarks (default: YAML).
+  std::string RemarksFormat = "";
 
   /// Whether to emit the pass manager debuggging informations.
   bool DebugPassManager = false;
@@ -141,7 +150,7 @@ struct Config {
   ///
   /// Note that in out-of-process backend scenarios, none of the hooks will be
   /// called for ThinLTO tasks.
-  typedef std::function<bool(unsigned Task, const Module &)> ModuleHookFn;
+  using ModuleHookFn = std::function<bool(unsigned Task, const Module &)>;
 
   /// This module hook is called after linking (regular LTO) or loading
   /// (ThinLTO) the module, before modifying it.
@@ -174,8 +183,8 @@ struct Config {
   ///
   /// It is called regardless of whether the backend is in-process, although it
   /// is not called from individual backend processes.
-  typedef std::function<bool(const ModuleSummaryIndex &Index)>
-      CombinedIndexHookFn;
+  using CombinedIndexHookFn =
+      std::function<bool(const ModuleSummaryIndex &Index)>;
   CombinedIndexHookFn CombinedIndexHook;
 
   /// This is a convenience function that configures this Config object to write

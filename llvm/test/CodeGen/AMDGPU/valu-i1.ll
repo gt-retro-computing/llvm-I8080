@@ -1,4 +1,4 @@
-; RUN: llc -march=amdgcn -verify-machineinstrs -enable-misched -asm-verbose < %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -verify-machineinstrs -enable-misched -asm-verbose -disable-block-placement < %s | FileCheck -check-prefix=SI %s
 
 declare i32 @llvm.amdgcn.workitem.id.x() nounwind readnone
 
@@ -66,6 +66,7 @@ end:
 ; SI: v_cmp_ne_u32_e32 vcc, 0, v{{[0-9]+}}
 ; SI: s_and_saveexec_b64 [[BR_SREG:s\[[0-9]+:[0-9]+\]]], vcc
 ; SI-NEXT: ; mask branch [[EXIT:BB[0-9]+_[0-9]+]]
+; SI-NEXT: s_cbranch_execz [[EXIT]]
 
 ; SI-NEXT: BB{{[0-9]+_[0-9]+}}:
 ; SI: buffer_store_dword
@@ -92,6 +93,7 @@ exit:
 ; SI: v_cmp_ne_u32_e32 vcc, 0, v{{[0-9]+}}
 ; SI: s_and_saveexec_b64 [[BR_SREG:s\[[0-9]+:[0-9]+\]]], vcc
 ; SI-NEXT: ; mask branch [[EXIT:BB[0-9]+_[0-9]+]]
+; SI-NEXT: s_cbranch_execz [[EXIT]]
 
 ; SI-NEXT: BB{{[0-9]+_[0-9]+}}:
 ; SI: buffer_store_dword
@@ -129,6 +131,7 @@ exit:
 ; SI-NEXT: s_or_saveexec_b64
 ; SI-NEXT: s_xor_b64 exec, exec
 ; SI-NEXT: ; mask branch [[UNIFIED_RETURN:BB[0-9]+_[0-9]+]]
+; SI-NEXT: s_cbranch_execz [[UNIFIED_RETURN]]
 
 ; SI-NEXT: {{^BB[0-9]+_[0-9]+}}: ; %then
 ; SI: s_waitcnt

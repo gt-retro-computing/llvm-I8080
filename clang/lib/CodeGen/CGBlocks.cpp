@@ -671,7 +671,7 @@ static void computeBlockInfo(CodeGenModule &CGM, CodeGenFunction *CGF,
   // Sort the layout by alignment.  We have to use a stable sort here
   // to get reproducible results.  There should probably be an
   // llvm::array_pod_stable_sort.
-  std::stable_sort(layout.begin(), layout.end());
+  llvm::stable_sort(layout);
 
   // Needed for blocks layout info.
   info.BlockHeaderForcedGapOffset = info.BlockSize;
@@ -1434,9 +1434,11 @@ static llvm::Constant *buildGlobalBlock(CodeGenModule &CGM,
   if (CGM.getContext().getLangOpts().OpenCL)
     AddrSpace = CGM.getContext().getTargetAddressSpace(LangAS::opencl_global);
 
-  llvm::Constant *literal = fields.finishAndCreateGlobal(
+  llvm::GlobalVariable *literal = fields.finishAndCreateGlobal(
       "__block_literal_global", blockInfo.BlockAlign,
       /*constant*/ !IsWindows, llvm::GlobalVariable::InternalLinkage, AddrSpace);
+
+  literal->addAttribute("objc_arc_inert");
 
   // Windows does not allow globals to be initialised to point to globals in
   // different DLLs.  Any such variables must run code to initialise them.

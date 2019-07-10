@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-- execution_defs.h --------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,6 +11,8 @@
 #define _PSTL_EXECUTION_POLICY_DEFS_H
 
 #include <type_traits>
+
+#include "pstl_config.h"
 
 namespace __pstl
 {
@@ -41,7 +43,6 @@ class sequenced_policy
     }
 };
 
-#if _PSTL_USE_PAR_POLICIES
 // 2.5, Parallel execution policy
 class parallel_policy
 {
@@ -85,7 +86,6 @@ class parallel_unsequenced_policy
         return std::true_type{};
     }
 };
-#endif
 
 class unsequenced_policy
 {
@@ -110,10 +110,8 @@ class unsequenced_policy
 
 // 2.8, Execution policy objects
 constexpr sequenced_policy seq{};
-#if _PSTL_USE_PAR_POLICIES
 constexpr parallel_policy par{};
 constexpr parallel_unsequenced_policy par_unseq{};
-#endif
 constexpr unsequenced_policy unseq{};
 
 // 2.3, Execution policy type trait
@@ -126,7 +124,6 @@ template <>
 struct is_execution_policy<__pstl::execution::sequenced_policy> : std::true_type
 {
 };
-#if _PSTL_USE_PAR_POLICIES
 template <>
 struct is_execution_policy<__pstl::execution::parallel_policy> : std::true_type
 {
@@ -135,7 +132,6 @@ template <>
 struct is_execution_policy<__pstl::execution::parallel_unsequenced_policy> : std::true_type
 {
 };
-#endif
 template <>
 struct is_execution_policy<__pstl::execution::unsequenced_policy> : std::true_type
 {

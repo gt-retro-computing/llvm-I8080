@@ -49,6 +49,8 @@ CommandObject::CommandObject(CommandInterpreter &interpreter, llvm::StringRef na
 
 CommandObject::~CommandObject() {}
 
+Debugger &CommandObject::GetDebugger() { return m_interpreter.GetDebugger(); }
+
 llvm::StringRef CommandObject::GetHelp() { return m_cmd_help_short; }
 
 llvm::StringRef CommandObject::GetHelpLong() { return m_cmd_help_long; }
@@ -1101,7 +1103,8 @@ CommandObject::ArgumentTableEntry CommandObject::g_arguments_data[] = {
 const CommandObject::ArgumentTableEntry *CommandObject::GetArgumentTable() {
   // If this assertion fires, then the table above is out of date with the
   // CommandArgumentType enumeration
-  assert((sizeof(CommandObject::g_arguments_data) /
-          sizeof(CommandObject::ArgumentTableEntry)) == eArgTypeLastArg);
+  static_assert((sizeof(CommandObject::g_arguments_data) /
+                 sizeof(CommandObject::ArgumentTableEntry)) == eArgTypeLastArg,
+                "");
   return CommandObject::g_arguments_data;
 }

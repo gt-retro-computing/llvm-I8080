@@ -12,8 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "MipsISelLowering.h"
-#include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "MCTargetDesc/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsMCTargetDesc.h"
 #include "MipsCCState.h"
 #include "MipsInstrInfo.h"
@@ -1203,8 +1203,9 @@ MipsTargetLowering::LowerOperationWrapper(SDNode *N,
                                           SelectionDAG &DAG) const {
   SDValue Res = LowerOperation(SDValue(N, 0), DAG);
 
-  for (unsigned I = 0, E = Res->getNumValues(); I != E; ++I)
-    Results.push_back(Res.getValue(I));
+  if (Res)
+    for (unsigned I = 0, E = Res->getNumValues(); I != E; ++I)
+      Results.push_back(Res.getValue(I));
 }
 
 void
@@ -4139,11 +4140,10 @@ MipsTargetLowering::isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const {
   return false;
 }
 
-EVT MipsTargetLowering::getOptimalMemOpType(uint64_t Size, unsigned DstAlign,
-                                            unsigned SrcAlign,
-                                            bool IsMemset, bool ZeroMemset,
-                                            bool MemcpyStrSrc,
-                                            MachineFunction &MF) const {
+EVT MipsTargetLowering::getOptimalMemOpType(
+    uint64_t Size, unsigned DstAlign, unsigned SrcAlign, bool IsMemset,
+    bool ZeroMemset, bool MemcpyStrSrc,
+    const AttributeList &FuncAttributes) const {
   if (Subtarget.hasMips64())
     return MVT::i64;
 

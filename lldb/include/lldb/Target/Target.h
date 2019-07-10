@@ -38,29 +38,29 @@ namespace lldb_private {
 
 OptionEnumValues GetDynamicValueTypes();
 
-typedef enum InlineStrategy {
+enum InlineStrategy {
   eInlineBreakpointsNever = 0,
   eInlineBreakpointsHeaders,
   eInlineBreakpointsAlways
-} InlineStrategy;
+};
 
-typedef enum LoadScriptFromSymFile {
+enum LoadScriptFromSymFile {
   eLoadScriptFromSymFileTrue,
   eLoadScriptFromSymFileFalse,
   eLoadScriptFromSymFileWarn
-} LoadScriptFromSymFile;
+};
 
-typedef enum LoadCWDlldbinitFile {
+enum LoadCWDlldbinitFile {
   eLoadCWDlldbinitTrue,
   eLoadCWDlldbinitFalse,
   eLoadCWDlldbinitWarn
-} LoadCWDlldbinitFile;
+};
 
-typedef enum LoadDependentFiles {
+enum LoadDependentFiles {
   eLoadDependentsDefault,
   eLoadDependentsYes,
   eLoadDependentsNo,
-} LoadDependentFiles;
+};
 
 // TargetProperties
 class TargetExperimentalProperties : public Properties {
@@ -119,11 +119,13 @@ public:
 
   PathMappingList &GetSourcePathMap() const;
 
-  FileSpecList &GetExecutableSearchPaths();
+  FileSpecList GetExecutableSearchPaths();
 
-  FileSpecList &GetDebugFileSearchPaths();
+  void AppendExecutableSearchPaths(const FileSpec&);
 
-  FileSpecList &GetClangModuleSearchPaths();
+  FileSpecList GetDebugFileSearchPaths();
+
+  FileSpecList GetClangModuleSearchPaths();
 
   bool GetEnableAutoImportClangModules() const;
 

@@ -59,9 +59,6 @@ public:
 
   Kind kind() const { return static_cast<Kind>(SymbolKind); }
 
-  // Returns true if this is an external symbol.
-  bool isExternal() { return IsExternal; }
-
   // Returns the symbol name.
   StringRef getName();
 
@@ -79,15 +76,16 @@ protected:
   explicit Symbol(Kind K, StringRef N = "")
       : SymbolKind(K), IsExternal(true), IsCOMDAT(false),
         WrittenToSymtab(false), PendingArchiveLoad(false), IsGCRoot(false),
-        IsRuntimePseudoReloc(false), Name(N) {}
+        IsRuntimePseudoReloc(false), NameSize(N.size()),
+        NameData(N.empty() ? nullptr : N.data()) {}
 
   const unsigned SymbolKind : 8;
   unsigned IsExternal : 1;
 
+public:
   // This bit is used by the \c DefinedRegular subclass.
   unsigned IsCOMDAT : 1;
 
-public:
   // This bit is used by Writer::createSymbolAndStringTable() to prevent
   // symbols from being written to the symbol table more than once.
   unsigned WrittenToSymtab : 1;
@@ -106,7 +104,10 @@ public:
   unsigned IsRuntimePseudoReloc : 1;
 
 protected:
-  StringRef Name;
+  // Symbol name length. Assume symbol lengths fit in a 32-bit integer.
+  uint32_t NameSize;
+
+  const char *NameData;
 };
 
 // The base class for any defined symbols, including absolute symbols,
@@ -129,7 +130,7 @@ public:
 // Symbols defined via a COFF object file or bitcode file.  For COFF files, this
 // stores a coff_symbol_generic*, and names of internal symbols are lazily
 // loaded through that. For bitcode files, Sym is nullptr and the name is stored
-// as a StringRef.
+// as a decomposed StringRef.
 class DefinedCOFF : public Defined {
   friend Symbol;
 
@@ -168,7 +169,6 @@ public:
   }
 
   uint64_t getRVA() const { return (*Data)->getRVA() + Sym->Value; }
-  bool isCOMDAT() const { return IsCOMDAT; }
   SectionChunk *getChunk() const { return *Data; }
   uint32_t getValue() const { return Sym->Value; }
 

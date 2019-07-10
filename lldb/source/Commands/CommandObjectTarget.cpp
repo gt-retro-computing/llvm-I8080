@@ -314,7 +314,7 @@ protected:
 
       bool must_set_platform_path = false;
 
-      Debugger &debugger = m_interpreter.GetDebugger();
+      Debugger &debugger = GetDebugger();
 
       TargetSP target_sp;
       llvm::StringRef arch_cstr = m_arch_option.GetArchitectureName();
@@ -410,11 +410,10 @@ protected:
             }
             FileSpec core_file_dir;
             core_file_dir.GetDirectory() = core_file.GetDirectory();
-            target_sp->GetExecutableSearchPaths().Append(core_file_dir);
+            target_sp->AppendExecutableSearchPaths(core_file_dir);
 
             ProcessSP process_sp(target_sp->CreateProcess(
-                m_interpreter.GetDebugger().GetListener(), llvm::StringRef(),
-                &core_file));
+                GetDebugger().GetListener(), llvm::StringRef(), &core_file));
 
             if (process_sp) {
               // Seems weird that we Launch a core file, but that is what we
@@ -492,7 +491,7 @@ protected:
       Stream &strm = result.GetOutputStream();
 
       bool show_stopped_process_status = false;
-      if (DumpTargetList(m_interpreter.GetDebugger().GetTargetList(),
+      if (DumpTargetList(GetDebugger().GetTargetList(),
                          show_stopped_process_status, strm) == 0) {
         strm.PutCString("No targets.\n");
       }
@@ -527,7 +526,7 @@ protected:
       uint32_t target_idx =
           StringConvert::ToUInt32(target_idx_arg, UINT32_MAX, 0, &success);
       if (success) {
-        TargetList &target_list = m_interpreter.GetDebugger().GetTargetList();
+        TargetList &target_list = GetDebugger().GetTargetList();
         const uint32_t num_targets = target_list.GetNumTargets();
         if (target_idx < num_targets) {
           TargetSP target_sp(target_list.GetTargetAtIndex(target_idx));
@@ -603,7 +602,7 @@ protected:
   bool DoExecute(Args &args, CommandReturnObject &result) override {
     const size_t argc = args.GetArgumentCount();
     std::vector<TargetSP> delete_target_list;
-    TargetList &target_list = m_interpreter.GetDebugger().GetTargetList();
+    TargetList &target_list = GetDebugger().GetTargetList();
     TargetSP target_sp;
 
     if (m_all_option.GetOptionValue()) {
@@ -1054,7 +1053,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target) {
       const size_t argc = command.GetArgumentCount();
       if (argc & 1) {
@@ -1108,7 +1107,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target) {
       bool notify = true;
       target->GetImageSearchPathList().Clear(notify);
@@ -1169,7 +1168,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target) {
       size_t argc = command.GetArgumentCount();
       // check for at least 3 arguments and an odd number of parameters
@@ -1237,7 +1236,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target) {
       if (command.GetArgumentCount() != 0) {
         result.AppendError("list takes no arguments\n");
@@ -1283,7 +1282,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target) {
       if (command.GetArgumentCount() != 1) {
         result.AppendError("query requires one argument\n");
@@ -1909,7 +1908,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2025,7 +2024,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2126,7 +2125,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2219,7 +2218,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2296,7 +2295,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2551,7 +2550,7 @@ protected:
   OptionGroupFile m_symbol_file;
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -2714,7 +2713,7 @@ public:
 
 protected:
   bool DoExecute(Args &args, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     const bool load = m_load_option.GetOptionValue().GetCurrentValue();
     const bool set_pc = m_pc_option.GetOptionValue().GetCurrentValue();
     if (target == nullptr) {
@@ -3049,7 +3048,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     const bool use_global_module_list = m_options.m_use_global_module_list;
     // Define a local module list here to ensure it lives longer than any
     // "locker" object which might lock its contents below (through the
@@ -3515,14 +3514,14 @@ protected:
           funcname.AsCString(), start_addr);
 
       UnwindPlanSP non_callsite_unwind_plan =
-          func_unwinders_sp->GetUnwindPlanAtNonCallSite(*target, *thread, -1);
+          func_unwinders_sp->GetUnwindPlanAtNonCallSite(*target, *thread);
       if (non_callsite_unwind_plan) {
         result.GetOutputStream().Printf(
             "Asynchronous (not restricted to call-sites) UnwindPlan is '%s'\n",
             non_callsite_unwind_plan->GetSourceName().AsCString());
       }
       UnwindPlanSP callsite_unwind_plan =
-          func_unwinders_sp->GetUnwindPlanAtCallSite(*target, -1);
+          func_unwinders_sp->GetUnwindPlanAtCallSite(*target, *thread);
       if (callsite_unwind_plan) {
         result.GetOutputStream().Printf(
             "Synchronous (restricted to call-sites) UnwindPlan is '%s'\n",
@@ -3539,7 +3538,7 @@ protected:
       result.GetOutputStream().Printf("\n");
 
       UnwindPlanSP assembly_sp =
-          func_unwinders_sp->GetAssemblyUnwindPlan(*target, *thread, 0);
+          func_unwinders_sp->GetAssemblyUnwindPlan(*target, *thread);
       if (assembly_sp) {
         result.GetOutputStream().Printf(
             "Assembly language inspection UnwindPlan:\n");
@@ -3549,7 +3548,7 @@ protected:
       }
 
       UnwindPlanSP ehframe_sp =
-          func_unwinders_sp->GetEHFrameUnwindPlan(*target, 0);
+          func_unwinders_sp->GetEHFrameUnwindPlan(*target);
       if (ehframe_sp) {
         result.GetOutputStream().Printf("eh_frame UnwindPlan:\n");
         ehframe_sp->Dump(result.GetOutputStream(), thread.get(),
@@ -3558,7 +3557,7 @@ protected:
       }
 
       UnwindPlanSP ehframe_augmented_sp =
-          func_unwinders_sp->GetEHFrameAugmentedUnwindPlan(*target, *thread, 0);
+          func_unwinders_sp->GetEHFrameAugmentedUnwindPlan(*target, *thread);
       if (ehframe_augmented_sp) {
         result.GetOutputStream().Printf("eh_frame augmented UnwindPlan:\n");
         ehframe_augmented_sp->Dump(result.GetOutputStream(), thread.get(),
@@ -3567,7 +3566,7 @@ protected:
       }
 
       if (UnwindPlanSP plan_sp =
-              func_unwinders_sp->GetDebugFrameUnwindPlan(*target, 0)) {
+              func_unwinders_sp->GetDebugFrameUnwindPlan(*target)) {
         result.GetOutputStream().Printf("debug_frame UnwindPlan:\n");
         plan_sp->Dump(result.GetOutputStream(), thread.get(),
                       LLDB_INVALID_ADDRESS);
@@ -3576,7 +3575,7 @@ protected:
 
       if (UnwindPlanSP plan_sp =
               func_unwinders_sp->GetDebugFrameAugmentedUnwindPlan(*target,
-                                                                  *thread, 0)) {
+                                                                  *thread)) {
         result.GetOutputStream().Printf("debug_frame augmented UnwindPlan:\n");
         plan_sp->Dump(result.GetOutputStream(), thread.get(),
                       LLDB_INVALID_ADDRESS);
@@ -3584,7 +3583,7 @@ protected:
       }
 
       UnwindPlanSP arm_unwind_sp =
-          func_unwinders_sp->GetArmUnwindUnwindPlan(*target, 0);
+          func_unwinders_sp->GetArmUnwindUnwindPlan(*target);
       if (arm_unwind_sp) {
         result.GetOutputStream().Printf("ARM.exidx unwind UnwindPlan:\n");
         arm_unwind_sp->Dump(result.GetOutputStream(), thread.get(),
@@ -3592,8 +3591,16 @@ protected:
         result.GetOutputStream().Printf("\n");
       }
 
+      if (UnwindPlanSP symfile_plan_sp =
+              func_unwinders_sp->GetSymbolFileUnwindPlan(*thread)) {
+        result.GetOutputStream().Printf("Symbol file UnwindPlan:\n");
+        symfile_plan_sp->Dump(result.GetOutputStream(), thread.get(),
+                              LLDB_INVALID_ADDRESS);
+        result.GetOutputStream().Printf("\n");
+      }
+
       UnwindPlanSP compact_unwind_sp =
-          func_unwinders_sp->GetCompactUnwindUnwindPlan(*target, 0);
+          func_unwinders_sp->GetCompactUnwindUnwindPlan(*target);
       if (compact_unwind_sp) {
         result.GetOutputStream().Printf("Compact unwind UnwindPlan:\n");
         compact_unwind_sp->Dump(result.GetOutputStream(), thread.get(),
@@ -3733,7 +3740,7 @@ public:
         break;
 
       case 'v':
-        m_verbose = 1;
+        m_verbose = true;
         break;
 
       case 'A':
@@ -3929,7 +3936,7 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+    Target *target = GetDebugger().GetSelectedTarget().get();
     if (target == nullptr) {
       result.AppendError("invalid target, create a debug target using the "
                          "'target create' command");
@@ -4711,7 +4718,7 @@ protected:
                            m_stop_hook_sp->GetID());
           error_sp->Flush();
         }
-        Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
+        Target *target = GetDebugger().GetSelectedTarget().get();
         if (target)
           target->RemoveStopHookByID(m_stop_hook_sp->GetID());
       } else {
@@ -4738,8 +4745,8 @@ protected:
       //  First step, make the specifier.
       std::unique_ptr<SymbolContextSpecifier> specifier_up;
       if (m_options.m_sym_ctx_specified) {
-        specifier_up.reset(new SymbolContextSpecifier(
-            m_interpreter.GetDebugger().GetSelectedTarget()));
+        specifier_up.reset(
+            new SymbolContextSpecifier(GetDebugger().GetSelectedTarget()));
 
         if (!m_options.m_module_name.empty()) {
           specifier_up->AddSpecification(

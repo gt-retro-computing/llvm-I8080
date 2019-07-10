@@ -176,10 +176,6 @@ static cl::opt<bool>
 DisableLoopUnrolling("disable-loop-unrolling",
                      cl::desc("Disable loop unrolling in all relevant passes"),
                      cl::init(false));
-static cl::opt<bool>
-DisableLoopVectorization("disable-loop-vectorization",
-                     cl::desc("Disable the loop vectorization pass"),
-                     cl::init(false));
 
 static cl::opt<bool>
 DisableSLPVectorization("disable-slp-vectorization",
@@ -255,19 +251,20 @@ static cl::opt<bool> Coroutines(
   cl::desc("Enable coroutine passes."),
   cl::init(false), cl::Hidden);
 
-static cl::opt<bool> PassRemarksWithHotness(
+static cl::opt<bool> RemarksWithHotness(
     "pass-remarks-with-hotness",
     cl::desc("With PGO, include profile count in optimization remarks"),
     cl::Hidden);
 
-static cl::opt<unsigned> PassRemarksHotnessThreshold(
-    "pass-remarks-hotness-threshold",
-    cl::desc("Minimum profile count required for an optimization remark to be output"),
-    cl::Hidden);
+static cl::opt<unsigned>
+    RemarksHotnessThreshold("pass-remarks-hotness-threshold",
+                            cl::desc("Minimum profile count required for "
+                                     "an optimization remark to be output"),
+                            cl::Hidden);
 
 static cl::opt<std::string>
     RemarksFilename("pass-remarks-output",
-                    cl::desc("YAML output filename for pass remarks"),
+                    cl::desc("Output filename for pass remarks"),
                     cl::value_desc("filename"));
 
 static cl::opt<std::string>
@@ -275,6 +272,11 @@ static cl::opt<std::string>
                   cl::desc("Only record optimization remarks from passes whose "
                            "names match the given regular expression"),
                   cl::value_desc("regex"));
+
+static cl::opt<std::string> RemarksFormat(
+    "pass-remarks-format",
+    cl::desc("The format used for serializing remarks (default: YAML)"),
+    cl::value_desc("format"), cl::init("yaml"));
 
 cl::opt<PGOKind>
     PGOKindFlag("pgo-kind", cl::init(NoPGO), cl::Hidden,
@@ -381,11 +383,13 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
                                DisableLoopUnrolling : OptLevel == 0;
 
-  // This is final, unless there is a #pragma vectorize enable
-  if (DisableLoopVectorization)
-    Builder.LoopVectorize = false;
-  // If option wasn't forced via cmd line (-vectorize-loops, -loop-vectorize)
-  else if (!Builder.LoopVectorize)
+  // Check if vectorization is explicitly disabled via -vectorize-loops=false.
+  // The flag enables vectorization in the LoopVectorize pass, it is on by
+  // default, and if it was disabled, leave it disabled here.
+  // Another flag that exists: -loop-vectorize, controls adding the pass to the
+  // pass manager. If set, the pass is added, and there is no additional check
+  // here for it.
+  if (Builder.LoopVectorize)
     Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
 
   // When #pragma vectorize is on for SLP, do the same as above
@@ -519,6 +523,7 @@ int main(int argc, char **argv) {
   initializeDwarfEHPreparePass(Registry);
   initializeSafeStackLegacyPassPass(Registry);
   initializeSjLjEHPreparePass(Registry);
+  initializeStackProtectorPass(Registry);
   initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
   initializeGlobalMergePass(Registry);
   initializeIndirectBrExpandPassPass(Registry);
@@ -530,6 +535,7 @@ int main(int argc, char **argv) {
   initializeExpandReductionsPass(Registry);
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
+  initializeHardwareLoopsPass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);
@@ -549,30 +555,15 @@ int main(int argc, char **argv) {
   if (!DisableDITypeMap)
     Context.enableDebugTypeODRUniquing();
 
-  if (PassRemarksWithHotness)
-    Context.setDiagnosticsHotnessRequested(true);
-
-  if (PassRemarksHotnessThreshold)
-    Context.setDiagnosticsHotnessThreshold(PassRemarksHotnessThreshold);
-
-  std::unique_ptr<ToolOutputFile> OptRemarkFile;
-  if (RemarksFilename != "") {
-    std::error_code EC;
-    OptRemarkFile =
-        llvm::make_unique<ToolOutputFile>(RemarksFilename, EC, sys::fs::F_None);
-    if (EC) {
-      errs() << EC.message() << '\n';
-      return 1;
-    }
-    Context.setRemarkStreamer(llvm::make_unique<RemarkStreamer>(
-        RemarksFilename, OptRemarkFile->os()));
-
-    if (!RemarksPasses.empty())
-      if (Error E = Context.getRemarkStreamer()->setFilter(RemarksPasses)) {
-        errs() << E << '\n';
-        return 1;
-      }
+  Expected<std::unique_ptr<ToolOutputFile>> RemarksFileOrErr =
+      setupOptimizationRemarks(Context, RemarksFilename, RemarksPasses,
+                               RemarksFormat, RemarksWithHotness,
+                               RemarksHotnessThreshold);
+  if (Error E = RemarksFileOrErr.takeError()) {
+    errs() << toString(std::move(E)) << '\n';
+    return 1;
   }
+  std::unique_ptr<ToolOutputFile> RemarksFile = std::move(*RemarksFileOrErr);
 
   // Load the input module...
   std::unique_ptr<Module> M =
@@ -686,7 +677,7 @@ int main(int argc, char **argv) {
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
     return runPassPipeline(argv[0], *M, TM.get(), Out.get(), ThinLinkOut.get(),
-                           OptRemarkFile.get(), PassPipeline, OK, VK,
+                           RemarksFile.get(), PassPipeline, OK, VK,
                            PreserveAssemblyUseListOrder,
                            PreserveBitcodeUseListOrder, EmitSummaryIndex,
                            EmitModuleHash, EnableDebugify)
@@ -922,8 +913,8 @@ int main(int argc, char **argv) {
              "the compile-twice option\n";
       Out->os() << BOS->str();
       Out->keep();
-      if (OptRemarkFile)
-        OptRemarkFile->keep();
+      if (RemarksFile)
+        RemarksFile->keep();
       return 1;
     }
     Out->os() << BOS->str();
@@ -936,8 +927,8 @@ int main(int argc, char **argv) {
   if (!NoOutput || PrintBreakpoints)
     Out->keep();
 
-  if (OptRemarkFile)
-    OptRemarkFile->keep();
+  if (RemarksFile)
+    RemarksFile->keep();
 
   if (ThinLinkOut)
     ThinLinkOut->keep();

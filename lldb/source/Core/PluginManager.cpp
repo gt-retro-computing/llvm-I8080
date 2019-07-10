@@ -828,6 +828,7 @@ struct LanguageRuntimeInstance {
   std::string description;
   LanguageRuntimeCreateInstance create_callback;
   LanguageRuntimeGetCommandObject command_callback;
+  LanguageRuntimeGetExceptionPrecondition precondition_callback;
 };
 
 typedef std::vector<LanguageRuntimeInstance> LanguageRuntimeInstances;
@@ -845,7 +846,8 @@ static LanguageRuntimeInstances &GetLanguageRuntimeInstances() {
 bool PluginManager::RegisterPlugin(
     ConstString name, const char *description,
     LanguageRuntimeCreateInstance create_callback,
-    LanguageRuntimeGetCommandObject command_callback) {
+    LanguageRuntimeGetCommandObject command_callback,
+    LanguageRuntimeGetExceptionPrecondition precondition_callback) {
   if (create_callback) {
     LanguageRuntimeInstance instance;
     assert((bool)name);
@@ -854,6 +856,7 @@ bool PluginManager::RegisterPlugin(
       instance.description = description;
     instance.create_callback = create_callback;
     instance.command_callback = command_callback;
+    instance.precondition_callback = precondition_callback;
     std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
     GetLanguageRuntimeInstances().push_back(instance);
   }
@@ -892,6 +895,15 @@ PluginManager::GetLanguageRuntimeGetCommandObjectAtIndex(uint32_t idx) {
   LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
   if (idx < instances.size())
     return instances[idx].command_callback;
+  return nullptr;
+}
+
+LanguageRuntimeGetExceptionPrecondition
+PluginManager::GetLanguageRuntimeGetExceptionPreconditionAtIndex(uint32_t idx) {
+  std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
+  LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
+  if (idx < instances.size())
+    return instances[idx].precondition_callback;
   return nullptr;
 }
 
@@ -1516,8 +1528,9 @@ PluginManager::GetScriptInterpreterCreateCallbackAtIndex(uint32_t idx) {
   return nullptr;
 }
 
-lldb::ScriptInterpreterSP PluginManager::GetScriptInterpreterForLanguage(
-    lldb::ScriptLanguage script_lang, CommandInterpreter &interpreter) {
+lldb::ScriptInterpreterSP
+PluginManager::GetScriptInterpreterForLanguage(lldb::ScriptLanguage script_lang,
+                                               Debugger &debugger) {
   std::lock_guard<std::recursive_mutex> guard(GetScriptInterpreterMutex());
   ScriptInterpreterInstances &instances = GetScriptInterpreterInstances();
 
@@ -1528,12 +1541,12 @@ lldb::ScriptInterpreterSP PluginManager::GetScriptInterpreterForLanguage(
       none_instance = pos->create_callback;
 
     if (script_lang == pos->language)
-      return pos->create_callback(interpreter);
+      return pos->create_callback(debugger);
   }
 
   // If we didn't find one, return the ScriptInterpreter for the null language.
   assert(none_instance != nullptr);
-  return none_instance(interpreter);
+  return none_instance(debugger);
 }
 
 #pragma mark -

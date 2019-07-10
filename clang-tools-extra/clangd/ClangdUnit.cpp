@@ -20,6 +20,8 @@
 #include "index/Index.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -34,6 +36,7 @@
 #include "clang/Serialization/ASTWriter.h"
 #include "clang/Serialization/PCHContainerOperations.h"
 #include "clang/Tooling/CompilationDatabase.h"
+#include "clang/Tooling/Syntax/Tokens.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
@@ -64,7 +67,8 @@ public:
 
   bool HandleTopLevelDecl(DeclGroupRef DG) override {
     for (Decl *D : DG) {
-      if (D->isFromASTFile())
+      auto &SM = D->getASTContext().getSourceManager();
+      if (!SM.isWrittenInMainFile(SM.getExpansionLoc(D->getLocation())))
         continue;
 
       // ObjCMethodDecl are not actually top-level decls.
@@ -94,14 +98,46 @@ private:
   std::vector<Decl *> TopLevelDecls;
 };
 
+class CollectMainFileMacros : public PPCallbacks {
+public:
+  explicit CollectMainFileMacros(const SourceManager &SM,
+                                 std::vector<std::string> *Out)
+      : SM(SM), Out(Out) {}
+
+  void FileChanged(SourceLocation Loc, FileChangeReason,
+                   SrcMgr::CharacteristicKind, FileID Prev) {
+    InMainFile = SM.isWrittenInMainFile(Loc);
+  }
+
+  void MacroDefined(const Token &MacroName, const MacroDirective *MD) {
+    if (InMainFile)
+      MainFileMacros.insert(MacroName.getIdentifierInfo()->getName());
+  }
+
+  void EndOfMainFile() {
+    for (const auto &Entry : MainFileMacros)
+      Out->push_back(Entry.getKey());
+    llvm::sort(*Out);
+  }
+
+private:
+  const SourceManager &SM;
+  bool InMainFile = true;
+  llvm::StringSet<> MainFileMacros;
+  std::vector<std::string> *Out;
+};
+
 class CppFilePreambleCallbacks : public PreambleCallbacks {
 public:
   CppFilePreambleCallbacks(PathRef File, PreambleParsedCallback ParsedCallback)
       : File(File), ParsedCallback(ParsedCallback) {
-    addSystemHeadersMapping(&CanonIncludes);
   }
 
   IncludeStructure takeIncludes() { return std::move(Includes); }
+
+  std::vector<std::string> takeMainFileMacros() {
+    return std::move(MainFileMacros);
+  }
 
   CanonicalIncludes takeCanonicalIncludes() { return std::move(CanonIncludes); }
 
@@ -113,12 +149,15 @@ public:
   }
 
   void BeforeExecute(CompilerInstance &CI) override {
+    addSystemHeadersMapping(&CanonIncludes, CI.getLangOpts());
     SourceMgr = &CI.getSourceManager();
   }
 
   std::unique_ptr<PPCallbacks> createPPCallbacks() override {
     assert(SourceMgr && "SourceMgr must be set at this point");
-    return collectIncludeStructureCallback(*SourceMgr, &Includes);
+    return llvm::make_unique<PPChainedCallbacks>(
+        collectIncludeStructureCallback(*SourceMgr, &Includes),
+        llvm::make_unique<CollectMainFileMacros>(*SourceMgr, &MainFileMacros));
   }
 
   CommentHandler *getCommentHandler() override {
@@ -131,6 +170,7 @@ private:
   PreambleParsedCallback ParsedCallback;
   IncludeStructure Includes;
   CanonicalIncludes CanonIncludes;
+  std::vector<std::string> MainFileMacros;
   std::unique_ptr<CommentHandler> IWYUHandler = nullptr;
   SourceManager *SourceMgr = nullptr;
 };
@@ -294,6 +334,38 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
     CTContext->setASTContext(&Clang->getASTContext());
     CTContext->setCurrentFile(MainInput.getFile());
     CTFactories.createChecks(CTContext.getPointer(), CTChecks);
+    ASTDiags.setLevelAdjuster([&CTContext](DiagnosticsEngine::Level DiagLevel,
+                                           const clang::Diagnostic &Info) {
+      if (CTContext) {
+        std::string CheckName = CTContext->getCheckName(Info.getID());
+        bool IsClangTidyDiag = !CheckName.empty();
+        if (IsClangTidyDiag) {
+          // Check for warning-as-error.
+          // We deliberately let this take precedence over suppression comments
+          // to match clang-tidy's behaviour.
+          if (DiagLevel == DiagnosticsEngine::Warning &&
+              CTContext->treatAsError(CheckName)) {
+            return DiagnosticsEngine::Error;
+          }
+
+          // Check for suppression comment. Skip the check for diagnostics not
+          // in the main file, because we don't want that function to query the
+          // source buffer for preamble files. For the same reason, we ask
+          // ShouldSuppressDiagnostic not to follow macro expansions, since
+          // those might take us into a preamble file as well.
+          bool IsInsideMainFile =
+              Info.hasSourceManager() &&
+              Info.getSourceManager().isWrittenInMainFile(
+                  Info.getSourceManager().getFileLoc(Info.getLocation()));
+          if (IsInsideMainFile && tidy::ShouldSuppressDiagnostic(
+                                      DiagLevel, Info, *CTContext,
+                                      /* CheckMacroExpansion = */ false)) {
+            return DiagnosticsEngine::Ignored;
+          }
+        }
+      }
+      return DiagLevel;
+    });
     Preprocessor *PP = &Clang->getPreprocessor();
     for (const auto &Check : CTChecks) {
       // FIXME: the PP callbacks skip the entire preamble.
@@ -343,14 +415,22 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   if (Preamble)
     CanonIncludes = Preamble->CanonIncludes;
   else
-    addSystemHeadersMapping(&CanonIncludes);
+    addSystemHeadersMapping(&CanonIncludes, Clang->getLangOpts());
   std::unique_ptr<CommentHandler> IWYUHandler =
       collectIWYUHeaderMaps(&CanonIncludes);
   Clang->getPreprocessor().addCommentHandler(IWYUHandler.get());
 
-  if (!Action->Execute())
-    log("Execute() failed when building AST for {0}", MainInput.getFile());
+  // Collect tokens of the main file.
+  syntax::TokenCollector CollectTokens(Clang->getPreprocessor());
 
+  if (llvm::Error Err = Action->Execute())
+    log("Execute() failed when building AST for {0}: {1}", MainInput.getFile(),
+        toString(std::move(Err)));
+
+  // We have to consume the tokens before running clang-tidy to avoid collecting
+  // tokens from running the preprocessor inside the checks (only
+  // modernize-use-trailing-return-type does that today).
+  syntax::TokenBuffer Tokens = std::move(CollectTokens).consume();
   std::vector<Decl *> ParsedDecls = Action->takeTopLevelDecls();
   // AST traversals should exclude the preamble, to avoid performance cliffs.
   Clang->getASTContext().setTraversalScope(ParsedDecls);
@@ -376,7 +456,7 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   if (Preamble)
     Diags.insert(Diags.begin(), Preamble->Diags.begin(), Preamble->Diags.end());
   return ParsedAST(std::move(Preamble), std::move(Clang), std::move(Action),
-                   std::move(ParsedDecls), std::move(Diags),
+                   std::move(Tokens), std::move(ParsedDecls), std::move(Diags),
                    std::move(Includes), std::move(CanonIncludes));
 }
 
@@ -459,20 +539,24 @@ const CanonicalIncludes &ParsedAST::getCanonicalIncludes() const {
 
 PreambleData::PreambleData(PrecompiledPreamble Preamble,
                            std::vector<Diag> Diags, IncludeStructure Includes,
+                           std::vector<std::string> MainFileMacros,
                            std::unique_ptr<PreambleFileStatusCache> StatCache,
                            CanonicalIncludes CanonIncludes)
     : Preamble(std::move(Preamble)), Diags(std::move(Diags)),
-      Includes(std::move(Includes)), StatCache(std::move(StatCache)),
-      CanonIncludes(std::move(CanonIncludes)) {}
+      Includes(std::move(Includes)), MainFileMacros(std::move(MainFileMacros)),
+      StatCache(std::move(StatCache)), CanonIncludes(std::move(CanonIncludes)) {
+}
 
 ParsedAST::ParsedAST(std::shared_ptr<const PreambleData> Preamble,
                      std::unique_ptr<CompilerInstance> Clang,
                      std::unique_ptr<FrontendAction> Action,
+                     syntax::TokenBuffer Tokens,
                      std::vector<Decl *> LocalTopLevelDecls,
                      std::vector<Diag> Diags, IncludeStructure Includes,
                      CanonicalIncludes CanonIncludes)
     : Preamble(std::move(Preamble)), Clang(std::move(Clang)),
-      Action(std::move(Action)), Diags(std::move(Diags)),
+      Action(std::move(Action)), Tokens(std::move(Tokens)),
+      Diags(std::move(Diags)),
       LocalTopLevelDecls(std::move(LocalTopLevelDecls)),
       Includes(std::move(Includes)), CanonIncludes(std::move(CanonIncludes)) {
   assert(this->Clang);
@@ -542,7 +626,8 @@ buildPreamble(PathRef FileName, CompilerInvocation &CI,
     std::vector<Diag> Diags = PreambleDiagnostics.take();
     return std::make_shared<PreambleData>(
         std::move(*BuiltPreamble), std::move(Diags),
-        SerializedDeclsCollector.takeIncludes(), std::move(StatCache),
+        SerializedDeclsCollector.takeIncludes(),
+        SerializedDeclsCollector.takeMainFileMacros(), std::move(StatCache),
         SerializedDeclsCollector.takeCanonicalIncludes());
   } else {
     elog("Could not build a preamble for file {0}", FileName);
@@ -572,8 +657,8 @@ buildAST(PathRef FileName, std::unique_ptr<CompilerInvocation> Invocation,
                           std::move(VFS), Inputs.Index, Inputs.Opts);
 }
 
-SourceLocation getBeginningOfIdentifier(ParsedAST &Unit, const Position &Pos,
-                                        const FileID FID) {
+SourceLocation getBeginningOfIdentifier(const ParsedAST &Unit,
+                                        const Position &Pos, const FileID FID) {
   const ASTContext &AST = Unit.getASTContext();
   const SourceManager &SourceMgr = AST.getSourceManager();
   auto Offset = positionToOffset(SourceMgr.getBufferData(FID), Pos);

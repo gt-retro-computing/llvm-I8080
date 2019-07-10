@@ -33,6 +33,7 @@
 ; CHECK-NEXT:     Interprocedural Sparse Conditional Constant Propagation
 ; CHECK-NEXT:       Unnamed pass: implement Pass::getPassName()
 ; CHECK-NEXT:     Called Value Propagation
+; CHECK-NEXT:     Deduce and propagate attributes
 ; CHECK-NEXT:     Global Variable Optimizer
 ; CHECK-NEXT:       Unnamed pass: implement Pass::getPassName()
 ; CHECK-NEXT:     FunctionPass Manager
@@ -276,7 +277,6 @@
 ; CHECK-NEXT:       Basic Alias Analysis (stateless AA impl)
 ; CHECK-NEXT:       Function Alias Analysis Results
 ; CHECK-NEXT:       Scalar Evolution Analysis
-; CHECK-NEXT:       Branch Probability Analysis
 ; CHECK-NEXT:       Block Frequency Analysis
 ; CHECK-NEXT:       Loop Pass Manager
 ; CHECK-NEXT:         Loop Sink

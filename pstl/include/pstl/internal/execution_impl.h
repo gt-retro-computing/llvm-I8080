@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-- execution_impl.h --------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -13,6 +13,7 @@
 #include <iterator>
 #include <type_traits>
 
+#include "pstl_config.h"
 #include "execution_defs.h"
 
 namespace __pstl
@@ -87,7 +88,6 @@ struct __policy_traits<unsequenced_policy>
     typedef std::true_type allow_vector;
 };
 
-#if _PSTL_USE_PAR_POLICIES
 template <>
 struct __policy_traits<parallel_policy>
 {
@@ -103,7 +103,6 @@ struct __policy_traits<parallel_unsequenced_policy>
     typedef std::true_type allow_unsequenced;
     typedef std::true_type allow_vector;
 };
-#endif
 
 template <typename _ExecutionPolicy>
 using __collector_t =

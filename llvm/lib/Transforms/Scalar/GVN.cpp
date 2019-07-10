@@ -46,6 +46,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -491,6 +492,7 @@ uint32_t GVN::ValueTable::lookupOrAdd(Value *V) {
   switch (I->getOpcode()) {
     case Instruction::Call:
       return lookupOrAddCall(cast<CallInst>(I));
+    case Instruction::FNeg:
     case Instruction::Add:
     case Instruction::FAdd:
     case Instruction::Sub:
@@ -522,6 +524,7 @@ uint32_t GVN::ValueTable::lookupOrAdd(Value *V) {
     case Instruction::FPExt:
     case Instruction::PtrToInt:
     case Instruction::IntToPtr:
+    case Instruction::AddrSpaceCast:
     case Instruction::BitCast:
     case Instruction::Select:
     case Instruction::ExtractElement:
@@ -857,11 +860,12 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
 
   const DataLayout &DL = LI->getModule()->getDataLayout();
 
+  Instruction *DepInst = DepInfo.getInst();
   if (DepInfo.isClobber()) {
     // If the dependence is to a store that writes to a superset of the bits
     // read by the load, we can extract the bits we need for the load from the
     // stored value.
-    if (StoreInst *DepSI = dyn_cast<StoreInst>(DepInfo.getInst())) {
+    if (StoreInst *DepSI = dyn_cast<StoreInst>(DepInst)) {
       // Can't forward from non-atomic to atomic without violating memory model.
       if (Address && LI->isAtomic() <= DepSI->isAtomic()) {
         int Offset =
@@ -877,7 +881,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     //    load i32* P
     //    load i8* (P+1)
     // if we have this, replace the later with an extraction from the former.
-    if (LoadInst *DepLI = dyn_cast<LoadInst>(DepInfo.getInst())) {
+    if (LoadInst *DepLI = dyn_cast<LoadInst>(DepInst)) {
       // If this is a clobber and L is the first instruction in its block, then
       // we have the first instruction in the entry block.
       // Can't forward from non-atomic to atomic without violating memory model.
@@ -894,7 +898,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
 
     // If the clobbering value is a memset/memcpy/memmove, see if we can
     // forward a value on from it.
-    if (MemIntrinsic *DepMI = dyn_cast<MemIntrinsic>(DepInfo.getInst())) {
+    if (MemIntrinsic *DepMI = dyn_cast<MemIntrinsic>(DepInst)) {
       if (Address && !LI->isAtomic()) {
         int Offset = analyzeLoadFromClobberingMemInst(LI->getType(), Address,
                                                       DepMI, DL);
@@ -908,16 +912,13 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     LLVM_DEBUG(
         // fast print dep, using operator<< on instruction is too slow.
         dbgs() << "GVN: load "; LI->printAsOperand(dbgs());
-        Instruction *I = DepInfo.getInst();
-        dbgs() << " is clobbered by " << *I << '\n';);
+        dbgs() << " is clobbered by " << *DepInst << '\n';);
     if (ORE->allowExtraAnalysis(DEBUG_TYPE))
       reportMayClobberedLoad(LI, DepInfo, DT, ORE);
 
     return false;
   }
   assert(DepInfo.isDef() && "follows from above");
-
-  Instruction *DepInst = DepInfo.getInst();
 
   // Loading the allocation -> undef.
   if (isa<AllocaInst>(DepInst) || isMallocLikeFn(DepInst, TLI) ||
@@ -937,9 +938,8 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     // Reject loads and stores that are to the same address but are of
     // different types if we have to. If the stored value is larger or equal to
     // the loaded value, we can reuse it.
-    if (S->getValueOperand()->getType() != LI->getType() &&
-        !canCoerceMustAliasedValueToLoad(S->getValueOperand(),
-                                         LI->getType(), DL))
+    if (!canCoerceMustAliasedValueToLoad(S->getValueOperand(), LI->getType(),
+                                         DL))
       return false;
 
     // Can't forward from non-atomic to atomic without violating memory model.
@@ -954,8 +954,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     // If the types mismatch and we can't handle it, reject reuse of the load.
     // If the stored value is larger or equal to the loaded value, we can reuse
     // it.
-    if (LD->getType() != LI->getType() &&
-        !canCoerceMustAliasedValueToLoad(LD, LI->getType(), DL))
+    if (!canCoerceMustAliasedValueToLoad(LD, LI->getType(), DL))
       return false;
 
     // Can't forward from non-atomic to atomic without violating memory model.
@@ -1206,9 +1205,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     // Instructions that have been inserted in predecessor(s) to materialize
     // the load address do not retain their original debug locations. Doing
     // so could lead to confusing (but correct) source attributions.
-    // FIXME: How do we retain source locations without causing poor debugging
-    // behavior?
-    I->setDebugLoc(DebugLoc());
+    if (const DebugLoc &DL = I->getDebugLoc())
+      I->setDebugLoc(DebugLoc::get(0, 0, DL.getScope(), DL.getInlinedAt()));
 
     // FIXME: We really _ought_ to insert these value numbers into their
     // parent's availability map.  However, in doing so, we risk getting into
@@ -2470,8 +2468,7 @@ void GVN::addDeadBlock(BasicBlock *BB) {
 
       for (BasicBlock::iterator II = B->begin(); isa<PHINode>(II); ++II) {
         PHINode &Phi = cast<PHINode>(*II);
-        Phi.setIncomingValue(Phi.getBasicBlockIndex(P),
-                             UndefValue::get(Phi.getType()));
+        Phi.setIncomingValueForBlock(P, UndefValue::get(Phi.getType()));
         if (MD)
           MD->invalidateCachedPointerInfo(&Phi);
       }
