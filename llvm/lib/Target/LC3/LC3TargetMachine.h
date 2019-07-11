@@ -11,13 +11,10 @@ namespace llvm {
     class LC3TargetMachine : public TargetMachine {
 
     public:
-        LC3TargetMachine(const llvm::Target &t, llvm::StringRef dataLayoutString,
-                         const llvm::Triple &targetTriple, llvm::StringRef cpu, llvm::StringRef fs,
-                         const llvm::TargetOptions &options, const llvm::Target &T,
-                         const llvm::Triple &TT, llvm::StringRef CPU, llvm::StringRef FS,
-                         const llvm::TargetOptions &Options, llvm::Reloc::Model RM,
-                         llvm::CodeModel::Model CM, llvm::CodeGenOpt::Level OL);
+        LC3TargetMachine(const Target &T, const Triple &TT, StringRef CPU,
+                StringRef FS, const TargetOptions &Options, Optional<Reloc::Model> RM,
+                Optional<CodeModel::Model> CM, CodeGenOpt::Level OL, bool JIT);
     };
-}
+} // end namespace llvm
 
 #endif //LLVM_LC3TARGETMACHINE_H

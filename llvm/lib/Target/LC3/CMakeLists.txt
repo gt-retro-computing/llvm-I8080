@@ -10,3 +10,7 @@ add_llvm_target(
         LC3CodeGen
         LC3TargetMachine.cpp
         LC3FrameLowering.cpp)
+
+add_subdirectory(TargetInfo)
+add_subdirectory(MCTargetDesc)
+add_subdirectory(InstPrinter)

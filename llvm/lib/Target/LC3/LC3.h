@@ -5,8 +5,12 @@
 #ifndef LLVM_LC3_H
 #define LLVM_LC3_H
 
-namespace llvm {
+#include "MCTargetDesc/LC3MCTargetDesc.h"
+#include "llvm/Target/TargetMachine.h"
 
+namespace llvm {
+    class TargetMachine;
+    class LC3TargetMachine;
 }
 
 

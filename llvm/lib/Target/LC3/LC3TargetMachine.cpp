@@ -12,14 +12,19 @@
 
 using namespace llvm;
 
-LC3TargetMachine::LC3TargetMachine(const llvm::Target &t, llvm::StringRef dataLayoutString,
-                                         const llvm::Triple &targetTriple, llvm::StringRef cpu, llvm::StringRef fs,
-                                         const llvm::TargetOptions &options, const llvm::Target &T,
-                                         const llvm::Triple &TT, llvm::StringRef CPU, llvm::StringRef FS,
-                                         const llvm::TargetOptions &Options, llvm::Reloc::Model RM,
-                                         llvm::CodeModel::Model CM, llvm::CodeGenOpt::Level OL) : TargetMachine(t, dataLayoutString, targetTriple, cpu, fs, options) {
+static std::string computeDataLayout(const Triple &TT, StringRef CPU,
+                                     const TargetOptions &Options) {
+    return "e-m:e-p:16:16:16-i1:16:16-i8:8:8-i16:16:16-i32:32:32-f64:64:64-a:0:16-n16";
 }
 
+LC3TargetMachine::LC3TargetMachine(const llvm::Target &T, const llvm::Triple &TT, llvm::StringRef CPU,
+                                   llvm::StringRef FS, const llvm::TargetOptions &Options,
+                                   Optional<llvm::Reloc::Model> RM,
+                                   Optional<llvm::CodeModel::Model> CM, llvm::CodeGenOpt::Level OL, bool JIT) :
+                                   TargetMachine(T, computeDataLayout(TT, CPU, Options), TT, CPU, FS, Options
+) {
+
+}
 
 extern "C" void LLVMInitializeLC3Target() {
     RegisterTargetMachine<LC3TargetMachine> X(TheLC3Target);
