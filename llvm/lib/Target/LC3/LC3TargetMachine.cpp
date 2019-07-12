@@ -23,7 +23,6 @@ LC3TargetMachine::LC3TargetMachine(const llvm::Target &T, const llvm::Triple &TT
                                    Optional<llvm::CodeModel::Model> CM, llvm::CodeGenOpt::Level OL, bool JIT) :
                                    TargetMachine(T, computeDataLayout(TT, CPU, Options), TT, CPU, FS, Options
 ) {
-
 }
 
 extern "C" void LLVMInitializeLC3Target() {
