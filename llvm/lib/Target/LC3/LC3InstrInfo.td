@@ -1,45 +1,36 @@
-
+include "LC3InstrFormats.td"
 include "LC3Operators.td"
 
-class LC3InstR<bits<4> opcode,
-    dag outs, dag ins,
-    string opcodestr, string argstr, list<dag> pattern> : Instruction {
-    bits<16> Inst;
-    let Namespace = "LC3";
-    let Size = 2;
-    let Inst{15-12} = opcode;
-    let AsmString = "$opcodestr $argsstr";
-    dag OutOperandList = outs;
-    dag InOperandList = ins;
-    let Pattern = pattern;
-}
-
-class LC3_ALU3r_Inst<bits<4> opcode, string opcodestr, SDNode opnode>
-    : LC3InstR<opcode, (outs GRRegs:$dr), (ins GRRegs:$sr1, GRRegs:$sr2),
-    opcodestr, "$dr, $sr1, $sr2", [(set i16:$dr, (opnode i16:$sr1, i16:$sr2))]> {
-    bits<3> dr;
-    bits<3> sr1;
-    bits<3> sr2;
-
-    let Inst{11-9} = dr;
-    let Inst{8-6} = sr1;
-    let Inst{5-3} = 0b000;
-    let Inst{2-0} = sr2;
-}
-class LC3_ALU2ri_Inst<bits<4> opcode, string opcodestr, SDNode opnode>
-    : LC3InstR<opcode, (outs GRRegs:$dr), (ins GRRegs:$sr1, i16imm:$imm),
-    opcodestr, "$dr, $sr1, $imm", [(set i16:$dr, (opnode i16:$sr1, LC3imm5:$imm))]> {
-    bits<3> dr;
-    bits<3> sr1;
+//===----------------------------------------------------------------------===//
+// ALU Instructions
+//===----------------------------------------------------------------------===//
+multiclass BinOp<bits<4> opcode, string opstr, SDNode opnode> {
+  def rr : ALUInst<opcode, (outs GRRegs:$dst), (ins GRRegs:$src1, GRRegs:$src2),
+                    !strconcat(opstr, " $dst, $src1, $src2"),
+                    [(set i16:$dst, (opnode i16:$src1, i16:$src2))]> {
+    bits<3> dst;
+    bits<3> src1;
+    bits<3> src2;
+    let Inst{5} = 0;
+    let Inst{7-6} = 0b00;
+    let Inst{11-9} = dst;
+    let Inst{8-6} = src1;
+    let Inst{2-0} = src2;
+    }
+  def ri : ALUInst<opcode, (outs GRRegs:$dst), (ins GRRegs:$src1, i16imm:$imm),
+                    !strconcat(opstr, " $dst, $src1, $imm"),
+                    [(set i16:$dst, (opnode i16:$src1, LC3imm5:$imm))]> {
+    bits<3> dst;
+    bits<3> src1;
     bits<5> imm;
-
-    let Inst{11-9} = dr;
-    let Inst{8-6} = sr1;
-    let Inst{5} = 0b1;
+    let Inst{5} = 1;
+    let Inst{11-9} = dst;
+    let Inst{8-6} = src1;
     let Inst{4-0} = imm;
+    }
 }
 
-def LC3_ADDrrr : LC3_ALU3r_Inst<0b0001, "ADD", add>;
-def LC3_ANDrrr : LC3_ALU3r_Inst<0b0101, "AND", and>;
-def LC3_ADDrri : LC3_ALU2ri_Inst<0b0001, "ADD", add>;
-def LC3_ANDrri : LC3_ALU2ri_Inst<0b0101, "AND", and>;
+defm ADD : BinOp<0b0001, "add", add>;
+defm AND : BinOp<0b0101, "and", and>;
+
+
