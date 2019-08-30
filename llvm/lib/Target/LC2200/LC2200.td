@@ -22,10 +22,10 @@ include "llvm/Target/Target.td"
 //===----------------------------------------------------------------------===//
 
 include "LC2200RegisterInfo.td"
-include "LC2200InstrInfo.td"
+include "LC2200InstInfo.td"
 include "LC2200CallingConv.td"
 
-def LC2200InstrInfo : InstrInfo;
+def LC2200InstInfo : InstInfo;
 
 //===----------------------------------------------------------------------===//
 // LC2200 processors supported.
@@ -41,5 +41,5 @@ def : Proc<"generic", []>;
 //===----------------------------------------------------------------------===//
 
 def LC2200 : Target {
-  let InstructionSet = LC2200InstrInfo;
+  let InstructionSet = LC2200InstInfo;
 }

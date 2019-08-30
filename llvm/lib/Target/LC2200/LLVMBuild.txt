@@ -37,9 +37,9 @@ required_libraries =
     AsmPrinter
     CodeGen
     Core
-#    LC2200Info
+    LC2200Info
     LC2200AsmPrinter
-#    LC2200Desc
+    LC2200Desc
     MC
     SelectionDAG
     Support
