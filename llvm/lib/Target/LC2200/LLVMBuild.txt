@@ -16,18 +16,33 @@
 ;===------------------------------------------------------------------------===;
 
 [common]
-subdirectories = InstPrinter MCTargetDesc TargetInfo
+subdirectories =
+ InstPrinter
+ MCTargetDesc
+ TargetInfo
 
 [component_0]
 type = TargetGroup
 name = LC2200
 parent = Target
-has_asmprinter = 0
+has_asmprinter = 1
 has_disassembler = 0
 
 [component_1]
 type = Library
 name = LC2200CodeGen
 parent = LC2200
-required_libraries = Analysis AsmPrinter CodeGen Core MC SelectionDAG Support Target TransformUtils LC2200AsmPrinter LC2200Desc LC2200Info
+required_libraries =
+    Analysis
+    AsmPrinter
+    CodeGen
+    Core
+#    LC2200Info
+    LC2200AsmPrinter
+#    LC2200Desc
+    MC
+    SelectionDAG
+    Support
+    Target
+    TransformUtils
 add_to_library_groups = LC2200

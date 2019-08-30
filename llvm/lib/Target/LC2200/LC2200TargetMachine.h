@@ -1,3 +1,3 @@
-const LC3InstrInfo *getInstrInfo() const override {
-	return getSubtargetImpl()->getInstrInfo();
-} 
+//const LC2200InstrInfo *getInstrInfo() const override {
+//	return getSubtargetImpl()->getInstrInfo();
+//}

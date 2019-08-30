@@ -1,0 +1,6 @@
+[component_0]
+type = Library
+name = LC2200Desc
+parent = LC2200
+required_libraries = MC Support LC2200AsmPrinter LC2200Info
+add_to_library_groups = LC2200

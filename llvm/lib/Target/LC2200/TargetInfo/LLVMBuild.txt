@@ -1,0 +1,6 @@
+[component_0]
+type = Library
+name = LC2200Info
+parent = LC2200
+required_libraries = Support
+add_to_library_groups = LC2200
