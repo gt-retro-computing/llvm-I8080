@@ -39,15 +39,15 @@ class RTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> patt
 }
 
 class ITypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
-  let Inst{15-12} = opcode;
+  let Inst{31-28} = opcode;
 }
 
 class JTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
-  let Inst{15-12} = opcode;
+  let Inst{31-28} = opcode;
 }
 
 class OTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
-  let Inst{15-12} = opcode;
+  let Inst{31-28} = opcode;
 }
 
 

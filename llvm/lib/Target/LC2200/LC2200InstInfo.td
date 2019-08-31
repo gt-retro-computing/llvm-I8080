@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-include "LC2200InstrFormats.td"
+include "LC2200InstFormats.td"
 include "LC2200Operators.td"
 
 //==========================
