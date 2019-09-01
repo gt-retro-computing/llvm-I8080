@@ -169,6 +169,12 @@ def G_BLOCK_ADDR : GenericInstruction {
   let hasSideEffects = 0;
 }
 
+def G_JUMP_TABLE : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins unknown:$jti);
+  let hasSideEffects = 0;
+}
+
 //------------------------------------------------------------------------------
 // Binary ops.
 //------------------------------------------------------------------------------
@@ -306,6 +312,38 @@ def G_PTR_MASK : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src, unknown:$bits);
   let hasSideEffects = 0;
+}
+
+// Generic signed integer minimum.
+def G_SMIN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic signed integer maximum.
+def G_SMAX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic unsigned integer minimum.
+def G_UMIN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic unsigned integer maximum.
+def G_UMAX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
 }
 
 //------------------------------------------------------------------------------
@@ -455,6 +493,12 @@ def G_FABS : GenericInstruction {
   let hasSideEffects = 0;
 }
 
+def G_FCOPYSIGN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src0, type1:$src1);
+  let hasSideEffects = 0;
+}
+
 def G_FCANONICALIZE : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src);
@@ -592,6 +636,20 @@ def G_FFLOOR : GenericInstruction {
   let hasSideEffects = 0;
 }
 
+// Floating point round to next integer.
+def G_FRINT : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
+// Floating point round to the nearest integer.
+def G_FNEARBYINT : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
 //------------------------------------------------------------------------------
 // Opcodes for LLVM Intrinsics
 //------------------------------------------------------------------------------
@@ -684,6 +742,12 @@ def G_ATOMICRMW_MAX : G_ATOMICRMW_OP;
 def G_ATOMICRMW_MIN : G_ATOMICRMW_OP;
 def G_ATOMICRMW_UMAX : G_ATOMICRMW_OP;
 def G_ATOMICRMW_UMIN : G_ATOMICRMW_OP;
+
+def G_FENCE : GenericInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins i32imm:$ordering, i32imm:$scope);
+  let hasSideEffects = 1;
+}
 
 //------------------------------------------------------------------------------
 // Variadic ops
@@ -794,6 +858,15 @@ def G_BRCOND : GenericInstruction {
 def G_BRINDIRECT : GenericInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+  let isBranch = 1;
+  let isTerminator = 1;
+}
+
+// Generic branch to jump table entry
+def G_BRJT : GenericInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins ptype0:$tbl, unknown:$jti, type1:$idx);
   let hasSideEffects = 0;
   let isBranch = 1;
   let isTerminator = 1;

@@ -584,23 +584,23 @@ void X86FrameLowering::emitStackProbeInline(MachineFunction &MF,
   // registers. For the prolog expansion we use RAX, RCX and RDX.
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const TargetRegisterClass *RegClass = &X86::GR64RegClass;
-  const unsigned SizeReg = InProlog ? (unsigned)X86::RAX
+  const Register SizeReg = InProlog ? X86::RAX
                                     : MRI.createVirtualRegister(RegClass),
-                 ZeroReg = InProlog ? (unsigned)X86::RCX
+                 ZeroReg = InProlog ? X86::RCX
                                     : MRI.createVirtualRegister(RegClass),
-                 CopyReg = InProlog ? (unsigned)X86::RDX
+                 CopyReg = InProlog ? X86::RDX
                                     : MRI.createVirtualRegister(RegClass),
-                 TestReg = InProlog ? (unsigned)X86::RDX
+                 TestReg = InProlog ? X86::RDX
                                     : MRI.createVirtualRegister(RegClass),
-                 FinalReg = InProlog ? (unsigned)X86::RDX
+                 FinalReg = InProlog ? X86::RDX
                                      : MRI.createVirtualRegister(RegClass),
-                 RoundedReg = InProlog ? (unsigned)X86::RDX
+                 RoundedReg = InProlog ? X86::RDX
                                        : MRI.createVirtualRegister(RegClass),
-                 LimitReg = InProlog ? (unsigned)X86::RCX
+                 LimitReg = InProlog ? X86::RCX
                                      : MRI.createVirtualRegister(RegClass),
-                 JoinReg = InProlog ? (unsigned)X86::RCX
+                 JoinReg = InProlog ? X86::RCX
                                     : MRI.createVirtualRegister(RegClass),
-                 ProbeReg = InProlog ? (unsigned)X86::RCX
+                 ProbeReg = InProlog ? X86::RCX
                                      : MRI.createVirtualRegister(RegClass);
 
   // SP-relative offsets where we can save RCX and RDX.
@@ -794,8 +794,8 @@ void X86FrameLowering::emitStackProbeCall(MachineFunction &MF,
         .addExternalSymbol(MF.createExternalSymbolName(Symbol));
   }
 
-  unsigned AX = Is64Bit ? X86::RAX : X86::EAX;
-  unsigned SP = Is64Bit ? X86::RSP : X86::ESP;
+  unsigned AX = Uses64BitFramePtr ? X86::RAX : X86::EAX;
+  unsigned SP = Uses64BitFramePtr ? X86::RSP : X86::ESP;
   CI.addReg(AX, RegState::Implicit)
       .addReg(SP, RegState::Implicit)
       .addReg(AX, RegState::Define | RegState::Implicit)
@@ -809,7 +809,7 @@ void X86FrameLowering::emitStackProbeCall(MachineFunction &MF,
     // adjusting %rsp.
     // All other platforms do not specify a particular ABI for the stack probe
     // function, so we arbitrarily define it to not adjust %esp/%rsp itself.
-    BuildMI(MBB, MBBI, DL, TII.get(getSUBrrOpcode(Is64Bit)), SP)
+    BuildMI(MBB, MBBI, DL, TII.get(getSUBrrOpcode(Uses64BitFramePtr)), SP)
         .addReg(SP)
         .addReg(AX);
   }
@@ -871,6 +871,17 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
   // The EFLAGS implicit def is dead.
   MI->getOperand(3).setIsDead();
 }
+
+bool X86FrameLowering::has128ByteRedZone(const MachineFunction& MF) const {
+  // x86-64 (non Win64) has a 128 byte red zone which is guaranteed not to be
+  // clobbered by any interrupt handler.
+  assert(&STI == &MF.getSubtarget<X86Subtarget>() &&
+         "MF used frame lowering for wrong subtarget");
+  const Function &Fn = MF.getFunction();
+  const bool IsWin64CC = STI.isCallingConvWin64(Fn.getCallingConv());
+  return Is64Bit && !IsWin64CC && !Fn.hasFnAttribute(Attribute::NoRedZone);
+}
+
 
 /// emitPrologue - Push callee-saved registers onto the stack, which
 /// automatically adjust the stack pointer. Adjust the stack pointer to allocate
@@ -976,7 +987,6 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       MF.hasEHFunclets() && Personality == EHPersonality::CoreCLR;
   bool IsClrFunclet = IsFunclet && FnHasClrFunclet;
   bool HasFP = hasFP(MF);
-  bool IsWin64CC = STI.isCallingConvWin64(Fn.getCallingConv());
   bool IsWin64Prologue = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
   bool NeedsWin64CFI = IsWin64Prologue && Fn.needsUnwindTableEntry();
   // FIXME: Emit FPO data for EH funclets.
@@ -1030,12 +1040,11 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   // pointer, calls, or dynamic alloca then we do not need to adjust the
   // stack pointer (we fit in the Red Zone). We also check that we don't
   // push and pop from the stack.
-  if (Is64Bit && !Fn.hasFnAttribute(Attribute::NoRedZone) &&
+  if (has128ByteRedZone(MF) &&
       !TRI->needsStackRealignment(MF) &&
       !MFI.hasVarSizedObjects() &&             // No dynamic alloca.
       !MFI.adjustsStack() &&                   // No calls.
       !UseStackProbe &&                        // No stack probes.
-      !IsWin64CC &&                            // Win64 has no Red Zone
       !MFI.hasCopyImplyingStackAdjustment() && // Don't push and pop.
       !MF.shouldSplitStack()) {                // Regular stack
     uint64_t MinSize = X86FI->getCalleeSavedFrameSize();
@@ -1897,8 +1906,7 @@ X86FrameLowering::getFrameIndexReferencePreferSP(const MachineFunction &MF,
   // If !hasReservedCallFrame the function might have SP adjustement in the
   // body.  So, even though the offset is statically known, it depends on where
   // we are in the function.
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
-  if (!IgnoreSPUpdates && !TFI->hasReservedCallFrame(MF))
+  if (!IgnoreSPUpdates && !hasReservedCallFrame(MF))
     return getFrameIndexReference(MF, FI, FrameReg);
 
   // We don't handle tail calls, and shouldn't be seeing them either.
@@ -3088,8 +3096,7 @@ void X86FrameLowering::orderFrameObjects(
 
   // Sort the objects using X86FrameSortingAlgorithm (see its comment for
   // info).
-  std::stable_sort(SortingObjects.begin(), SortingObjects.end(),
-                   X86FrameSortingComparator());
+  llvm::stable_sort(SortingObjects, X86FrameSortingComparator());
 
   // Now modify the original list to represent the final order that
   // we want. The order will depend on whether we're going to access them

@@ -55,6 +55,9 @@ private:
   // Implement DiagnosticsConsumer.
   void onDiagnosticsReady(PathRef File, std::vector<Diag> Diagnostics) override;
   void onFileUpdated(PathRef File, const TUStatus &Status) override;
+  void
+  onHighlightingsReady(PathRef File,
+                       std::vector<HighlightingToken> Highlightings) override;
 
   // LSP methods. Notifications have signature void(const Params&).
   // Calls have signature void(const Params&, Callback<Response>).
@@ -85,7 +88,7 @@ private:
                         Callback<std::vector<Location>>);
   void onReference(const ReferenceParams &, Callback<std::vector<Location>>);
   void onSwitchSourceHeader(const TextDocumentIdentifier &,
-                            Callback<std::string>);
+                            Callback<llvm::Optional<URIForFile>>);
   void onDocumentHighlight(const TextDocumentPositionParams &,
                            Callback<std::vector<DocumentHighlight>>);
   void onFileEvent(const DidChangeWatchedFilesParams &);
@@ -114,6 +117,9 @@ private:
   /// compilation database is changed.
   void reparseOpenedFiles();
   void applyConfiguration(const ConfigurationSettings &Settings);
+
+  /// Sends a "publishSemanticHighlighting" notification to the LSP client.
+  void publishSemanticHighlighting(SemanticHighlightingParams Params);
 
   /// Sends a "publishDiagnostics" notification to the LSP client.
   void publishDiagnostics(const URIForFile &File,
@@ -154,6 +160,10 @@ private:
   bool SupportsHierarchicalDocumentSymbol = false;
   /// Whether the client supports showing file status.
   bool SupportFileStatus = false;
+  /// Which kind of markup should we use in textDocument/hover responses.
+  MarkupKind HoverContentFormat = MarkupKind::PlainText;
+  /// Whether the client supports offsets for parameter info labels.
+  bool SupportsOffsetsInSignatureHelp = false;
   // Store of the current versions of the open documents.
   DraftStore DraftMgr;
 

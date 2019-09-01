@@ -68,7 +68,7 @@ DynamicLoader *DynamicLoaderMacOS::CreateInstance(Process *process,
 
   if (create)
     return new DynamicLoaderMacOS(process);
-  return NULL;
+  return nullptr;
 }
 
 // Constructor
@@ -111,7 +111,7 @@ bool DynamicLoaderMacOS::ProcessDidExec() {
             const Symbol *symbol =
                 frame_sp->GetSymbolContext(eSymbolContextSymbol).symbol;
             if (symbol) {
-              if (symbol->GetName() == ConstString("_dyld_start"))
+              if (symbol->GetName() == "_dyld_start")
                 did_exec = true;
             }
           }
@@ -334,7 +334,7 @@ void DynamicLoaderMacOS::AddBinaries(
 // Dump the _dyld_all_image_infos members and all current image infos that we
 // have parsed to the file handle provided.
 void DynamicLoaderMacOS::PutToLog(Log *log) const {
-  if (log == NULL)
+  if (log == nullptr)
     return;
 }
 

@@ -34,6 +34,8 @@ bool RISCVAsmBackend::shouldForceRelocation(const MCAssembler &Asm,
   default:
     break;
   case RISCV::fixup_riscv_got_hi20:
+  case RISCV::fixup_riscv_tls_got_hi20:
+  case RISCV::fixup_riscv_tls_gd_hi20:
     return true;
   case RISCV::fixup_riscv_pcrel_lo12_i:
   case RISCV::fixup_riscv_pcrel_lo12_s:
@@ -51,6 +53,8 @@ bool RISCVAsmBackend::shouldForceRelocation(const MCAssembler &Asm,
       llvm_unreachable("Unexpected fixup kind for pcrel_lo12");
       break;
     case RISCV::fixup_riscv_got_hi20:
+    case RISCV::fixup_riscv_tls_got_hi20:
+    case RISCV::fixup_riscv_tls_gd_hi20:
       ShouldForce = true;
       break;
     case RISCV::fixup_riscv_pcrel_hi20:
@@ -158,16 +162,12 @@ bool RISCVAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
     return false;
 
   // The canonical nop on RISC-V is addi x0, x0, 0.
-  uint64_t Nop32Count = Count / 4;
-  for (uint64_t i = Nop32Count; i != 0; --i)
+  for (; Count >= 4; Count -= 4)
     OS.write("\x13\0\0\0", 4);
 
   // The canonical nop on RVC is c.nop.
-  if (HasStdExtC) {
-    uint64_t Nop16Count = (Count - Nop32Count * 4) / 2;
-    for (uint64_t i = Nop16Count; i != 0; --i)
-      OS.write("\x01\0", 2);
-  }
+  if (Count && HasStdExtC)
+    OS.write("\x01\0", 2);
 
   return true;
 }
@@ -179,6 +179,8 @@ static uint64_t adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
   default:
     llvm_unreachable("Unknown fixup kind!");
   case RISCV::fixup_riscv_got_hi20:
+  case RISCV::fixup_riscv_tls_got_hi20:
+  case RISCV::fixup_riscv_tls_gd_hi20:
     llvm_unreachable("Relocation should be unconditionally forced\n");
   case FK_Data_1:
   case FK_Data_2:

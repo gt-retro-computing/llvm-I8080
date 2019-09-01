@@ -11,6 +11,7 @@
 #include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Breakpoint/BreakpointIDList.h"
+#include "lldb/Breakpoint/BreakpointPrecondition.h"
 #include "lldb/Breakpoint/BreakpointResolver.h"
 #include "lldb/Breakpoint/BreakpointResolverAddress.h"
 #include "lldb/Breakpoint/BreakpointResolverFileLine.h"
@@ -43,7 +44,6 @@
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/LanguageRuntime.h"
-#include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/StackFrame.h"
@@ -57,6 +57,8 @@
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/Timer.h"
+
+#include "llvm/ADT/ScopeExit.h"
 
 #include <memory>
 #include <mutex>
@@ -572,8 +574,7 @@ Target::CreateExceptionBreakpoint(enum lldb::LanguageType language,
   BreakpointSP exc_bkpt_sp = LanguageRuntime::CreateExceptionBreakpoint(
       *this, language, catch_bp, throw_bp, internal);
   if (exc_bkpt_sp && additional_args) {
-    Breakpoint::BreakpointPreconditionSP precondition_sp =
-        exc_bkpt_sp->GetPrecondition();
+    BreakpointPreconditionSP precondition_sp = exc_bkpt_sp->GetPrecondition();
     if (precondition_sp && additional_args) {
       if (error)
         *error = precondition_sp->ConfigurePrecondition(*additional_args);
@@ -615,13 +616,10 @@ Target::CreateScriptedBreakpoint(const llvm::StringRef class_name,
   StructuredDataImpl *extra_args_impl = new StructuredDataImpl();
   if (extra_args_sp)
     extra_args_impl->SetObjectSP(extra_args_sp);
-  
-  BreakpointResolverSP resolver_sp(new 
-                                   BreakpointResolverScripted(nullptr, class_name,
-                                   depth,
-                                   extra_args_impl,
-                                   *GetDebugger().GetCommandInterpreter()
-                                       .GetScriptInterpreter()));
+
+  BreakpointResolverSP resolver_sp(new BreakpointResolverScripted(
+      nullptr, class_name, depth, extra_args_impl,
+      *GetDebugger().GetScriptInterpreter()));
   return CreateBreakpoint(filter_sp, resolver_sp, internal, false, true);
 
 }
@@ -1574,8 +1572,9 @@ bool Target::SetArchitecture(const ArchSpec &arch_spec, bool set_platform) {
                   arch_spec.GetArchitectureName(),
                   arch_spec.GetTriple().getTriple().c_str());
     ModuleSpec module_spec(executable_sp->GetFileSpec(), other);
+    FileSpecList search_paths = GetExecutableSearchPaths();
     Status error = ModuleList::GetSharedModule(module_spec, executable_sp,
-                                               &GetExecutableSearchPaths(),
+                                               &search_paths,
                                                nullptr, nullptr);
 
     if (!error.Fail() && executable_sp) {
@@ -1651,12 +1650,10 @@ void Target::NotifyModulesRemoved(lldb_private::ModuleList &module_list) {
 
 
 void Target::ModulesDidLoad(ModuleList &module_list) {
-  if (m_valid && module_list.GetSize()) {
-
-    const ModuleList &modules = GetImages();
-    const size_t num_images = modules.GetSize();
+  const size_t num_images = module_list.GetSize();
+  if (m_valid && num_images) {
     for (size_t idx = 0; idx < num_images; ++idx) {
-      ModuleSP module_sp(modules.GetModuleAtIndex(idx));
+      ModuleSP module_sp(module_list.GetModuleAtIndex(idx));
       LoadScriptingResourceForModule(module_sp, this);
     }
     m_breakpoint_list.UpdateBreakpoints(module_list, true, false);
@@ -1672,11 +1669,8 @@ void Target::ModulesDidLoad(ModuleList &module_list) {
 void Target::SymbolsDidLoad(ModuleList &module_list) {
   if (m_valid && module_list.GetSize()) {
     if (m_process_sp) {
-      LanguageRuntime *runtime =
-          m_process_sp->GetLanguageRuntime(lldb::eLanguageTypeObjC);
-      if (runtime) {
-        ObjCLanguageRuntime *objc_runtime = (ObjCLanguageRuntime *)runtime;
-        objc_runtime->SymbolsDidLoad(module_list);
+      for (LanguageRuntime *runtime : m_process_sp->GetLanguageRuntimes()) {
+        runtime->SymbolsDidLoad(module_list);
       }
     }
 
@@ -1860,7 +1854,7 @@ size_t Target::ReadCStringFromMemory(const Address &addr, std::string &out_str,
   out_str.clear();
   addr_t curr_addr = addr.GetLoadAddress(this);
   Address address(addr);
-  while (1) {
+  while (true) {
     size_t length = ReadCStringFromMemory(address, buf, sizeof(buf), error);
     if (length == 0)
       break;
@@ -2017,7 +2011,7 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
     ModuleSP old_module_sp; // This will get filled in if we have a new version
                             // of the library
     bool did_create_module = false;
-
+    FileSpecList search_paths = GetExecutableSearchPaths();
     // If there are image search path entries, try to use them first to acquire
     // a suitable image.
     if (m_image_search_paths.GetSize()) {
@@ -2028,7 +2022,7 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
         transformed_spec.GetFileSpec().GetFilename() =
             module_spec.GetFileSpec().GetFilename();
         error = ModuleList::GetSharedModule(transformed_spec, module_sp,
-                                            &GetExecutableSearchPaths(),
+                                            &search_paths,
                                             &old_module_sp, &did_create_module);
       }
     }
@@ -2045,7 +2039,7 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
       if (module_spec.GetUUID().IsValid()) {
         // We have a UUID, it is OK to check the global module list...
         error = ModuleList::GetSharedModule(module_spec, module_sp,
-                                            &GetExecutableSearchPaths(),
+                                            &search_paths,
                                             &old_module_sp, &did_create_module);
       }
 
@@ -2055,7 +2049,7 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
         if (m_platform_sp) {
           error = m_platform_sp->GetSharedModule(
               module_spec, m_process_sp.get(), module_sp,
-              &GetExecutableSearchPaths(), &old_module_sp, &did_create_module);
+              &search_paths, &old_module_sp, &did_create_module);
         } else {
           error.SetErrorString("no platform is currently set");
         }
@@ -2388,10 +2382,11 @@ ExpressionResults Target::EvaluateExpression(
   if (expr.empty())
     return execution_results;
 
-  // We shouldn't run stop hooks in expressions. Be sure to reset this if you
-  // return anywhere within this function.
+  // We shouldn't run stop hooks in expressions.
   bool old_suppress_value = m_suppress_stop_hooks;
   m_suppress_stop_hooks = true;
+  auto on_exit = llvm::make_scope_exit([this, old_suppress_value]() {
+      m_suppress_stop_hooks = old_suppress_value; });
 
   ExecutionContext exe_ctx;
 
@@ -2424,8 +2419,6 @@ ExpressionResults Target::EvaluateExpression(
                                  nullptr, // Module
                                  ctx_obj);
   }
-
-  m_suppress_stop_hooks = old_suppress_value;
 
   return execution_results;
 }
@@ -2656,6 +2649,7 @@ void Target::RunStopHooks() {
         options.SetStopOnError(true);
         options.SetEchoCommands(false);
         options.SetPrintResults(true);
+        options.SetPrintErrors(true);
         options.SetAddToHistory(false);
 
         // Force Async:
@@ -3255,11 +3249,11 @@ static constexpr OptionEnumValueElement g_inline_breakpoint_enums[] = {
      "Always look for inline breakpoint locations when setting file and line "
      "breakpoints (slower but most accurate)."} };
 
-typedef enum x86DisassemblyFlavor {
+enum x86DisassemblyFlavor {
   eX86DisFlavorDefault,
   eX86DisFlavorIntel,
   eX86DisFlavorATT
-} x86DisassemblyFlavor;
+};
 
 static constexpr OptionEnumValueElement g_x86_dis_flavor_value_types[] = {
     {eX86DisFlavorDefault, "default", "Disassembler default (currently att)."},
@@ -3867,27 +3861,36 @@ PathMappingList &TargetProperties::GetSourcePathMap() const {
   return option_value->GetCurrentValue();
 }
 
-FileSpecList &TargetProperties::GetExecutableSearchPaths() {
+void TargetProperties::AppendExecutableSearchPaths(const FileSpec& dir) {
   const uint32_t idx = ePropertyExecutableSearchPaths;
   OptionValueFileSpecList *option_value =
       m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(nullptr,
                                                                    false, idx);
   assert(option_value);
-  return option_value->GetCurrentValue();
+  option_value->AppendCurrentValue(dir);
 }
 
-FileSpecList &TargetProperties::GetDebugFileSearchPaths() {
-  const uint32_t idx = ePropertyDebugFileSearchPaths;
-  OptionValueFileSpecList *option_value =
+FileSpecList TargetProperties::GetExecutableSearchPaths() {
+  const uint32_t idx = ePropertyExecutableSearchPaths;
+  const OptionValueFileSpecList *option_value =
       m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(nullptr,
                                                                    false, idx);
   assert(option_value);
   return option_value->GetCurrentValue();
 }
 
-FileSpecList &TargetProperties::GetClangModuleSearchPaths() {
+FileSpecList TargetProperties::GetDebugFileSearchPaths() {
+  const uint32_t idx = ePropertyDebugFileSearchPaths;
+  const OptionValueFileSpecList *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(nullptr,
+                                                                   false, idx);
+  assert(option_value);
+  return option_value->GetCurrentValue();
+}
+
+FileSpecList TargetProperties::GetClangModuleSearchPaths() {
   const uint32_t idx = ePropertyClangModuleSearchPaths;
-  OptionValueFileSpecList *option_value =
+  const OptionValueFileSpecList *option_value =
       m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(nullptr,
                                                                    false, idx);
   assert(option_value);

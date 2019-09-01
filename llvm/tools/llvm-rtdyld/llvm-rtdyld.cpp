@@ -77,6 +77,10 @@ Dylibs("dylib",
        cl::desc("Add library."),
        cl::ZeroOrMore);
 
+static cl::list<std::string> InputArgv("args", cl::Positional,
+                                       cl::desc("<program arguments>..."),
+                                       cl::ZeroOrMore, cl::PositionalEatsArgs);
+
 static cl::opt<std::string>
 TripleName("triple", cl::desc("Target triple for disassembler"));
 
@@ -91,35 +95,28 @@ CheckFiles("check",
            cl::desc("File containing RuntimeDyld verifier checks."),
            cl::ZeroOrMore);
 
-// Tracking BUG: 19665
-// http://llvm.org/bugs/show_bug.cgi?id=19665
-//
-// Do not change these options to cl::opt<uint64_t> since this silently breaks
-// argument parsing.
-static cl::opt<unsigned long long>
-PreallocMemory("preallocate",
-              cl::desc("Allocate memory upfront rather than on-demand"),
-              cl::init(0));
+static cl::opt<uint64_t>
+    PreallocMemory("preallocate",
+                   cl::desc("Allocate memory upfront rather than on-demand"),
+                   cl::init(0));
 
-static cl::opt<unsigned long long>
-TargetAddrStart("target-addr-start",
-                cl::desc("For -verify only: start of phony target address "
-                         "range."),
-                cl::init(4096), // Start at "page 1" - no allocating at "null".
-                cl::Hidden);
+static cl::opt<uint64_t> TargetAddrStart(
+    "target-addr-start",
+    cl::desc("For -verify only: start of phony target address "
+             "range."),
+    cl::init(4096), // Start at "page 1" - no allocating at "null".
+    cl::Hidden);
 
-static cl::opt<unsigned long long>
-TargetAddrEnd("target-addr-end",
-              cl::desc("For -verify only: end of phony target address range."),
-              cl::init(~0ULL),
-              cl::Hidden);
+static cl::opt<uint64_t> TargetAddrEnd(
+    "target-addr-end",
+    cl::desc("For -verify only: end of phony target address range."),
+    cl::init(~0ULL), cl::Hidden);
 
-static cl::opt<unsigned long long>
-TargetSectionSep("target-section-sep",
-                 cl::desc("For -verify only: Separation between sections in "
-                          "phony target address space."),
-                 cl::init(0),
-                 cl::Hidden);
+static cl::opt<uint64_t> TargetSectionSep(
+    "target-section-sep",
+    cl::desc("For -verify only: Separation between sections in "
+             "phony target address space."),
+    cl::init(0), cl::Hidden);
 
 static cl::list<std::string>
 SpecificSectionMappings("map-section",
@@ -215,7 +212,15 @@ public:
     if (I != DummyExterns.end())
       return JITSymbol(I->second, JITSymbolFlags::Exported);
 
-    return RTDyldMemoryManager::findSymbol(Name);
+    if (auto Sym = RTDyldMemoryManager::findSymbol(Name))
+      return Sym;
+    else if (auto Err = Sym.takeError())
+      ExitOnErr(std::move(Err));
+    else
+      ExitOnErr(make_error<StringError>("Could not find definition for \"" +
+                                            Name + "\"",
+                                        inconvertibleErrorCode()));
+    llvm_unreachable("Should have returned or exited by now");
   }
 
   void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
@@ -540,11 +545,13 @@ static int executeInput() {
 
   int (*Main)(int, const char**) =
     (int(*)(int,const char**)) uintptr_t(MainAddress);
-  const char **Argv = new const char*[2];
+  std::vector<const char *> Argv;
   // Use the name of the first input object module as argv[0] for the target.
-  Argv[0] = InputFileList[0].c_str();
-  Argv[1] = nullptr;
-  return Main(1, Argv);
+  Argv.push_back(InputFileList[0].data());
+  for (auto &Arg : InputArgv)
+    Argv.push_back(Arg.data());
+  Argv.push_back(nullptr);
+  return Main(Argv.size() - 1, Argv.data());
 }
 
 static int checkAllExpressions(RuntimeDyldChecker &Checker) {
@@ -637,7 +644,7 @@ static void remapSectionsAndSymbols(const llvm::Triple &TargetTriple,
       // reason (e.g. zero byte COFF sections). Don't include those sections in
       // the allocation map.
       if (LoadAddr != 0)
-        AlreadyAllocated[LoadAddr] = (*Tmp)->MB.size();
+        AlreadyAllocated[LoadAddr] = (*Tmp)->MB.allocatedSize();
       Worklist.erase(Tmp);
     }
   }
@@ -661,13 +668,14 @@ static void remapSectionsAndSymbols(const llvm::Triple &TargetTriple,
     uint64_t NextSectionAddr = TargetAddrStart;
 
     for (const auto &Alloc : AlreadyAllocated)
-      if (NextSectionAddr + CurEntry->MB.size() + TargetSectionSep <= Alloc.first)
+      if (NextSectionAddr + CurEntry->MB.allocatedSize() + TargetSectionSep <=
+          Alloc.first)
         break;
       else
         NextSectionAddr = Alloc.first + Alloc.second + TargetSectionSep;
 
     Dyld.mapSectionAddress(CurEntry->MB.base(), NextSectionAddr);
-    AlreadyAllocated[NextSectionAddr] = CurEntry->MB.size();
+    AlreadyAllocated[NextSectionAddr] = CurEntry->MB.allocatedSize();
   }
 
   // Add dummy symbols to the memory manager.
@@ -767,7 +775,7 @@ static int linkAndVerify() {
 
     // First get the target address.
     if (auto InternalSymbol = Dyld.getSymbol(Symbol))
-      SymInfo.TargetAddress = InternalSymbol.getAddress();
+      SymInfo.setTargetAddress(InternalSymbol.getAddress());
     else {
       // Symbol not found in RuntimeDyld. Fall back to external lookup.
 #ifdef _MSC_VER
@@ -792,7 +800,7 @@ static int linkAndVerify() {
       auto I = Result->find(Symbol);
       assert(I != Result->end() &&
              "Expected symbol address if no error occurred");
-      SymInfo.TargetAddress = I->second.getAddress();
+      SymInfo.setTargetAddress(I->second.getAddress());
     }
 
     // Now find the symbol content if possible (otherwise leave content as a
@@ -803,7 +811,7 @@ static int linkAndVerify() {
         char *CSymAddr = static_cast<char *>(SymAddr);
         StringRef SecContent = Dyld.getSectionContent(SectionID);
         uint64_t SymSize = SecContent.size() - (CSymAddr - SecContent.data());
-        SymInfo.Content = StringRef(CSymAddr, SymSize);
+        SymInfo.setContent(StringRef(CSymAddr, SymSize));
       }
     }
     return SymInfo;
@@ -817,7 +825,7 @@ static int linkAndVerify() {
       logAllUnhandledErrors(SymInfo.takeError(), errs(), "RTDyldChecker: ");
       return false;
     }
-    return SymInfo->TargetAddress != 0;
+    return SymInfo->getTargetAddress() != 0;
   };
 
   FileToSectionIDMap FileToSecIDMap;
@@ -829,8 +837,8 @@ static int linkAndVerify() {
     if (!SectionID)
       return SectionID.takeError();
     RuntimeDyldChecker::MemoryRegionInfo SecInfo;
-    SecInfo.TargetAddress = Dyld.getSectionLoadAddress(*SectionID);
-    SecInfo.Content = Dyld.getSectionContent(*SectionID);
+    SecInfo.setTargetAddress(Dyld.getSectionLoadAddress(*SectionID));
+    SecInfo.setContent(Dyld.getSectionContent(*SectionID));
     return SecInfo;
   };
 
@@ -847,10 +855,10 @@ static int linkAndVerify() {
                                      inconvertibleErrorCode());
     auto &SI = StubMap[StubContainer][SymbolName];
     RuntimeDyldChecker::MemoryRegionInfo StubMemInfo;
-    StubMemInfo.TargetAddress =
-        Dyld.getSectionLoadAddress(SI.SectionID) + SI.Offset;
-    StubMemInfo.Content =
-        Dyld.getSectionContent(SI.SectionID).substr(SI.Offset);
+    StubMemInfo.setTargetAddress(Dyld.getSectionLoadAddress(SI.SectionID) +
+                                 SI.Offset);
+    StubMemInfo.setContent(
+        Dyld.getSectionContent(SI.SectionID).substr(SI.Offset));
     return StubMemInfo;
   };
 

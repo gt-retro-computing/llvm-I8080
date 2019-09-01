@@ -3011,13 +3011,18 @@ static void handleSectionAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     D->addAttr(NewAttr);
 }
 
-static bool checkCodeSegName(Sema&S, SourceLocation LiteralLoc, StringRef CodeSegName) {
-  std::string Error = S.Context.getTargetInfo().isValidSectionSpecifier(CodeSegName);
+// This is used for `__declspec(code_seg("segname"))` on a decl.
+// `#pragma code_seg("segname")` uses checkSectionName() instead.
+static bool checkCodeSegName(Sema &S, SourceLocation LiteralLoc,
+                             StringRef CodeSegName) {
+  std::string Error =
+      S.Context.getTargetInfo().isValidSectionSpecifier(CodeSegName);
   if (!Error.empty()) {
-    S.Diag(LiteralLoc, diag::err_attribute_section_invalid_for_target) << Error
-           << 0 /*'code-seg'*/;
+    S.Diag(LiteralLoc, diag::err_attribute_section_invalid_for_target)
+        << Error << 0 /*'code-seg'*/;
     return false;
   }
+
   return true;
 }
 
@@ -4650,10 +4655,22 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
   } else {
     A = TI.checkCallingConvention(CC);
   }
-  if (A != TargetInfo::CCCR_OK) {
-    if (A == TargetInfo::CCCR_Warning)
-      Diag(Attrs.getLoc(), diag::warn_cconv_ignored)
-          << Attrs << (int)CallingConventionIgnoredReason::ForThisTarget;
+
+  switch (A) {
+  case TargetInfo::CCCR_OK:
+    break;
+
+  case TargetInfo::CCCR_Ignore:
+    // Treat an ignored convention as if it was an explicit C calling convention
+    // attribute. For example, __stdcall on Win x64 functions as __cdecl, so
+    // that command line flags that change the default convention to
+    // __vectorcall don't affect declarations marked __stdcall.
+    CC = CC_C;
+    break;
+
+  case TargetInfo::CCCR_Warning: {
+    Diag(Attrs.getLoc(), diag::warn_cconv_ignored)
+        << Attrs << (int)CallingConventionIgnoredReason::ForThisTarget;
 
     // This convention is not valid for the target. Use the default function or
     // method calling convention.
@@ -4663,6 +4680,8 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
       IsVariadic = FD->isVariadic();
     }
     CC = Context.getDefaultCallingConvention(IsVariadic, IsCXXMethod);
+    break;
+  }
   }
 
   Attrs.setProcessingCache((unsigned) CC);
@@ -6329,9 +6348,21 @@ static void handleNoSanitizeSpecificAttr(Sema &S, Decl *D,
   if (isGlobalVar(D) && SanitizerName != "address")
     S.Diag(D->getLocation(), diag::err_attribute_wrong_decl_type)
         << AL << ExpectedFunction;
-  D->addAttr(::new (S.Context)
-                 NoSanitizeAttr(AL.getRange(), S.Context, &SanitizerName, 1,
-                                AL.getAttributeSpellingListIndex()));
+
+  // FIXME: Rather than create a NoSanitizeSpecificAttr, this creates a
+  // NoSanitizeAttr object; but we need to calculate the correct spelling list
+  // index rather than incorrectly assume the index for NoSanitizeSpecificAttr
+  // has the same spellings as the index for NoSanitizeAttr. We don't have a
+  // general way to "translate" between the two, so this hack attempts to work
+  // around the issue with hard-coded indicies. This is critical for calling
+  // getSpelling() or prettyPrint() on the resulting semantic attribute object
+  // without failing assertions.
+  unsigned TranslatedSpellingIndex = 0;
+  if (AL.isC2xAttribute() || AL.isCXX11Attribute())
+    TranslatedSpellingIndex = 1;
+
+  D->addAttr(::new (S.Context) NoSanitizeAttr(
+      AL.getRange(), S.Context, &SanitizerName, 1, TranslatedSpellingIndex));
 }
 
 static void handleInternalLinkageAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -6774,6 +6805,10 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_CUDAHost:
     handleSimpleAttributeWithExclusions<CUDAHostAttr, CUDAGlobalAttr>(S, D, AL);
     break;
+  case ParsedAttr::AT_HIPPinnedShadow:
+    handleSimpleAttributeWithExclusions<HIPPinnedShadowAttr, CUDADeviceAttr,
+                                        CUDAConstantAttr>(S, D, AL);
+    break;
   case ParsedAttr::AT_GNUInline:
     handleGNUInlineAttr(S, D, AL);
     break;
@@ -6800,6 +6835,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_NoSplitStack:
     handleSimpleAttribute<NoSplitStackAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_NoUniqueAddress:
+    handleSimpleAttribute<NoUniqueAddressAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_NonNull:
     if (auto *PVD = dyn_cast<ParmVarDecl>(D))
@@ -6841,7 +6879,8 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleNoCfCheckAttr(S, D, AL);
     break;
   case ParsedAttr::AT_NoThrow:
-    handleSimpleAttribute<NoThrowAttr>(S, D, AL);
+    if (!AL.isUsedAsTypeAttr())
+      handleSimpleAttribute<NoThrowAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_CUDAShared:
     handleSharedAttr(S, D, AL);
@@ -6980,6 +7019,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_ObjCSubclassingRestricted:
     handleSimpleAttribute<ObjCSubclassingRestrictedAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_ObjCClassStub:
+    handleSimpleAttribute<ObjCClassStubAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_ObjCExplicitProtocolImpl:
     handleObjCSuppresProtocolAttr(S, D, AL);
@@ -7444,12 +7486,10 @@ NamedDecl * Sema::DeclClonePragmaWeak(NamedDecl *ND, IdentifierInfo *II,
     // FIXME: Mangling?
     // FIXME: Is the qualifier info correct?
     // FIXME: Is the DeclContext correct?
-    NewFD = FunctionDecl::Create(FD->getASTContext(), FD->getDeclContext(),
-                                 Loc, Loc, DeclarationName(II),
-                                 FD->getType(), FD->getTypeSourceInfo(),
-                                 SC_None, false/*isInlineSpecified*/,
-                                 FD->hasPrototype(),
-                                 false/*isConstexprSpecified*/);
+    NewFD = FunctionDecl::Create(
+        FD->getASTContext(), FD->getDeclContext(), Loc, Loc,
+        DeclarationName(II), FD->getType(), FD->getTypeSourceInfo(), SC_None,
+        false /*isInlineSpecified*/, FD->hasPrototype(), CSK_unspecified);
     NewD = NewFD;
 
     if (FD->getQualifier())

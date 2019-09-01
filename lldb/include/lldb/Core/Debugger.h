@@ -45,34 +45,21 @@
 #include <stddef.h>
 #include <stdio.h>
 
-namespace lldb_private {
-class Address;
-}
-namespace lldb_private {
-class CommandInterpreter;
-}
-namespace lldb_private {
-class Process;
-}
-namespace lldb_private {
-class Stream;
-}
-namespace lldb_private {
-class SymbolContext;
-}
-namespace lldb_private {
-class Target;
-}
-namespace lldb_private {
-namespace repro {
-class DataRecorder;
-}
-} // namespace lldb_private
 namespace llvm {
 class raw_ostream;
 }
 
 namespace lldb_private {
+class Address;
+class CommandInterpreter;
+class Process;
+class Stream;
+class SymbolContext;
+class Target;
+
+namespace repro {
+class DataRecorder;
+}
 
 /// \class Debugger Debugger.h "lldb/Core/Debugger.h"
 /// A class to manage flag bits.
@@ -153,6 +140,8 @@ public:
     assert(m_command_interpreter_up.get());
     return *m_command_interpreter_up;
   }
+
+  ScriptInterpreter *GetScriptInterpreter(bool can_create = true);
 
   lldb::ListenerSP GetListener() { return m_listener_sp; }
 
@@ -394,6 +383,9 @@ protected:
                                                       // shared
                                                       // source file cache.
   std::unique_ptr<CommandInterpreter> m_command_interpreter_up;
+
+  lldb::ScriptInterpreterSP m_script_interpreter_sp;
+  std::recursive_mutex m_script_interpreter_mutex;
 
   IOHandlerStack m_input_reader_stack;
   llvm::StringMap<std::weak_ptr<llvm::raw_ostream>> m_log_streams;

@@ -169,6 +169,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(cxxConstructorDecl);
   REGISTER_MATCHER(cxxConversionDecl);
   REGISTER_MATCHER(cxxCtorInitializer);
+  REGISTER_MATCHER(cxxDeductionGuideDecl);
   REGISTER_MATCHER(cxxDefaultArgExpr);
   REGISTER_MATCHER(cxxDeleteExpr);
   REGISTER_MATCHER(cxxDependentScopeMemberExpr);
@@ -267,6 +268,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasEitherOperand);
   REGISTER_MATCHER(hasElementType);
   REGISTER_MATCHER(hasElse);
+  REGISTER_MATCHER(hasExplicitSpecifier);
   REGISTER_MATCHER(hasExternalFormalLinkage);
   REGISTER_MATCHER(hasFalseExpression);
   REGISTER_MATCHER(hasGlobalStorage);
@@ -320,6 +322,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasUnqualifiedDesugaredType);
   REGISTER_MATCHER(hasValueType);
   REGISTER_MATCHER(ifStmt);
+  REGISTER_MATCHER(ignoringElidableConstructorCall);
   REGISTER_MATCHER(ignoringImpCasts);
   REGISTER_MATCHER(ignoringImplicit);
   REGISTER_MATCHER(ignoringParenCasts);
@@ -344,6 +347,8 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isBitField);
   REGISTER_MATCHER(isCatchAll);
   REGISTER_MATCHER(isClass);
+  REGISTER_MATCHER(isClassMessage);
+  REGISTER_MATCHER(isClassMethod);
   REGISTER_MATCHER(isConst);
   REGISTER_MATCHER(isConstQualified);
   REGISTER_MATCHER(isConstexpr);
@@ -364,9 +369,11 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isExternC);
   REGISTER_MATCHER(isFinal);
   REGISTER_MATCHER(isImplicit);
+  REGISTER_MATCHER(isInStdNamespace);
   REGISTER_MATCHER(isInTemplateInstantiation);
   REGISTER_MATCHER(isInline);
   REGISTER_MATCHER(isInstanceMessage);
+  REGISTER_MATCHER(isInstanceMethod);
   REGISTER_MATCHER(isInstantiated);
   REGISTER_MATCHER(isInstantiationDependent);
   REGISTER_MATCHER(isInteger);

@@ -22,17 +22,9 @@
 
 namespace lldb_private {
 class CommandInterpreter;
-}
-namespace lldb_private {
 class ConstString;
-}
-namespace lldb_private {
 class Debugger;
-}
-namespace lldb_private {
 class StringList;
-}
-namespace lldb_private {
 
 class PluginManager {
 public:
@@ -142,10 +134,11 @@ public:
   GetLanguageCreateCallbackForPluginName(ConstString name);
 
   // LanguageRuntime
-  static bool
-  RegisterPlugin(ConstString name, const char *description,
-                 LanguageRuntimeCreateInstance create_callback,
-                 LanguageRuntimeGetCommandObject command_callback = nullptr);
+  static bool RegisterPlugin(
+      ConstString name, const char *description,
+      LanguageRuntimeCreateInstance create_callback,
+      LanguageRuntimeGetCommandObject command_callback = nullptr,
+      LanguageRuntimeGetExceptionPrecondition precondition_callback = nullptr);
 
   static bool UnregisterPlugin(LanguageRuntimeCreateInstance create_callback);
 
@@ -154,6 +147,9 @@ public:
 
   static LanguageRuntimeGetCommandObject
   GetLanguageRuntimeGetCommandObjectAtIndex(uint32_t idx);
+
+  static LanguageRuntimeGetExceptionPrecondition
+  GetLanguageRuntimeGetExceptionPreconditionAtIndex(uint32_t idx);
 
   static LanguageRuntimeCreateInstance
   GetLanguageRuntimeCreateCallbackForPluginName(ConstString name);
@@ -263,7 +259,7 @@ public:
 
   static lldb::ScriptInterpreterSP
   GetScriptInterpreterForLanguage(lldb::ScriptLanguage script_lang,
-                                  CommandInterpreter &interpreter);
+                                  Debugger &debugger);
 
   // StructuredDataPlugin
 

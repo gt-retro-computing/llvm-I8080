@@ -48,6 +48,10 @@
       parameter(omp_alloctrait_val_kind=int_ptr_kind())
       integer omp_pause_resource_kind
       parameter(omp_pause_resource_kind=omp_integer_kind)
+      integer omp_depend_kind
+      parameter(omp_depend_kind=int_ptr_kind())
+      integer omp_event_handle_kind
+      parameter(omp_event_handle_kind=int_ptr_kind())
 
       integer(kind=omp_integer_kind)openmp_version
       parameter(openmp_version=@LIBOMP_OMP_YEAR_MONTH@)
@@ -68,6 +72,8 @@
       parameter(omp_sched_guided=3)
       integer(kind=omp_sched_kind)omp_sched_auto
       parameter(omp_sched_auto=4)
+      integer(kind=omp_sched_kind)omp_sched_monotonic
+      parameter(omp_sched_monotonic=Z'80000000')
 
       integer(kind=omp_proc_bind_kind)omp_proc_bind_false
       parameter(omp_proc_bind_false=0)
@@ -438,6 +444,11 @@
           integer (kind=omp_integer_kind) omp_get_supported_active_levels
         end function omp_get_supported_active_levels
 
+        subroutine omp_fulfill_event(event) bind(c)
+          import
+          integer (kind=omp_event_handle_kind), value :: event
+        end subroutine omp_fulfill_event
+
         subroutine omp_init_lock(svar) bind(c)
 !DIR$ IF(__INTEL_COMPILER.GE.1400)
 !DIR$ attributes known_intrinsic :: omp_init_lock
@@ -774,6 +785,7 @@
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_pause_resource
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_pause_resource_all
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_supported_active_levels
+!DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_fulfill_event
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_num_teams
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_team_num
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_init_lock
@@ -856,6 +868,7 @@
 !$omp declare target(omp_pause_resource )
 !$omp declare target(omp_pause_resource_all )
 !$omp declare target(omp_get_supported_active_levels )
+!$omp declare target(omp_fulfill_event)
 !$omp declare target(omp_get_num_teams )
 !$omp declare target(omp_get_team_num )
 !$omp declare target(omp_init_lock )

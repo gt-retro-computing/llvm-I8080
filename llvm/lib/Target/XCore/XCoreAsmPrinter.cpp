@@ -11,7 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstPrinter/XCoreInstPrinter.h"
+#include "MCTargetDesc/XCoreInstPrinter.h"
+#include "TargetInfo/XCoreTargetInfo.h"
 #include "XCore.h"
 #include "XCoreInstrInfo.h"
 #include "XCoreMCInstLower.h"
@@ -213,7 +214,7 @@ void XCoreAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
     MO.getMBB()->getSymbol()->print(O, MAI);
     break;
   case MachineOperand::MO_GlobalAddress:
-    getSymbol(MO.getGlobal())->print(O, MAI);
+    PrintSymbolOperand(MO, O);
     break;
   case MachineOperand::MO_ConstantPoolIndex:
     O << DL.getPrivateGlobalPrefix() << "CPI" << getFunctionNumber() << '_'

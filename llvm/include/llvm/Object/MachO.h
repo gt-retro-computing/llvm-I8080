@@ -293,13 +293,12 @@ public:
   unsigned getSectionID(SectionRef Sec) const;
 
   void moveSectionNext(DataRefImpl &Sec) const override;
-  std::error_code getSectionName(DataRefImpl Sec,
-                                 StringRef &Res) const override;
+  Expected<StringRef> getSectionName(DataRefImpl Sec) const override;
   uint64_t getSectionAddress(DataRefImpl Sec) const override;
   uint64_t getSectionIndex(DataRefImpl Sec) const override;
   uint64_t getSectionSize(DataRefImpl Sec) const override;
-  std::error_code getSectionContents(DataRefImpl Sec,
-                                     StringRef &Res) const override;
+  Expected<ArrayRef<uint8_t>>
+  getSectionContents(DataRefImpl Sec) const override;
   uint64_t getSectionAlignment(DataRefImpl Sec) const override;
   Expected<SectionRef> getSection(unsigned SectionIndex) const;
   Expected<SectionRef> getSection(StringRef SectionName) const;
@@ -572,6 +571,7 @@ public:
                               const char **McpuDefault = nullptr,
                               const char **ArchFlag = nullptr);
   static bool isValidArch(StringRef ArchFlag);
+  static ArrayRef<StringRef> getValidArchs();
   static Triple getHostArch();
 
   bool isRelocatableObject() const override;
@@ -609,6 +609,7 @@ public:
     case MachO::PLATFORM_TVOS: return "tvos";
     case MachO::PLATFORM_WATCHOS: return "watchos";
     case MachO::PLATFORM_BRIDGEOS: return "bridgeos";
+    case MachO::PLATFORM_MACCATALYST: return "macCatalyst";
     case MachO::PLATFORM_IOSSIMULATOR: return "iossimulator";
     case MachO::PLATFORM_TVOSSIMULATOR: return "tvossimulator";
     case MachO::PLATFORM_WATCHOSSIMULATOR: return "watchossimulator";

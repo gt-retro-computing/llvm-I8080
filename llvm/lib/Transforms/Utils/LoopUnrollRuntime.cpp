@@ -124,11 +124,10 @@ static void ConnectProlog(Loop *L, Value *BECount, unsigned Count,
       // Update the existing PHI node operand with the value from the
       // new PHI node.  How this is done depends on if the existing
       // PHI node is in the original loop block, or the exit block.
-      if (L->contains(&PN)) {
-        PN.setIncomingValue(PN.getBasicBlockIndex(NewPreHeader), NewPN);
-      } else {
+      if (L->contains(&PN))
+        PN.setIncomingValueForBlock(NewPreHeader, NewPN);
+      else
         PN.addIncoming(NewPN, PrologExit);
-      }
     }
   }
 
@@ -264,7 +263,7 @@ static void ConnectEpilog(Loop *L, Value *ModVal, BasicBlock *NewExit,
       // Update the existing PHI node operand with the value from the new PHI
       // node.  Corresponding instruction in epilog loop should be PHI.
       PHINode *VPN = cast<PHINode>(VMap[&PN]);
-      VPN->setIncomingValue(VPN->getBasicBlockIndex(EpilogPreHeader), NewPN);
+      VPN->setIncomingValueForBlock(EpilogPreHeader, NewPN);
     }
   }
 
@@ -949,11 +948,12 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
   if (remainderLoop && UnrollRemainder) {
     LLVM_DEBUG(dbgs() << "Unrolling remainder loop\n");
     UnrollResult =
-        UnrollLoop(remainderLoop, /*Count*/ Count - 1, /*TripCount*/ Count - 1,
-                   /*Force*/ false, /*AllowRuntime*/ false,
-                   /*AllowExpensiveTripCount*/ false, /*PreserveCondBr*/ true,
-                   /*PreserveOnlyFirst*/ false, /*TripMultiple*/ 1,
-                   /*PeelCount*/ 0, /*UnrollRemainder*/ false, ForgetAllSCEV,
+        UnrollLoop(remainderLoop,
+                   {/*Count*/ Count - 1, /*TripCount*/ Count - 1,
+                    /*Force*/ false, /*AllowRuntime*/ false,
+                    /*AllowExpensiveTripCount*/ false, /*PreserveCondBr*/ true,
+                    /*PreserveOnlyFirst*/ false, /*TripMultiple*/ 1,
+                    /*PeelCount*/ 0, /*UnrollRemainder*/ false, ForgetAllSCEV},
                    LI, SE, DT, AC, /*ORE*/ nullptr, PreserveLCSSA);
   }
 

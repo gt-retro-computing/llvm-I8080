@@ -43,10 +43,11 @@
 
     /* schedule kind constants */
     typedef enum omp_sched_t {
-	omp_sched_static  = 1,
-	omp_sched_dynamic = 2,
-	omp_sched_guided  = 3,
-	omp_sched_auto    = 4
+        omp_sched_static  = 1,
+        omp_sched_dynamic = 2,
+        omp_sched_guided  = 3,
+        omp_sched_auto    = 4,
+        omp_sched_monotonic = 0x80000000
     } omp_sched_t;
 
     /* set API functions */
@@ -148,6 +149,7 @@
 
     /* OpenMP 5.0 */
     extern int   __KAI_KMPC_CONVENTION  omp_get_device_num (void);
+    typedef void * omp_depend_t;
 
     /* kmp API functions */
     extern int    __KAI_KMPC_CONVENTION  kmp_get_stacksize          (void);
@@ -331,6 +333,15 @@
     extern size_t __KAI_KMPC_CONVENTION omp_get_affinity_format(char *, size_t);
     extern void __KAI_KMPC_CONVENTION omp_display_affinity(char const *);
     extern size_t __KAI_KMPC_CONVENTION omp_capture_affinity(char *, size_t, char const *);
+
+    /* OpenMP 5.0 events */
+#   if defined(_WIN32)
+    // On Windows cl and icl do not support 64-bit enum, let's use integer then.
+    typedef omp_uintptr_t omp_event_handle_t;
+#   else
+    typedef enum omp_event_handle_t { KMP_EVENT_MAX_HANDLE = UINTPTR_MAX } omp_event_handle_t;
+#   endif
+    extern void __KAI_KMPC_CONVENTION omp_fulfill_event ( omp_event_handle_t event );
 
     /* OpenMP 5.0 Pause Resources */
     typedef enum omp_pause_resource_t {

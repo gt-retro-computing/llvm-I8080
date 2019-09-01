@@ -50,9 +50,7 @@ INITIALIZE_PASS_END(Legalizer, DEBUG_TYPE,
                     "Legalize the Machine IR a function's Machine IR", false,
                     false)
 
-Legalizer::Legalizer() : MachineFunctionPass(ID) {
-  initializeLegalizerPass(*PassRegistry::getPassRegistry());
-}
+Legalizer::Legalizer() : MachineFunctionPass(ID) { }
 
 void Legalizer::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetPassConfig>();
@@ -88,12 +86,15 @@ namespace {
 class LegalizerWorkListManager : public GISelChangeObserver {
   InstListTy &InstList;
   ArtifactListTy &ArtifactList;
+#ifndef NDEBUG
+  SmallVector<MachineInstr *, 4> NewMIs;
+#endif
 
 public:
   LegalizerWorkListManager(InstListTy &Insts, ArtifactListTy &Arts)
       : InstList(Insts), ArtifactList(Arts) {}
 
-  void createdInstr(MachineInstr &MI) override {
+  void createdOrChangedInstr(MachineInstr &MI) {
     // Only legalize pre-isel generic instructions.
     // Legalization process could generate Target specific pseudo
     // instructions with generic types. Don't record them
@@ -103,7 +104,20 @@ public:
       else
         InstList.insert(&MI);
     }
+  }
+
+  void createdInstr(MachineInstr &MI) override {
     LLVM_DEBUG(dbgs() << ".. .. New MI: " << MI);
+    LLVM_DEBUG(NewMIs.push_back(&MI));
+    createdOrChangedInstr(MI);
+  }
+
+  void printNewInstrs() {
+    LLVM_DEBUG({
+      for (const auto *MI : NewMIs)
+        dbgs() << ".. .. New MI: " << *MI;
+      NewMIs.clear();
+    });
   }
 
   void erasingInstr(MachineInstr &MI) override {
@@ -120,7 +134,7 @@ public:
     // When insts change, we want to revisit them to legalize them again.
     // We'll consider them the same as created.
     LLVM_DEBUG(dbgs() << ".. .. Changed MI: " << MI);
-    createdInstr(MI);
+    createdOrChangedInstr(MI);
   }
 };
 } // namespace
@@ -213,6 +227,7 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
                            "unable to legalize instruction", MI);
         return false;
       }
+      WorkListObserver.printNewInstrs();
       Changed |= Res == LegalizerHelper::Legalized;
     }
     while (!ArtifactList.empty()) {
@@ -227,6 +242,7 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
       SmallVector<MachineInstr *, 4> DeadInstructions;
       if (ArtCombiner.tryCombineInstruction(MI, DeadInstructions,
                                             WrapperObserver)) {
+        WorkListObserver.printNewInstrs();
         for (auto *DeadMI : DeadInstructions) {
           LLVM_DEBUG(dbgs() << *DeadMI << "Is dead\n");
           RemoveDeadInstFromLists(DeadMI);

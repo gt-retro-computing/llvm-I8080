@@ -479,9 +479,9 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
   return NF;
 }
 
-/// AllCallersPassInValidPointerForArgument - Return true if we can prove that
-/// all callees pass in a valid pointer for the specified function argument.
-static bool allCallersPassInValidPointerForArgument(Argument *Arg) {
+/// Return true if we can prove that all callees pass in a valid pointer for the
+/// specified function argument.
+static bool allCallersPassValidPointerForArgument(Argument *Arg, Type *Ty) {
   Function *Callee = Arg->getParent();
   const DataLayout &DL = Callee->getParent()->getDataLayout();
 
@@ -493,7 +493,7 @@ static bool allCallersPassInValidPointerForArgument(Argument *Arg) {
     CallSite CS(U);
     assert(CS && "Should only have direct calls!");
 
-    if (!isDereferenceablePointer(CS.getArgument(ArgNo), DL))
+    if (!isDereferenceablePointer(CS.getArgument(ArgNo), Ty, DL))
       return false;
   }
   return true;
@@ -566,8 +566,8 @@ static void markIndicesSafe(const IndicesVector &ToMark,
 /// This method limits promotion of aggregates to only promote up to three
 /// elements of the aggregate in order to avoid exploding the number of
 /// arguments passed in.
-static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
-                                    AAResults &AAR, unsigned MaxElements) {
+static bool isSafeToPromoteArgument(Argument *Arg, Type *ByValTy, AAResults &AAR,
+                                    unsigned MaxElements) {
   using GEPIndicesSet = std::set<IndicesVector>;
 
   // Quick exit for unused arguments
@@ -589,9 +589,6 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
   //
   // This set will contain all sets of indices that are loaded in the entry
   // block, and thus are safe to unconditionally load in the caller.
-  //
-  // This optimization is also safe for InAlloca parameters, because it verifies
-  // that the address isn't captured.
   GEPIndicesSet SafeToUnconditionallyLoad;
 
   // This set contains all the sets of indices that we are planning to promote.
@@ -599,8 +596,27 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
   GEPIndicesSet ToPromote;
 
   // If the pointer is always valid, any load with first index 0 is valid.
-  if (isByValOrInAlloca || allCallersPassInValidPointerForArgument(Arg))
+
+  if (ByValTy)
     SafeToUnconditionallyLoad.insert(IndicesVector(1, 0));
+
+  // Whenever a new underlying type for the operand is found, make sure it's
+  // consistent with the GEPs and loads we've already seen and, if necessary,
+  // use it to see if all incoming pointers are valid (which implies the 0-index
+  // is safe).
+  Type *BaseTy = ByValTy;
+  auto UpdateBaseTy = [&](Type *NewBaseTy) {
+    if (BaseTy)
+      return BaseTy == NewBaseTy;
+
+    BaseTy = NewBaseTy;
+    if (allCallersPassValidPointerForArgument(Arg, BaseTy)) {
+      assert(SafeToUnconditionallyLoad.empty());
+      SafeToUnconditionallyLoad.insert(IndicesVector(1, 0));
+    }
+
+    return true;
+  };
 
   // First, iterate the entry block and mark loads of (geps of) arguments as
   // safe.
@@ -624,6 +640,9 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
               // right away, can't promote this argument at all.
               return false;
 
+          if (!UpdateBaseTy(GEP->getSourceElementType()))
+            return false;
+
           // Indices checked out, mark them as safe
           markIndicesSafe(Indices, SafeToUnconditionallyLoad);
           Indices.clear();
@@ -631,6 +650,11 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
       } else if (V == Arg) {
         // Direct loads are equivalent to a GEP with a single 0 index.
         markIndicesSafe(IndicesVector(1, 0), SafeToUnconditionallyLoad);
+
+        if (BaseTy && LI->getType() != BaseTy)
+          return false;
+
+        BaseTy = LI->getType();
       }
     }
 
@@ -648,6 +672,9 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
       Loads.push_back(LI);
       // Direct loads are equivalent to a GEP with a zero index and then a load.
       Operands.push_back(0);
+
+      if (!UpdateBaseTy(LI->getType()))
+        return false;
     } else if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(UR)) {
       if (GEP->use_empty()) {
         // Dead GEP's cause trouble later.  Just remove them if we run into
@@ -656,9 +683,11 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
         // TODO: This runs the above loop over and over again for dead GEPs
         // Couldn't we just do increment the UI iterator earlier and erase the
         // use?
-        return isSafeToPromoteArgument(Arg, isByValOrInAlloca, AAR,
-                                       MaxElements);
+        return isSafeToPromoteArgument(Arg, ByValTy, AAR, MaxElements);
       }
+
+      if (!UpdateBaseTy(GEP->getSourceElementType()))
+        return false;
 
       // Ensure that all of the indices are constants.
       for (User::op_iterator i = GEP->idx_begin(), e = GEP->idx_end(); i != e;
@@ -856,6 +885,11 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
   if (F->isVarArg())
     return nullptr;
 
+  // Don't transform functions that receive inallocas, as the transformation may
+  // not be safe depending on calling convention.
+  if (F->getAttributes().hasAttrSomewhere(Attribute::InAlloca))
+    return nullptr;
+
   // First check: see if there are any pointer arguments!  If not, quick exit.
   SmallVector<Argument *, 16> PointerArgs;
   for (Argument &I : F->args())
@@ -914,8 +948,7 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
 
     // If this is a byval argument, and if the aggregate type is small, just
     // pass the elements, which is always safe, if the passed value is densely
-    // packed or if we can prove the padding bytes are never accessed. This does
-    // not apply to inalloca.
+    // packed or if we can prove the padding bytes are never accessed.
     bool isSafeToPromote =
         PtrArg->hasByValAttr() &&
         (isDenselyPacked(AgTy, DL) || !canPaddingBeAccessed(PtrArg));
@@ -966,8 +999,9 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
     }
 
     // Otherwise, see if we can promote the pointer to its value.
-    if (isSafeToPromoteArgument(PtrArg, PtrArg->hasByValOrInAllocaAttr(), AAR,
-                                MaxElements))
+    Type *ByValTy =
+        PtrArg->hasByValAttr() ? PtrArg->getParamByValType() : nullptr;
+    if (isSafeToPromoteArgument(PtrArg, ByValTy, AAR, MaxElements))
       ArgsToPromote.insert(PtrArg);
   }
 
@@ -1104,7 +1138,9 @@ bool ArgPromotion::runOnSCC(CallGraphSCC &SCC) {
         CallGraphNode *NewCalleeNode =
             CG.getOrInsertFunction(NewCS.getCalledFunction());
         CallGraphNode *CallerNode = CG[Caller];
-        CallerNode->replaceCallEdge(OldCS, NewCS, NewCalleeNode);
+        CallerNode->replaceCallEdge(*cast<CallBase>(OldCS.getInstruction()),
+                                    *cast<CallBase>(NewCS.getInstruction()),
+                                    NewCalleeNode);
       };
 
       const TargetTransformInfo &TTI =

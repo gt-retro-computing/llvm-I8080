@@ -73,6 +73,7 @@
 #include "clang/AST/DeclFriend.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/TemplateBase.h"
 #include "clang/AST/TemplateName.h"
@@ -100,6 +101,59 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      const TemplateArgument &Arg1,
                                      const TemplateArgument &Arg2);
+static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
+                                     NestedNameSpecifier *NNS1,
+                                     NestedNameSpecifier *NNS2);
+static bool IsStructurallyEquivalent(const IdentifierInfo *Name1,
+                                     const IdentifierInfo *Name2);
+
+static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
+                                     const DeclarationName Name1,
+                                     const DeclarationName Name2) {
+  if (Name1.getNameKind() != Name2.getNameKind())
+    return false;
+
+  switch (Name1.getNameKind()) {
+
+  case DeclarationName::Identifier:
+    return IsStructurallyEquivalent(Name1.getAsIdentifierInfo(),
+                                    Name2.getAsIdentifierInfo());
+
+  case DeclarationName::CXXConstructorName:
+  case DeclarationName::CXXDestructorName:
+  case DeclarationName::CXXConversionFunctionName:
+    return IsStructurallyEquivalent(Context, Name1.getCXXNameType(),
+                                    Name2.getCXXNameType());
+
+  case DeclarationName::CXXDeductionGuideName: {
+    if (!IsStructurallyEquivalent(
+            Context, Name1.getCXXDeductionGuideTemplate()->getDeclName(),
+            Name2.getCXXDeductionGuideTemplate()->getDeclName()))
+      return false;
+    return IsStructurallyEquivalent(Context,
+                                    Name1.getCXXDeductionGuideTemplate(),
+                                    Name2.getCXXDeductionGuideTemplate());
+  }
+
+  case DeclarationName::CXXOperatorName:
+    return Name1.getCXXOverloadedOperator() == Name2.getCXXOverloadedOperator();
+
+  case DeclarationName::CXXLiteralOperatorName:
+    return IsStructurallyEquivalent(Name1.getCXXLiteralIdentifier(),
+                                    Name2.getCXXLiteralIdentifier());
+
+  case DeclarationName::CXXUsingDirective:
+    return true; // FIXME When do we consider two using directives equal?
+
+  case DeclarationName::ObjCZeroArgSelector:
+  case DeclarationName::ObjCOneArgSelector:
+  case DeclarationName::ObjCMultiArgSelector:
+    return true; // FIXME
+  }
+
+  llvm_unreachable("Unhandled kind of DeclarationName");
+  return true;
+}
 
 /// Determine structural equivalence of two expressions.
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
@@ -107,7 +161,26 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
   if (!E1 || !E2)
     return E1 == E2;
 
-  // FIXME: Actually perform a structural comparison!
+  if (auto *DE1 = dyn_cast<DependentScopeDeclRefExpr>(E1)) {
+    auto *DE2 = dyn_cast<DependentScopeDeclRefExpr>(E2);
+    if (!DE2)
+      return false;
+    if (!IsStructurallyEquivalent(Context, DE1->getDeclName(),
+                                  DE2->getDeclName()))
+      return false;
+    return IsStructurallyEquivalent(Context, DE1->getQualifier(),
+                                    DE2->getQualifier());
+  } else if (auto CastE1 = dyn_cast<ImplicitCastExpr>(E1)) {
+    auto *CastE2 = dyn_cast<ImplicitCastExpr>(E2);
+    if (!CastE2)
+      return false;
+    if (!IsStructurallyEquivalent(Context, CastE1->getType(),
+                                  CastE2->getType()))
+      return false;
+    return IsStructurallyEquivalent(Context, CastE1->getSubExpr(),
+                                    CastE2->getSubExpr());
+  }
+  // FIXME: Handle other kind of expressions!
   return true;
 }
 
@@ -178,6 +251,12 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
       if (!IsStructurallyEquivalent(Context, *I1, *I2))
         return false;
     return I1 == E1 && I2 == E2;
+  }
+
+  case TemplateName::AssumedTemplate: {
+    AssumedTemplateStorage *TN1 = N1.getAsAssumedTemplateName(),
+                           *TN2 = N1.getAsAssumedTemplateName();
+    return TN1->getDeclName() == TN2->getDeclName();
   }
 
   case TemplateName::QualifiedTemplate: {
@@ -318,6 +397,36 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
     return false;
   if (EI1.getNoCfCheck() != EI2.getNoCfCheck())
     return false;
+
+  return true;
+}
+
+/// Check the equivalence of exception specifications.
+static bool IsEquivalentExceptionSpec(StructuralEquivalenceContext &Context,
+                                      const FunctionProtoType *Proto1,
+                                      const FunctionProtoType *Proto2) {
+
+  auto Spec1 = Proto1->getExceptionSpecType();
+  auto Spec2 = Proto2->getExceptionSpecType();
+
+  if (isUnresolvedExceptionSpec(Spec1) || isUnresolvedExceptionSpec(Spec2))
+    return true;
+
+  if (Spec1 != Spec2)
+    return false;
+  if (Spec1 == EST_Dynamic) {
+    if (Proto1->getNumExceptions() != Proto2->getNumExceptions())
+      return false;
+    for (unsigned I = 0, N = Proto1->getNumExceptions(); I != N; ++I) {
+      if (!IsStructurallyEquivalent(Context, Proto1->getExceptionType(I),
+                                    Proto2->getExceptionType(I)))
+        return false;
+    }
+  } else if (isComputedNoexcept(Spec1)) {
+    if (!IsStructurallyEquivalent(Context, Proto1->getNoexceptExpr(),
+                                  Proto2->getNoexceptExpr()))
+      return false;
+  }
 
   return true;
 }
@@ -536,24 +645,8 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
         cast<FunctionProtoType>(OrigT1.getDesugaredType(Context.FromCtx));
     const auto *OrigProto2 =
         cast<FunctionProtoType>(OrigT2.getDesugaredType(Context.ToCtx));
-    auto Spec1 = OrigProto1->getExceptionSpecType();
-    auto Spec2 = OrigProto2->getExceptionSpecType();
-
-    if (Spec1 != Spec2)
+    if (!IsEquivalentExceptionSpec(Context, OrigProto1, OrigProto2))
       return false;
-    if (Spec1 == EST_Dynamic) {
-      if (OrigProto1->getNumExceptions() != OrigProto2->getNumExceptions())
-        return false;
-      for (unsigned I = 0, N = OrigProto1->getNumExceptions(); I != N; ++I) {
-        if (!IsStructurallyEquivalent(Context, OrigProto1->getExceptionType(I),
-                                      OrigProto2->getExceptionType(I)))
-          return false;
-      }
-    } else if (isComputedNoexcept(Spec1)) {
-      if (!IsStructurallyEquivalent(Context, OrigProto1->getNoexceptExpr(),
-                                    OrigProto2->getNoexceptExpr()))
-        return false;
-    }
 
     // Fall through to check the bits common with FunctionNoProtoType.
     LLVM_FALLTHROUGH;
@@ -592,6 +685,13 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
   case Type::Paren:
     if (!IsStructurallyEquivalent(Context, cast<ParenType>(T1)->getInnerType(),
                                   cast<ParenType>(T2)->getInnerType()))
+      return false;
+    break;
+
+  case Type::MacroQualified:
+    if (!IsStructurallyEquivalent(
+            Context, cast<MacroQualifiedType>(T1)->getUnderlyingType(),
+            cast<MacroQualifiedType>(T2)->getUnderlyingType()))
       return false;
     break;
 
@@ -955,13 +1055,15 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
 
   if (auto *Constructor1 = dyn_cast<CXXConstructorDecl>(Method1)) {
     auto *Constructor2 = cast<CXXConstructorDecl>(Method2);
-    if (Constructor1->isExplicit() != Constructor2->isExplicit())
+    if (!Constructor1->getExplicitSpecifier().isEquivalent(
+            Constructor2->getExplicitSpecifier()))
       return false;
   }
 
   if (auto *Conversion1 = dyn_cast<CXXConversionDecl>(Method1)) {
     auto *Conversion2 = cast<CXXConversionDecl>(Method2);
-    if (Conversion1->isExplicit() != Conversion2->isExplicit())
+    if (!Conversion1->getExplicitSpecifier().isEquivalent(
+            Conversion2->getExplicitSpecifier()))
       return false;
     if (!IsStructurallyEquivalent(Context, Conversion1->getConversionType(),
                                   Conversion2->getConversionType()))

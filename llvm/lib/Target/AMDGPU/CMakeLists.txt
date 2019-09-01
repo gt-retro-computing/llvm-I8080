@@ -58,6 +58,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUMCInstLower.cpp
   AMDGPUOpenCLEnqueuedBlockLowering.cpp
   AMDGPUPromoteAlloca.cpp
+  AMDGPUPropagateAttributes.cpp
   AMDGPURegAsmNames.inc.cpp
   AMDGPURegisterBankInfo.cpp
   AMDGPURegisterInfo.cpp
@@ -106,6 +107,7 @@ add_llvm_target(AMDGPUCodeGen
   SILoadStoreOptimizer.cpp
   SILowerControlFlow.cpp
   SILowerI1Copies.cpp
+  SILowerSGPRSpills.cpp
   SIMachineFunctionInfo.cpp
   SIMachineScheduler.cpp
   SIMemoryLegalizer.cpp
@@ -116,13 +118,14 @@ add_llvm_target(AMDGPUCodeGen
   SIShrinkInstructions.cpp
   SIWholeQuadMode.cpp
   GCNILPSched.cpp
+  GCNRegBankReassign.cpp
+  GCNNSAReassign.cpp
   GCNDPPCombine.cpp
   SIModeRegister.cpp
   )
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)
-add_subdirectory(InstPrinter)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
 add_subdirectory(Utils)

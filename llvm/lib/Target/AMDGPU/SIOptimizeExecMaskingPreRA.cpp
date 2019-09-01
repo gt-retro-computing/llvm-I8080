@@ -82,34 +82,50 @@ FunctionPass *llvm::createSIOptimizeExecMaskingPreRAPass() {
   return new SIOptimizeExecMaskingPreRA();
 }
 
-static bool isEndCF(const MachineInstr& MI, const SIRegisterInfo* TRI) {
-  return MI.getOpcode() == AMDGPU::S_OR_B64_term &&
+static bool isEndCF(const MachineInstr &MI, const SIRegisterInfo *TRI,
+                    const GCNSubtarget &ST) {
+  if (ST.isWave32()) {
+    return MI.getOpcode() == AMDGPU::S_OR_B32 &&
+           MI.modifiesRegister(AMDGPU::EXEC_LO, TRI);
+  }
+
+  return MI.getOpcode() == AMDGPU::S_OR_B64 &&
          MI.modifiesRegister(AMDGPU::EXEC, TRI);
 }
 
-static bool isFullExecCopy(const MachineInstr& MI) {
-  return MI.getOperand(1).getReg() == AMDGPU::EXEC;
+static bool isFullExecCopy(const MachineInstr& MI, const GCNSubtarget& ST) {
+  unsigned Exec = ST.isWave32() ? AMDGPU::EXEC_LO : AMDGPU::EXEC;
+
+  if (MI.isCopy() && MI.getOperand(1).getReg() == Exec) {
+    assert(MI.isFullCopy());
+    return true;
+  }
+
+  return false;
 }
 
 static unsigned getOrNonExecReg(const MachineInstr &MI,
-                                const SIInstrInfo &TII) {
+                                const SIInstrInfo &TII,
+                                const GCNSubtarget& ST) {
+  unsigned Exec = ST.isWave32() ? AMDGPU::EXEC_LO : AMDGPU::EXEC;
   auto Op = TII.getNamedOperand(MI, AMDGPU::OpName::src1);
-  if (Op->isReg() && Op->getReg() != AMDGPU::EXEC)
+  if (Op->isReg() && Op->getReg() != Exec)
      return Op->getReg();
   Op = TII.getNamedOperand(MI, AMDGPU::OpName::src0);
-  if (Op->isReg() && Op->getReg() != AMDGPU::EXEC)
+  if (Op->isReg() && Op->getReg() != Exec)
      return Op->getReg();
   return AMDGPU::NoRegister;
 }
 
 static MachineInstr* getOrExecSource(const MachineInstr &MI,
                                      const SIInstrInfo &TII,
-                                     const MachineRegisterInfo &MRI) {
-  auto SavedExec = getOrNonExecReg(MI, TII);
+                                     const MachineRegisterInfo &MRI,
+                                     const GCNSubtarget& ST) {
+  auto SavedExec = getOrNonExecReg(MI, TII, ST);
   if (SavedExec == AMDGPU::NoRegister)
     return nullptr;
   auto SaveExecInst = MRI.getUniqueVRegDef(SavedExec);
-  if (!SaveExecInst || !isFullExecCopy(*SaveExecInst))
+  if (!SaveExecInst || !isFullExecCopy(*SaveExecInst, ST))
     return nullptr;
   return SaveExecInst;
 }
@@ -175,10 +191,11 @@ static unsigned optimizeVcndVcmpPair(MachineBasicBlock &MBB,
                                      LiveIntervals *LIS) {
   const SIRegisterInfo *TRI = ST.getRegisterInfo();
   const SIInstrInfo *TII = ST.getInstrInfo();
-  const unsigned AndOpc = AMDGPU::S_AND_B64;
-  const unsigned Andn2Opc = AMDGPU::S_ANDN2_B64;
-  const unsigned CondReg = AMDGPU::VCC;
-  const unsigned ExecReg = AMDGPU::EXEC;
+  bool Wave32 = ST.isWave32();
+  const unsigned AndOpc = Wave32 ? AMDGPU::S_AND_B32 : AMDGPU::S_AND_B64;
+  const unsigned Andn2Opc = Wave32 ? AMDGPU::S_ANDN2_B32 : AMDGPU::S_ANDN2_B64;
+  const unsigned CondReg = Wave32 ? AMDGPU::VCC_LO : AMDGPU::VCC;
+  const unsigned ExecReg = Wave32 ? AMDGPU::EXEC_LO : AMDGPU::EXEC;
 
   auto I = llvm::find_if(MBB.terminators(), [](const MachineInstr &MI) {
                            unsigned Opc = MI.getOpcode();
@@ -241,7 +258,7 @@ static unsigned optimizeVcndVcmpPair(MachineBasicBlock &MBB,
   MachineInstr *Andn2 = BuildMI(MBB, *And, And->getDebugLoc(),
                                 TII->get(Andn2Opc), And->getOperand(0).getReg())
                             .addReg(ExecReg)
-                            .addReg(CCReg, CC->getSubReg());
+                            .addReg(CCReg, 0, CC->getSubReg());
   And->eraseFromParent();
   LIS->InsertMachineInstrInMaps(*Andn2);
 
@@ -285,6 +302,7 @@ bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
   MachineRegisterInfo &MRI = MF.getRegInfo();
   LiveIntervals *LIS = &getAnalysis<LiveIntervals>();
   DenseSet<unsigned> RecalcRegs({AMDGPU::EXEC_LO, AMDGPU::EXEC_HI});
+  unsigned Exec = ST.isWave32() ? AMDGPU::EXEC_LO : AMDGPU::EXEC;
   bool Changed = false;
 
   for (MachineBasicBlock &MBB : MF) {
@@ -362,20 +380,20 @@ bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
 
     // Try to collapse adjacent endifs.
     auto E = MBB.end();
-    auto Lead = MBB.getFirstTerminator();
-    if (MBB.succ_size() != 1 || Lead == E || !isEndCF(*Lead, TRI))
+    auto Lead = skipDebugInstructionsForward(MBB.begin(), E);
+    if (MBB.succ_size() != 1 || Lead == E || !isEndCF(*Lead, TRI, ST))
       continue;
 
     MachineBasicBlock *TmpMBB = &MBB;
     auto NextLead = skipIgnoreExecInstsTrivialSucc(TmpMBB, std::next(Lead));
-    if (NextLead == TmpMBB->end() || !isEndCF(*NextLead, TRI) ||
-        !getOrExecSource(*NextLead, *TII, MRI))
+    if (NextLead == TmpMBB->end() || !isEndCF(*NextLead, TRI, ST) ||
+        !getOrExecSource(*NextLead, *TII, MRI, ST))
       continue;
 
     LLVM_DEBUG(dbgs() << "Redundant EXEC = S_OR_B64 found: " << *Lead << '\n');
 
-    auto SaveExec = getOrExecSource(*Lead, *TII, MRI);
-    unsigned SaveExecReg = getOrNonExecReg(*Lead, *TII);
+    auto SaveExec = getOrExecSource(*Lead, *TII, MRI, ST);
+    unsigned SaveExecReg = getOrNonExecReg(*Lead, *TII, ST);
     for (auto &Op : Lead->operands()) {
       if (Op.isReg())
         RecalcRegs.insert(Op.getReg());
@@ -409,7 +427,7 @@ bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
     if (SafeToReplace) {
       LIS->RemoveMachineInstrFromMaps(*SaveExec);
       SaveExec->eraseFromParent();
-      MRI.replaceRegWith(SavedExec, AMDGPU::EXEC);
+      MRI.replaceRegWith(SavedExec, Exec);
       LIS->removeInterval(SavedExec);
     }
   }

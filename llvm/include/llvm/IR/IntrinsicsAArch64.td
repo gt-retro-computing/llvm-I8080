@@ -462,12 +462,12 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                 [IntrArgMemOnly, NoCapture<2>]>;
 
   class AdvSIMD_2Vec_Load_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>],
+    : Intrinsic<[LLVMMatchType<0>, llvm_anyvector_ty],
                 [LLVMAnyPointerType<LLVMMatchType<0>>],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_2Vec_Load_Lane_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>],
-                [LLVMMatchType<0>, LLVMMatchType<0>,
+    : Intrinsic<[LLVMMatchType<0>, LLVMMatchType<0>],
+                [LLVMMatchType<0>, llvm_anyvector_ty,
                  llvm_i64_ty, llvm_anyptr_ty],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_2Vec_Store_Intrinsic
@@ -480,12 +480,12 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                 [IntrArgMemOnly, NoCapture<3>]>;
 
   class AdvSIMD_3Vec_Load_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>, LLVMMatchType<0>],
+    : Intrinsic<[LLVMMatchType<0>, LLVMMatchType<0>, llvm_anyvector_ty],
                 [LLVMAnyPointerType<LLVMMatchType<0>>],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_3Vec_Load_Lane_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>, LLVMMatchType<0>],
-                [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>,
+    : Intrinsic<[LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>],
+                [LLVMMatchType<0>, LLVMMatchType<0>, llvm_anyvector_ty,
                  llvm_i64_ty, llvm_anyptr_ty],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_3Vec_Store_Intrinsic
@@ -499,15 +499,15 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                 [IntrArgMemOnly, NoCapture<4>]>;
 
   class AdvSIMD_4Vec_Load_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>,
-                 LLVMMatchType<0>, LLVMMatchType<0>],
+    : Intrinsic<[LLVMMatchType<0>, LLVMMatchType<0>,
+                 LLVMMatchType<0>, llvm_anyvector_ty],
                 [LLVMAnyPointerType<LLVMMatchType<0>>],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_4Vec_Load_Lane_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>,
+    : Intrinsic<[LLVMMatchType<0>, LLVMMatchType<0>,
                  LLVMMatchType<0>, LLVMMatchType<0>],
                 [LLVMMatchType<0>, LLVMMatchType<0>,
-                 LLVMMatchType<0>, LLVMMatchType<0>,
+                 LLVMMatchType<0>, llvm_anyvector_ty,
                  llvm_i64_ty, llvm_anyptr_ty],
                 [IntrReadMem, IntrArgMemOnly]>;
   class AdvSIMD_4Vec_Store_Intrinsic
@@ -682,5 +682,22 @@ def int_aarch64_crc32cw : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
 def int_aarch64_crc32x  : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i64_ty],
     [IntrNoMem]>;
 def int_aarch64_crc32cx : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i64_ty],
+    [IntrNoMem]>;
+}
+
+//===----------------------------------------------------------------------===//
+// Memory Tagging Extensions (MTE) Intrinsics
+let TargetPrefix = "aarch64" in {
+def int_aarch64_irg   : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_i64_ty],
+    [IntrInaccessibleMemOnly]>;
+def int_aarch64_addg  : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_i64_ty],
+    [IntrNoMem]>;
+def int_aarch64_gmi   : Intrinsic<[llvm_i64_ty], [llvm_ptr_ty, llvm_i64_ty],
+    [IntrNoMem]>;
+def int_aarch64_ldg   : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_ptr_ty],
+    [IntrReadMem]>;
+def int_aarch64_stg   : Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty],
+    [IntrWriteMem]>;
+def int_aarch64_subp :  Intrinsic<[llvm_i64_ty], [llvm_ptr_ty, llvm_ptr_ty],
     [IntrNoMem]>;
 }

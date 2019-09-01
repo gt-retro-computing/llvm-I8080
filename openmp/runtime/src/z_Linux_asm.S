@@ -1185,7 +1185,6 @@ KMP_LABEL(kmp_1_exit):
 
         DEBUG_INFO __kmp_bsr32
 
-
 // -----------------------------------------------------------------------
 #endif /* KMP_ARCH_X86_64 */
 
@@ -1243,7 +1242,7 @@ __tid = 8
 
 	orr	w9, wzr, #1
 	add	w9, w9, w3, lsr #1
-	sub	sp, sp, w9, lsl #4
+	sub	sp, sp, w9, uxtw #4
 	mov	x11, sp
 
 	mov	x8, x0

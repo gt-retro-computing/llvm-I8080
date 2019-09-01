@@ -321,6 +321,10 @@ class MachineFunction {
   /// CodeView label annotations.
   std::vector<std::pair<MCSymbol *, MDNode *>> CodeViewAnnotations;
 
+  /// CodeView heapallocsites.
+  std::vector<std::tuple<MCSymbol*, MCSymbol*, DIType*>>
+      CodeViewHeapAllocSites;
+
   bool CallsEHReturn = false;
   bool CallsUnwindInit = false;
   bool HasEHScopes = false;
@@ -374,8 +378,27 @@ public:
     virtual void MF_HandleRemoval(MachineInstr &MI) = 0;
   };
 
+  /// Structure used to represent pair of argument number after call lowering
+  /// and register used to transfer that argument.
+  /// For now we support only cases when argument is transferred through one
+  /// register.
+  struct ArgRegPair {
+    unsigned Reg;
+    uint16_t ArgNo;
+    ArgRegPair(unsigned R, unsigned Arg) : Reg(R), ArgNo(Arg) {
+      assert(Arg < (1 << 16) && "Arg out of range");
+    }
+  };
+  /// Vector of call argument and its forwarding register.
+  using CallSiteInfo = SmallVector<ArgRegPair, 1>;
+  using CallSiteInfoImpl = SmallVectorImpl<ArgRegPair>;
+
 private:
   Delegate *TheDelegate = nullptr;
+
+  using CallSiteInfoMap = DenseMap<const MachineInstr *, CallSiteInfo>;
+  /// Map a call instruction to call site arguments forwarding info.
+  CallSiteInfoMap CallSitesInfo;
 
   // Callbacks for insertion and removal.
   void handleInsertion(MachineInstr &MI);
@@ -439,7 +462,6 @@ public:
   /// getSubtarget - Return the subtarget for which this machine code is being
   /// compiled.
   const TargetSubtargetInfo &getSubtarget() const { return *STI; }
-  void setSubtarget(const TargetSubtargetInfo *ST) { STI = ST; }
 
   /// getSubtarget - This method returns a pointer to the specified type of
   /// TargetSubtargetInfo.  In debug builds, it verifies that the object being
@@ -737,6 +759,12 @@ public:
   MachineMemOperand *getMachineMemOperand(const MachineMemOperand *MMO,
                                           const AAMDNodes &AAInfo);
 
+  /// Allocate a new MachineMemOperand by copying an existing one,
+  /// replacing the flags. MachineMemOperands are owned
+  /// by the MachineFunction and need not be explicitly deallocated.
+  MachineMemOperand *getMachineMemOperand(const MachineMemOperand *MMO,
+                                          MachineMemOperand::Flags Flags);
+
   using OperandCapacity = ArrayRecycler<MachineOperand>::Capacity;
 
   /// Allocate an array of MachineOperands. This is only intended for use by
@@ -906,6 +934,14 @@ public:
     return CodeViewAnnotations;
   }
 
+  /// Record heapallocsites
+  void addCodeViewHeapAllocSite(MachineInstr *I, MDNode *MD);
+
+  ArrayRef<std::tuple<MCSymbol*, MCSymbol*, DIType*>>
+      getCodeViewHeapAllocSites() const {
+    return CodeViewHeapAllocSites;
+  }
+
   /// Return a reference to the C++ typeinfo for the current function.
   const std::vector<const GlobalValue *> &getTypeInfos() const {
     return TypeInfos;
@@ -929,6 +965,23 @@ public:
   const VariableDbgInfoMapTy &getVariableDbgInfo() const {
     return VariableDbgInfos;
   }
+
+  void addCallArgsForwardingRegs(const MachineInstr *CallI,
+                                 CallSiteInfoImpl &&CallInfo) {
+    assert(CallI->isCall());
+    CallSitesInfo[CallI] = std::move(CallInfo);
+  }
+
+  const CallSiteInfoMap &getCallSitesInfo() const {
+    return CallSitesInfo;
+  }
+
+  /// Update call sites info by deleting entry for \p Old call instruction.
+  /// If \p New is present then transfer \p Old call info to it. This function
+  /// should be called before removing call instruction or before replacing
+  /// call instruction with new one.
+  void updateCallSiteInfo(const MachineInstr *Old,
+                          const MachineInstr *New = nullptr);
 };
 
 //===--------------------------------------------------------------------===//

@@ -20,7 +20,31 @@
 using namespace llvm;
 using namespace llvm::remarks;
 
-Parser::Parser(StringRef Buf) : Impl(llvm::make_unique<YAMLParserImpl>(Buf)) {}
+static std::unique_ptr<ParserImpl> formatToParserImpl(ParserFormat Format,
+                                                      StringRef Buf) {
+  switch (Format) {
+  case ParserFormat::YAML:
+    return llvm::make_unique<YAMLParserImpl>(Buf);
+  };
+  llvm_unreachable("Unhandled llvm::remarks::ParserFormat enum");
+}
+
+static std::unique_ptr<ParserImpl>
+formatToParserImpl(ParserFormat Format, StringRef Buf,
+                   const ParsedStringTable &StrTab) {
+  switch (Format) {
+  case ParserFormat::YAML:
+    return llvm::make_unique<YAMLParserImpl>(Buf, &StrTab);
+  };
+  llvm_unreachable("Unhandled llvm::remarks::ParserFormat enum");
+}
+
+Parser::Parser(ParserFormat Format, StringRef Buf)
+    : Impl(formatToParserImpl(Format, Buf)) {}
+
+Parser::Parser(ParserFormat Format, StringRef Buf,
+               const ParsedStringTable &StrTab)
+    : Impl(formatToParserImpl(Format, Buf, StrTab)) {}
 
 Parser::~Parser() = default;
 
@@ -56,13 +80,39 @@ Expected<const Remark *> Parser::getNext() const {
   llvm_unreachable("Get next called with an unknown parsing implementation.");
 }
 
+ParsedStringTable::ParsedStringTable(StringRef InBuffer) : Buffer(InBuffer) {
+  while (!InBuffer.empty()) {
+    // Strings are separated by '\0' bytes.
+    std::pair<StringRef, StringRef> Split = InBuffer.split('\0');
+    // We only store the offset from the beginning of the buffer.
+    Offsets.push_back(Split.first.data() - Buffer.data());
+    InBuffer = Split.second;
+  }
+}
+
+Expected<StringRef> ParsedStringTable::operator[](size_t Index) const {
+  if (Index >= Offsets.size())
+    return createStringError(
+        std::make_error_code(std::errc::invalid_argument),
+        "String with index %u is out of bounds (size = %u).", Index,
+        Offsets.size());
+
+  size_t Offset = Offsets[Index];
+  // If it's the last offset, we can't use the next offset to know the size of
+  // the string.
+  size_t NextOffset =
+      (Index == Offsets.size() - 1) ? Buffer.size() : Offsets[Index + 1];
+  return StringRef(Buffer.data() + Offset, NextOffset - Offset - 1);
+}
+
 // Create wrappers for C Binding types (see CBindingWrapping.h).
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(remarks::Parser, LLVMRemarkParserRef)
 
 extern "C" LLVMRemarkParserRef LLVMRemarkParserCreateYAML(const void *Buf,
                                                           uint64_t Size) {
   return wrap(
-      new remarks::Parser(StringRef(static_cast<const char *>(Buf), Size)));
+      new remarks::Parser(remarks::ParserFormat::YAML,
+                          StringRef(static_cast<const char *>(Buf), Size)));
 }
 
 static void handleYAMLError(remarks::YAMLParserImpl &Impl, Error E) {

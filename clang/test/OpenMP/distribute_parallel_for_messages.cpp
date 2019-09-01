@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -verify -fopenmp -ferror-limit 100 -std=c++11 -o - %s
+// RUN: %clang_cc1 -verify -fopenmp -ferror-limit 100 -std=c++11 -o - %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd -ferror-limit 100 -std=c++11 -o - %s
+// RUN: %clang_cc1 -verify -fopenmp-simd -ferror-limit 100 -std=c++11 -o - %s -Wuninitialized
 
 void foo() {
 }
@@ -81,7 +81,7 @@ L1:
   }
 #pragma omp target
 #pragma omp teams
-#pragma omp distribute parallel for default(none)
+#pragma omp distribute parallel for default(none) // expected-note {{explicit data sharing attribute requested here}}
   for (int i = 0; i < 10; ++i)
     ++argc; // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
 

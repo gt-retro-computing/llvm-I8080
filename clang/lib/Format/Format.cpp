@@ -341,6 +341,7 @@ template <> struct MappingTraits<FormatStyle> {
 
     IO.mapOptional("AccessModifierOffset", Style.AccessModifierOffset);
     IO.mapOptional("AlignAfterOpenBracket", Style.AlignAfterOpenBracket);
+    IO.mapOptional("AlignConsecutiveMacros", Style.AlignConsecutiveMacros);
     IO.mapOptional("AlignConsecutiveAssignments",
                    Style.AlignConsecutiveAssignments);
     IO.mapOptional("AlignConsecutiveDeclarations",
@@ -455,6 +456,7 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("MacroBlockEnd", Style.MacroBlockEnd);
     IO.mapOptional("MaxEmptyLinesToKeep", Style.MaxEmptyLinesToKeep);
     IO.mapOptional("NamespaceIndentation", Style.NamespaceIndentation);
+    IO.mapOptional("NamespaceMacros", Style.NamespaceMacros);
     IO.mapOptional("ObjCBinPackProtocolList", Style.ObjCBinPackProtocolList);
     IO.mapOptional("ObjCBlockIndentWidth", Style.ObjCBlockIndentWidth);
     IO.mapOptional("ObjCSpaceAfterProperty", Style.ObjCSpaceAfterProperty);
@@ -505,6 +507,7 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("Standard", Style.Standard);
     IO.mapOptional("StatementMacros", Style.StatementMacros);
     IO.mapOptional("TabWidth", Style.TabWidth);
+    IO.mapOptional("TypenameMacros", Style.TypenameMacros);
     IO.mapOptional("UseTab", Style.UseTab);
   }
 };
@@ -664,6 +667,7 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.AlignTrailingComments = true;
   LLVMStyle.AlignConsecutiveAssignments = false;
   LLVMStyle.AlignConsecutiveDeclarations = false;
+  LLVMStyle.AlignConsecutiveMacros = false;
   LLVMStyle.AllowAllArgumentsOnNextLine = true;
   LLVMStyle.AllowAllConstructorInitializersOnNextLine = true;
   LLVMStyle.AllowAllParametersOfDeclarationOnNextLine = true;
@@ -1780,11 +1784,10 @@ static void sortCppIncludes(const FormatStyle &Style,
   SmallVector<unsigned, 16> Indices;
   for (unsigned i = 0, e = Includes.size(); i != e; ++i)
     Indices.push_back(i);
-  std::stable_sort(
-      Indices.begin(), Indices.end(), [&](unsigned LHSI, unsigned RHSI) {
-        return std::tie(Includes[LHSI].Category, Includes[LHSI].Filename) <
-               std::tie(Includes[RHSI].Category, Includes[RHSI].Filename);
-      });
+  llvm::stable_sort(Indices, [&](unsigned LHSI, unsigned RHSI) {
+    return std::tie(Includes[LHSI].Category, Includes[LHSI].Filename) <
+           std::tie(Includes[RHSI].Category, Includes[RHSI].Filename);
+  });
   // The index of the include on which the cursor will be put after
   // sorting/deduplicating.
   unsigned CursorIndex;

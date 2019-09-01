@@ -5,7 +5,8 @@
 #ifndef LLVM_I8080TARGETMACHINE_H
 #define LLVM_I8080TARGETMACHINE_H
 
-#include <llvm/Target/TargetMachine.h>
+#include "llvm/Target/TargetMachine.h"
+
 
 namespace llvm {
     class Module;

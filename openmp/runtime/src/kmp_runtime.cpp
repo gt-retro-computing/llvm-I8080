@@ -2801,9 +2801,13 @@ int __kmp_get_max_active_levels(int gtid) {
   return thread->th.th_current_task->td_icvs.max_active_levels;
 }
 
+KMP_BUILD_ASSERT(sizeof(kmp_sched_t) == sizeof(int));
+KMP_BUILD_ASSERT(sizeof(enum sched_type) == sizeof(int));
+
 /* Changes def_sched_var ICV values (run-time schedule kind and chunk) */
 void __kmp_set_schedule(int gtid, kmp_sched_t kind, int chunk) {
   kmp_info_t *thread;
+  kmp_sched_t orig_kind;
   //    kmp_team_t *team;
 
   KF_TRACE(10, ("__kmp_set_schedule: new schedule for thread %d = (%d, %d)\n",
@@ -2814,6 +2818,9 @@ void __kmp_set_schedule(int gtid, kmp_sched_t kind, int chunk) {
   // Valid parameters should fit in one of two intervals - standard or extended:
   //       <lower>, <valid>, <upper_std>, <lower_ext>, <valid>, <upper>
   // 2008-01-25: 0,  1 - 4,       5,         100,     101 - 102, 103
+  orig_kind = kind;
+  kind = __kmp_sched_without_mods(kind);
+
   if (kind <= kmp_sched_lower || kind >= kmp_sched_upper ||
       (kind <= kmp_sched_lower_ext && kind >= kmp_sched_upper_std)) {
     // TODO: Hint needs attention in case we change the default schedule.
@@ -2844,6 +2851,8 @@ void __kmp_set_schedule(int gtid, kmp_sched_t kind, int chunk) {
         __kmp_sch_map[kind - kmp_sched_lower_ext + kmp_sched_upper_std -
                       kmp_sched_lower - 2];
   }
+  __kmp_sched_apply_mods_intkind(
+      orig_kind, &(thread->th.th_current_task->td_icvs.sched.r_sched_type));
   if (kind == kmp_sched_auto || chunk < 1) {
     // ignore parameter chunk for schedule auto
     thread->th.th_current_task->td_icvs.sched.chunk = KMP_DEFAULT_CHUNK;
@@ -2863,12 +2872,12 @@ void __kmp_get_schedule(int gtid, kmp_sched_t *kind, int *chunk) {
   thread = __kmp_threads[gtid];
 
   th_type = thread->th.th_current_task->td_icvs.sched.r_sched_type;
-
-  switch (th_type) {
+  switch (SCHEDULE_WITHOUT_MODIFIERS(th_type)) {
   case kmp_sch_static:
   case kmp_sch_static_greedy:
   case kmp_sch_static_balanced:
     *kind = kmp_sched_static;
+    __kmp_sched_apply_mods_stdkind(kind, th_type);
     *chunk = 0; // chunk was not set, try to show this fact via zero value
     return;
   case kmp_sch_static_chunked:
@@ -2897,6 +2906,7 @@ void __kmp_get_schedule(int gtid, kmp_sched_t *kind, int *chunk) {
     KMP_FATAL(UnknownSchedulingType, th_type);
   }
 
+  __kmp_sched_apply_mods_stdkind(kind, th_type);
   *chunk = thread->th.th_current_task->td_icvs.sched.chunk;
 }
 
@@ -3025,15 +3035,22 @@ kmp_r_sched_t __kmp_get_schedule_global() {
   // __kmp_guided. __kmp_sched should keep original value, so that user can set
   // KMP_SCHEDULE multiple times, and thus have different run-time schedules in
   // different roots (even in OMP 2.5)
-  if (__kmp_sched == kmp_sch_static) {
+  enum sched_type s = SCHEDULE_WITHOUT_MODIFIERS(__kmp_sched);
+#if OMP_45_ENABLED
+  enum sched_type sched_modifiers = SCHEDULE_GET_MODIFIERS(__kmp_sched);
+#endif
+  if (s == kmp_sch_static) {
     // replace STATIC with more detailed schedule (balanced or greedy)
     r_sched.r_sched_type = __kmp_static;
-  } else if (__kmp_sched == kmp_sch_guided_chunked) {
+  } else if (s == kmp_sch_guided_chunked) {
     // replace GUIDED with more detailed schedule (iterative or analytical)
     r_sched.r_sched_type = __kmp_guided;
   } else { // (STATIC_CHUNKED), or (DYNAMIC_CHUNKED), or other
     r_sched.r_sched_type = __kmp_sched;
   }
+#if OMP_45_ENABLED
+  SCHEDULE_SET_MODIFIERS(r_sched.r_sched_type, sched_modifiers);
+#endif
 
   if (__kmp_chunk < KMP_DEFAULT_CHUNK) {
     // __kmp_chunk may be wrong here (if it was not ever set)
@@ -3880,11 +3897,11 @@ int __kmp_register_root(int initial_thread) {
           ompt_thread_initial, __ompt_get_thread_data_internal());
     }
     ompt_data_t *task_data;
-    __ompt_get_task_info_internal(0, NULL, &task_data, NULL, NULL, NULL);
-    if (ompt_enabled.ompt_callback_task_create) {
-      ompt_callbacks.ompt_callback(ompt_callback_task_create)(
-          NULL, NULL, task_data, ompt_task_initial, 0, NULL);
-      // initial task has nothing to return to
+    ompt_data_t *parallel_data;
+    __ompt_get_task_info_internal(0, NULL, &task_data, NULL, &parallel_data, NULL);
+    if (ompt_enabled.ompt_callback_implicit_task) {
+      ompt_callbacks.ompt_callback(ompt_callback_implicit_task)(
+          ompt_scope_begin, parallel_data, task_data, 1, 1, ompt_task_initial);
     }
 
     ompt_set_thread_state(root_thread, ompt_state_work_serial);
@@ -3974,6 +3991,13 @@ static int __kmp_reset_root(int gtid, kmp_root_t *root) {
 #endif /* KMP_OS_WINDOWS */
 
 #if OMPT_SUPPORT
+  ompt_data_t *task_data;
+  ompt_data_t *parallel_data;
+  __ompt_get_task_info_internal(0, NULL, &task_data, NULL, &parallel_data, NULL);
+  if (ompt_enabled.ompt_callback_implicit_task) {
+    ompt_callbacks.ompt_callback(ompt_callback_implicit_task)(
+        ompt_scope_end, parallel_data, task_data, 0, 1, ompt_task_initial);
+  }
   if (ompt_enabled.ompt_callback_thread_end) {
     ompt_callbacks.ompt_callback(ompt_callback_thread_end)(
         &(root->r.r_uber_thread->th.ompt_thread_info.thread_data));
@@ -4172,6 +4196,17 @@ static void __kmp_initialize_info(kmp_info_t *this_thr, kmp_team_t *team,
       this_thr->th.th_cg_roots != master->th.th_cg_roots) { // CG root not set
     // Make new thread's CG root same as master's
     KMP_DEBUG_ASSERT(master->th.th_cg_roots);
+    kmp_cg_root_t *tmp = this_thr->th.th_cg_roots;
+    if (tmp) {
+      // worker changes CG, need to check if old CG should be freed
+      int i = tmp->cg_nthreads--;
+      KA_TRACE(100, ("__kmp_initialize_info: Thread %p decrement cg_nthreads"
+                     " on node %p of thread %p to %d\n",
+                     this_thr, tmp, tmp->cg_root, tmp->cg_nthreads));
+      if (i == 1) {
+        __kmp_free(tmp); // last thread left CG --> free it
+      }
+    }
     this_thr->th.th_cg_roots = master->th.th_cg_roots;
     // Increment new thread's CG root's counter to add the new thread
     this_thr->th.th_cg_roots->cg_nthreads++;
@@ -4278,11 +4313,6 @@ kmp_info_t *__kmp_allocate_thread(kmp_root_t *root, kmp_team_t *team,
       KMP_ATOMIC_DEC(&__kmp_thread_pool_active_nth);
       new_thr->th.th_active_in_pool = FALSE;
     }
-#if KMP_DEBUG
-    else {
-      KMP_DEBUG_ASSERT(new_thr->th.th_active == FALSE);
-    }
-#endif
     __kmp_unlock_suspend_mx(new_thr);
 
     KA_TRACE(20, ("__kmp_allocate_thread: T#%d using thread T#%d\n",
@@ -5575,7 +5605,10 @@ void __kmp_free_team(kmp_root_t *root,
         KA_TRACE(100, ("__kmp_free_team: Thread %p popping node %p and moving"
                        " up to node %p. cg_nthreads was %d\n",
                        thr, tmp, thr->th.th_cg_roots, tmp->cg_nthreads));
-        __kmp_free(tmp);
+        int i = tmp->cg_nthreads--;
+        if (i == 1) {
+          __kmp_free(tmp); // free CG if we are the last thread in it
+        }
         // Restore current task's thread_limit from CG root
         if (thr->th.th_cg_roots)
           thr->th.th_current_task->td_icvs.thread_limit =
@@ -5676,6 +5709,9 @@ void __kmp_free_thread(kmp_info_t *this_th) {
       this_th->th.th_cg_roots = tmp->up;
       __kmp_free(tmp);
     } else { // Worker thread
+      if (tmp->cg_nthreads == 0) { // last thread leaves contention group
+        __kmp_free(tmp);
+      }
       this_th->th.th_cg_roots = NULL;
       break;
     }
@@ -6122,8 +6158,6 @@ static void __kmp_internal_end(void) {
       KMP_DEBUG_ASSERT(thread->th.th_reap_state == KMP_SAFE_TO_REAP);
       thread->th.th_next_pool = NULL;
       thread->th.th_in_pool = FALSE;
-      thread->th.th_active_in_pool = FALSE;
-      KMP_ATOMIC_DEC(&__kmp_thread_pool_active_nth);
       __kmp_reap_thread(thread, 0);
     }
     __kmp_thread_pool_insert_pt = NULL;
@@ -7206,7 +7240,7 @@ void __kmp_teams_master(int gtid) {
   tmp->cg_thread_limit = thr->th.th_current_task->td_icvs.thread_limit;
   tmp->cg_nthreads = 1; // Init counter to one active thread, this one
   KA_TRACE(100, ("__kmp_teams_master: Thread %p created node %p and init"
-                 " cg_threads to 1\n",
+                 " cg_nthreads to 1\n",
                  thr, tmp));
   tmp->up = thr->th.th_cg_roots;
   thr->th.th_cg_roots = tmp;
@@ -8239,7 +8273,7 @@ __kmp_determine_reduction_method(
 
 #elif KMP_ARCH_X86 || KMP_ARCH_ARM || KMP_ARCH_AARCH || KMP_ARCH_MIPS
 
-#if KMP_OS_LINUX || KMP_OS_WINDOWS || KMP_OS_HURD
+#if KMP_OS_LINUX || KMP_OS_FREEBSD || KMP_OS_WINDOWS || KMP_OS_HURD
 
     // basic tuning
 

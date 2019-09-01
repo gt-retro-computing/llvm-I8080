@@ -391,7 +391,8 @@ Expected<Trace> llvm::xray::loadTraceFile(StringRef Filename, bool Sort) {
   // Map the opened file into memory and use a StringRef to access it later.
   std::error_code EC;
   sys::fs::mapped_file_region MappedFile(
-      Fd, sys::fs::mapped_file_region::mapmode::readonly, FileSize, 0, EC);
+      sys::fs::convertFDToNativeFile(Fd),
+      sys::fs::mapped_file_region::mapmode::readonly, FileSize, 0, EC);
   if (EC) {
     return make_error<StringError>(
         Twine("Cannot read log from '") + Filename + "'", EC);
@@ -461,10 +462,9 @@ Expected<Trace> llvm::xray::loadTrace(const DataExtractor &DE, bool Sort) {
   }
 
   if (Sort)
-    std::stable_sort(T.Records.begin(), T.Records.end(),
-                     [&](const XRayRecord &L, const XRayRecord &R) {
-                       return L.TSC < R.TSC;
-                     });
+    llvm::stable_sort(T.Records, [&](const XRayRecord &L, const XRayRecord &R) {
+      return L.TSC < R.TSC;
+    });
 
   return std::move(T);
 }

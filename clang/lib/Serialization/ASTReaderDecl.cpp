@@ -57,7 +57,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/Bitcode/BitstreamReader.h"
+#include "llvm/Bitstream/BitstreamReader.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -858,7 +858,6 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
   FD->setStorageClass(static_cast<StorageClass>(Record.readInt()));
   FD->setInlineSpecified(Record.readInt());
   FD->setImplicitlyInline(Record.readInt());
-  FD->setExplicitSpecified(Record.readInt());
   FD->setVirtualAsWritten(Record.readInt());
   FD->setPure(Record.readInt());
   FD->setHasInheritedPrototype(Record.readInt());
@@ -869,7 +868,7 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
   FD->setDefaulted(Record.readInt());
   FD->setExplicitlyDefaulted(Record.readInt());
   FD->setHasImplicitReturnZero(Record.readInt());
-  FD->setConstexpr(Record.readInt());
+  FD->setConstexprKind(static_cast<ConstexprSpecKind>(Record.readInt()));
   FD->setUsesSEHTry(Record.readInt());
   FD->setHasSkippedBody(Record.readInt());
   FD->setIsMultiVersion(Record.readInt());
@@ -928,12 +927,22 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
     TemplateArgumentListInfo TemplArgsInfo(LAngleLoc, RAngleLoc);
     for (unsigned i = 0, e = TemplArgLocs.size(); i != e; ++i)
       TemplArgsInfo.addArgument(TemplArgLocs[i]);
-    FunctionTemplateSpecializationInfo *FTInfo
-        = FunctionTemplateSpecializationInfo::Create(C, FD, Template, TSK,
-                                                     TemplArgList,
-                             HasTemplateArgumentsAsWritten ? &TemplArgsInfo
-                                                           : nullptr,
-                                                     POI);
+
+    MemberSpecializationInfo *MSInfo = nullptr;
+    if (Record.readInt()) {
+      auto *FD = ReadDeclAs<FunctionDecl>();
+      auto TSK = (TemplateSpecializationKind)Record.readInt();
+      SourceLocation POI = ReadSourceLocation();
+
+      MSInfo = new (C) MemberSpecializationInfo(FD, TSK);
+      MSInfo->setPointOfInstantiation(POI);
+    }
+
+    FunctionTemplateSpecializationInfo *FTInfo =
+        FunctionTemplateSpecializationInfo::Create(
+            C, FD, Template, TSK, TemplArgList,
+            HasTemplateArgumentsAsWritten ? &TemplArgsInfo : nullptr, POI,
+            MSInfo);
     FD->TemplateOrSpecialization = FTInfo;
 
     if (FD->isCanonicalDecl()) { // if canonical add to template's set.
@@ -956,7 +965,7 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
       else {
         assert(Reader.getContext().getLangOpts().Modules &&
                "already deserialized this template specialization");
-        mergeRedeclarable(FD, ExistingInfo->Function, Redecl);
+        mergeRedeclarable(FD, ExistingInfo->getFunction(), Redecl);
       }
     }
     break;
@@ -1450,8 +1459,10 @@ void ASTDeclReader::VisitParmVarDecl(ParmVarDecl *PD) {
 void ASTDeclReader::VisitDecompositionDecl(DecompositionDecl *DD) {
   VisitVarDecl(DD);
   auto **BDs = DD->getTrailingObjects<BindingDecl *>();
-  for (unsigned I = 0; I != DD->NumBindings; ++I)
+  for (unsigned I = 0; I != DD->NumBindings; ++I) {
     BDs[I] = ReadDeclAs<BindingDecl>();
+    BDs[I]->setDecomposedDecl(DD);
+  }
 }
 
 void ASTDeclReader::VisitBindingDecl(BindingDecl *BD) {
@@ -1967,6 +1978,7 @@ ASTDeclReader::VisitCXXRecordDeclImpl(CXXRecordDecl *D) {
 }
 
 void ASTDeclReader::VisitCXXDeductionGuideDecl(CXXDeductionGuideDecl *D) {
+  D->setExplicitSpecifier(Record.readExplicitSpec());
   VisitFunctionDecl(D);
   D->setIsCopyDeductionCandidate(Record.readInt());
 }
@@ -1992,6 +2004,7 @@ void ASTDeclReader::VisitCXXMethodDecl(CXXMethodDecl *D) {
 void ASTDeclReader::VisitCXXConstructorDecl(CXXConstructorDecl *D) {
   // We need the inherited constructor information to merge the declaration,
   // so we have to read it before we call VisitCXXMethodDecl.
+  D->setExplicitSpecifier(Record.readExplicitSpec());
   if (D->isInheritingConstructor()) {
     auto *Shadow = ReadDeclAs<ConstructorUsingShadowDecl>();
     auto *Ctor = ReadDeclAs<CXXConstructorDecl>();
@@ -2017,6 +2030,7 @@ void ASTDeclReader::VisitCXXDestructorDecl(CXXDestructorDecl *D) {
 }
 
 void ASTDeclReader::VisitCXXConversionDecl(CXXConversionDecl *D) {
+  D->setExplicitSpecifier(Record.readExplicitSpec());
   VisitCXXMethodDecl(D);
 }
 
@@ -2244,6 +2258,8 @@ void ASTDeclReader::VisitClassScopeFunctionSpecializationDecl(
                                     ClassScopeFunctionSpecializationDecl *D) {
   VisitDecl(D);
   D->Specialization = ReadDeclAs<CXXMethodDecl>();
+  if (Record.readInt())
+    D->TemplateArgs = Record.readASTTemplateArgumentListInfo();
 }
 
 void ASTDeclReader::VisitFunctionTemplateDecl(FunctionTemplateDecl *D) {
@@ -3663,14 +3679,28 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
   // Note that we are loading a declaration record.
   Deserializing ADecl(this);
 
-  DeclsCursor.JumpToBit(Loc.Offset);
+  auto Fail = [](const char *what, llvm::Error &&Err) {
+    llvm::report_fatal_error(Twine("ASTReader::ReadDeclRecord failed ") + what +
+                             ": " + toString(std::move(Err)));
+  };
+
+  if (llvm::Error JumpFailed = DeclsCursor.JumpToBit(Loc.Offset))
+    Fail("jumping", std::move(JumpFailed));
   ASTRecordReader Record(*this, *Loc.F);
   ASTDeclReader Reader(*this, Record, Loc, ID, DeclLoc);
-  unsigned Code = DeclsCursor.ReadCode();
+  Expected<unsigned> MaybeCode = DeclsCursor.ReadCode();
+  if (!MaybeCode)
+    Fail("reading code", MaybeCode.takeError());
+  unsigned Code = MaybeCode.get();
 
   ASTContext &Context = getContext();
   Decl *D = nullptr;
-  switch ((DeclCode)Record.readRecord(DeclsCursor, Code)) {
+  Expected<unsigned> MaybeDeclCode = Record.readRecord(DeclsCursor, Code);
+  if (!MaybeDeclCode)
+    llvm::report_fatal_error(
+        "ASTReader::ReadDeclRecord failed reading decl code: " +
+        toString(MaybeDeclCode.takeError()));
+  switch ((DeclCode)MaybeDeclCode.get()) {
   case DECL_CONTEXT_LEXICAL:
   case DECL_CONTEXT_VISIBLE:
     llvm_unreachable("Record cannot be de-serialized with ReadDeclRecord");
@@ -3738,10 +3768,7 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     D = CXXMethodDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_CXX_CONSTRUCTOR:
-    D = CXXConstructorDecl::CreateDeserialized(Context, ID, false);
-    break;
-  case DECL_CXX_INHERITED_CONSTRUCTOR:
-    D = CXXConstructorDecl::CreateDeserialized(Context, ID, true);
+    D = CXXConstructorDecl::CreateDeserialized(Context, ID, Record.readInt());
     break;
   case DECL_CXX_DESTRUCTOR:
     D = CXXDestructorDecl::CreateDeserialized(Context, ID);
@@ -4012,12 +4039,25 @@ void ASTReader::loadDeclUpdateRecords(PendingUpdateRecord &Record) {
       uint64_t Offset = FileAndOffset.second;
       llvm::BitstreamCursor &Cursor = F->DeclsCursor;
       SavedStreamPosition SavedPosition(Cursor);
-      Cursor.JumpToBit(Offset);
-      unsigned Code = Cursor.ReadCode();
+      if (llvm::Error JumpFailed = Cursor.JumpToBit(Offset))
+        // FIXME don't do a fatal error.
+        llvm::report_fatal_error(
+            "ASTReader::loadDeclUpdateRecords failed jumping: " +
+            toString(std::move(JumpFailed)));
+      Expected<unsigned> MaybeCode = Cursor.ReadCode();
+      if (!MaybeCode)
+        llvm::report_fatal_error(
+            "ASTReader::loadDeclUpdateRecords failed reading code: " +
+            toString(MaybeCode.takeError()));
+      unsigned Code = MaybeCode.get();
       ASTRecordReader Record(*this, *F);
-      unsigned RecCode = Record.readRecord(Cursor, Code);
-      (void)RecCode;
-      assert(RecCode == DECL_UPDATES && "Expected DECL_UPDATES record!");
+      if (Expected<unsigned> MaybeRecCode = Record.readRecord(Cursor, Code))
+        assert(MaybeRecCode.get() == DECL_UPDATES &&
+               "Expected DECL_UPDATES record!");
+      else
+        llvm::report_fatal_error(
+            "ASTReader::loadDeclUpdateRecords failed reading rec code: " +
+            toString(MaybeCode.takeError()));
 
       ASTDeclReader Reader(*this, Record, RecordLocation(F, Offset), ID,
                            SourceLocation());
@@ -4081,13 +4121,25 @@ void ASTReader::loadPendingDeclChain(Decl *FirstLocal, uint64_t LocalOffset) {
 
   llvm::BitstreamCursor &Cursor = M->DeclsCursor;
   SavedStreamPosition SavedPosition(Cursor);
-  Cursor.JumpToBit(LocalOffset);
+  if (llvm::Error JumpFailed = Cursor.JumpToBit(LocalOffset))
+    llvm::report_fatal_error(
+        "ASTReader::loadPendingDeclChain failed jumping: " +
+        toString(std::move(JumpFailed)));
 
   RecordData Record;
-  unsigned Code = Cursor.ReadCode();
-  unsigned RecCode = Cursor.readRecord(Code, Record);
-  (void)RecCode;
-  assert(RecCode == LOCAL_REDECLARATIONS && "expected LOCAL_REDECLARATIONS record!");
+  Expected<unsigned> MaybeCode = Cursor.ReadCode();
+  if (!MaybeCode)
+    llvm::report_fatal_error(
+        "ASTReader::loadPendingDeclChain failed reading code: " +
+        toString(MaybeCode.takeError()));
+  unsigned Code = MaybeCode.get();
+  if (Expected<unsigned> MaybeRecCode = Cursor.readRecord(Code, Record))
+    assert(MaybeRecCode.get() == LOCAL_REDECLARATIONS &&
+           "expected LOCAL_REDECLARATIONS record!");
+  else
+    llvm::report_fatal_error(
+        "ASTReader::loadPendingDeclChain failed reading rec code: " +
+        toString(MaybeCode.takeError()));
 
   // FIXME: We have several different dispatches on decl kind here; maybe
   // we should instead generate one loop per kind and dispatch up-front?

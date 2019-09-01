@@ -324,7 +324,7 @@ static constexpr OptionDefinition g_breakpoint_set_options[] = {
 
 class CommandObjectBreakpointSet : public CommandObjectParsed {
 public:
-  typedef enum BreakpointSetType {
+  enum BreakpointSetType {
     eSetTypeInvalid,
     eSetTypeFileAndLine,
     eSetTypeAddress,
@@ -333,7 +333,7 @@ public:
     eSetTypeSourceRegexp,
     eSetTypeException,
     eSetTypeScripted,
-  } BreakpointSetType;
+  };
 
   CommandObjectBreakpointSet(CommandInterpreter &interpreter)
       : CommandObjectParsed(
@@ -897,7 +897,7 @@ protected:
       const bool show_locations = false;
       bp_sp->GetDescription(&output_stream, lldb::eDescriptionLevelInitial,
                          show_locations);
-      if (target == m_interpreter.GetDebugger().GetDummyTarget())
+      if (target == GetDebugger().GetDummyTarget())
         output_stream.Printf("Breakpoint set in dummy target, will get copied "
                              "into future targets.\n");
       else {
@@ -1420,10 +1420,7 @@ static constexpr OptionDefinition g_breakpoint_clear_options[] = {
 
 class CommandObjectBreakpointClear : public CommandObjectParsed {
 public:
-  typedef enum BreakpointClearType {
-    eClearTypeInvalid,
-    eClearTypeFileAndLine
-  } BreakpointClearType;
+  enum BreakpointClearType { eClearTypeInvalid, eClearTypeFileAndLine };
 
   CommandObjectBreakpointClear(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "breakpoint clear",

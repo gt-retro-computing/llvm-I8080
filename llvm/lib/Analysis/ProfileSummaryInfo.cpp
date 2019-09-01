@@ -60,10 +60,9 @@ static cl::opt<int> ProfileSummaryColdCount(
 // Find the summary entry for a desired percentile of counts.
 static const ProfileSummaryEntry &getEntryForPercentile(SummaryEntryVector &DS,
                                                         uint64_t Percentile) {
-  auto Compare = [](const ProfileSummaryEntry &Entry, uint64_t Percentile) {
+  auto It = partition_point(DS, [=](const ProfileSummaryEntry &Entry) {
     return Entry.Cutoff < Percentile;
-  };
-  auto It = std::lower_bound(DS.begin(), DS.end(), Percentile, Compare);
+  });
   // The required percentile has to be <= one of the percentiles in the
   // detailed summary.
   if (It == DS.end())
@@ -95,7 +94,8 @@ bool ProfileSummaryInfo::computeSummary() {
 
 Optional<uint64_t>
 ProfileSummaryInfo::getProfileCount(const Instruction *Inst,
-                                    BlockFrequencyInfo *BFI) {
+                                    BlockFrequencyInfo *BFI,
+                                    bool AllowSynthetic) {
   if (!Inst)
     return None;
   assert((isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) &&
@@ -111,7 +111,7 @@ ProfileSummaryInfo::getProfileCount(const Instruction *Inst,
     return None;
   }
   if (BFI)
-    return BFI->getBlockProfileCount(Inst->getParent());
+    return BFI->getBlockProfileCount(Inst->getParent(), AllowSynthetic);
   return None;
 }
 

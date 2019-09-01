@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-- glue_execution_defs.h ---------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -13,6 +13,7 @@
 #include <type_traits>
 
 #include "execution_defs.h"
+#include "pstl_config.h"
 
 namespace std
 {
@@ -30,17 +31,15 @@ using __pstl::execution::is_execution_policy_v;
 namespace execution
 {
 // Standard C++ policy classes
-using __pstl::execution::sequenced_policy;
-#if _PSTL_USE_PAR_POLICIES
 using __pstl::execution::parallel_policy;
 using __pstl::execution::parallel_unsequenced_policy;
-#endif
+using __pstl::execution::sequenced_policy;
+
 // Standard predefined policy instances
-using __pstl::execution::seq;
-#if _PSTL_USE_PAR_POLICIES
 using __pstl::execution::par;
 using __pstl::execution::par_unseq;
-#endif
+using __pstl::execution::seq;
+
 // Implementation-defined names
 // Unsequenced policy is not yet standard, but for consistency
 // we include it into namespace std::execution as well

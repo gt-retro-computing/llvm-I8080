@@ -121,7 +121,10 @@ static constexpr OptionEnumValueElement g_language_enumerators[] = {
   "{${frame.no-debug}${function.pc-offset}}}}"
 
 #define FILE_AND_LINE                                                          \
-  "{ at ${line.file.basename}:${line.number}{:${line.column}}}"
+  "{ at ${ansi.fg.cyan}${line.file.basename}${ansi.normal}"                    \
+  ":${ansi.fg.yellow}${line.number}${ansi.normal}"                             \
+  "{:${ansi.fg.yellow}${line.column}${ansi.normal}}}"
+
 #define IS_OPTIMIZED "{${function.is-optimized} [opt]}"
 
 #define IS_ARTIFICIAL "{${frame.is-artificial} [artificial]}"
@@ -129,32 +132,36 @@ static constexpr OptionEnumValueElement g_language_enumerators[] = {
 #define DEFAULT_THREAD_FORMAT                                                  \
   "thread #${thread.index}: tid = ${thread.id%tid}"                            \
   "{, ${frame.pc}}" MODULE_WITH_FUNC FILE_AND_LINE                             \
-  "{, name = '${thread.name}'}"                                                \
-  "{, queue = '${thread.queue}'}"                                              \
-  "{, activity = '${thread.info.activity.name}'}"                              \
+  "{, name = ${ansi.fg.green}'${thread.name}'${ansi.normal}}"                  \
+  "{, queue = ${ansi.fg.green}'${thread.queue}'${ansi.normal}}"                \
+  "{, activity = "                                                             \
+  "${ansi.fg.green}'${thread.info.activity.name}'${ansi.normal}}"              \
   "{, ${thread.info.trace_messages} messages}"                                 \
-  "{, stop reason = ${thread.stop-reason}}"                                    \
+  "{, stop reason = ${ansi.fg.red}${thread.stop-reason}${ansi.normal}}"        \
   "{\\nReturn value: ${thread.return-value}}"                                  \
   "{\\nCompleted expression: ${thread.completed-expression}}"                  \
   "\\n"
 
 #define DEFAULT_THREAD_STOP_FORMAT                                             \
   "thread #${thread.index}{, name = '${thread.name}'}"                         \
-  "{, queue = '${thread.queue}'}"                                              \
-  "{, activity = '${thread.info.activity.name}'}"                              \
+  "{, queue = ${ansi.fg.green}'${thread.queue}'${ansi.normal}}"                \
+  "{, activity = "                                                             \
+  "${ansi.fg.green}'${thread.info.activity.name}'${ansi.normal}}"              \
   "{, ${thread.info.trace_messages} messages}"                                 \
-  "{, stop reason = ${thread.stop-reason}}"                                    \
+  "{, stop reason = ${ansi.fg.red}${thread.stop-reason}${ansi.normal}}"        \
   "{\\nReturn value: ${thread.return-value}}"                                  \
   "{\\nCompleted expression: ${thread.completed-expression}}"                  \
   "\\n"
 
 #define DEFAULT_FRAME_FORMAT                                                   \
-  "frame #${frame.index}: ${frame.pc}" MODULE_WITH_FUNC FILE_AND_LINE          \
+  "frame #${frame.index}: "                                                    \
+  "${ansi.fg.yellow}${frame.pc}${ansi.normal}" MODULE_WITH_FUNC FILE_AND_LINE  \
       IS_OPTIMIZED IS_ARTIFICIAL "\\n"
 
 #define DEFAULT_FRAME_FORMAT_NO_ARGS                                           \
-  "frame #${frame.index}: ${frame.pc}" MODULE_WITH_FUNC_NO_ARGS FILE_AND_LINE  \
-      IS_OPTIMIZED IS_ARTIFICIAL "\\n"
+  "frame #${frame.index}: "                                                    \
+  "${ansi.fg.yellow}${frame.pc}${ansi.normal}" MODULE_WITH_FUNC_NO_ARGS        \
+      FILE_AND_LINE IS_OPTIMIZED IS_ARTIFICIAL "\\n"
 
 // Three parts to this disassembly format specification:
 //   1. If this is a new function/symbol (no previous symbol/function), print
@@ -765,10 +772,10 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
       m_terminal_state(), m_target_list(*this), m_platform_list(),
       m_listener_sp(Listener::MakeListener("lldb.Debugger")),
       m_source_manager_up(), m_source_file_cache(),
-      m_command_interpreter_up(llvm::make_unique<CommandInterpreter>(
-          *this, eScriptLanguageDefault, false)),
-      m_input_reader_stack(), m_instance_name(), m_loaded_plugins(),
-      m_event_handler_thread(), m_io_handler_thread(),
+      m_command_interpreter_up(
+          llvm::make_unique<CommandInterpreter>(*this, false)),
+      m_script_interpreter_sp(), m_input_reader_stack(), m_instance_name(),
+      m_loaded_plugins(), m_event_handler_thread(), m_io_handler_thread(),
       m_sync_broadcaster(nullptr, "lldb.debugger.sync"),
       m_forward_listener_sp(), m_clear_once() {
   char instance_cstr[256];
@@ -905,12 +912,10 @@ void Debugger::SetOutputFileHandle(FILE *fh, bool tranfer_ownership) {
   if (!out_file.IsValid())
     out_file.SetStream(stdout, false);
 
-  // do not create the ScriptInterpreter just for setting the output file
-  // handle as the constructor will know how to do the right thing on its own
-  const bool can_create = false;
-  ScriptInterpreter *script_interpreter =
-      GetCommandInterpreter().GetScriptInterpreter(can_create);
-  if (script_interpreter)
+  // Do not create the ScriptInterpreter just for setting the output file
+  // handle as the constructor will know how to do the right thing on its own.
+  if (ScriptInterpreter *script_interpreter =
+          GetScriptInterpreter(/*can_create=*/false))
     script_interpreter->ResetOutputFileHandle(fh);
 }
 
@@ -1288,6 +1293,19 @@ bool Debugger::EnableLog(llvm::StringRef channel,
                                error_stream);
 }
 
+ScriptInterpreter *Debugger::GetScriptInterpreter(bool can_create) {
+  std::lock_guard<std::recursive_mutex> locker(m_script_interpreter_mutex);
+
+  if (!m_script_interpreter_sp) {
+    if (!can_create)
+      return nullptr;
+    m_script_interpreter_sp = PluginManager::GetScriptInterpreterForLanguage(
+        GetScriptLanguage(), *this);
+  }
+
+  return m_script_interpreter_sp.get();
+}
+
 SourceManager &Debugger::GetSourceManager() {
   if (!m_source_manager_up)
     m_source_manager_up = llvm::make_unique<SourceManager>(shared_from_this());
@@ -1605,7 +1623,7 @@ void Debugger::DefaultEventHandler() {
 
 lldb::thread_result_t Debugger::EventHandlerThread(lldb::thread_arg_t arg) {
   ((Debugger *)arg)->DefaultEventHandler();
-  return NULL;
+  return {};
 }
 
 bool Debugger::StartEventHandlerThread() {
@@ -1624,8 +1642,17 @@ bool Debugger::StartEventHandlerThread() {
         full_name.AsCString() : "dbg.evt-handler";
 
     // Use larger 8MB stack for this thread
-    m_event_handler_thread = ThreadLauncher::LaunchThread(thread_name,
-        EventHandlerThread, this, nullptr, g_debugger_event_thread_stack_bytes);
+    llvm::Expected<HostThread> event_handler_thread =
+        ThreadLauncher::LaunchThread(thread_name, EventHandlerThread, this,
+                                     g_debugger_event_thread_stack_bytes);
+
+    if (event_handler_thread) {
+      m_event_handler_thread = *event_handler_thread;
+    } else {
+      LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST),
+               "failed to launch host thread: {}",
+               llvm::toString(event_handler_thread.takeError()));
+    }
 
     // Make sure DefaultEventHandler() is running and listening to events
     // before we return from this function. We are only listening for events of
@@ -1650,16 +1677,24 @@ lldb::thread_result_t Debugger::IOHandlerThread(lldb::thread_arg_t arg) {
   Debugger *debugger = (Debugger *)arg;
   debugger->ExecuteIOHandlers();
   debugger->StopEventHandlerThread();
-  return NULL;
+  return {};
 }
 
 bool Debugger::HasIOHandlerThread() { return m_io_handler_thread.IsJoinable(); }
 
 bool Debugger::StartIOHandlerThread() {
-  if (!m_io_handler_thread.IsJoinable())
-    m_io_handler_thread = ThreadLauncher::LaunchThread(
-        "lldb.debugger.io-handler", IOHandlerThread, this, nullptr,
+  if (!m_io_handler_thread.IsJoinable()) {
+    llvm::Expected<HostThread> io_handler_thread = ThreadLauncher::LaunchThread(
+        "lldb.debugger.io-handler", IOHandlerThread, this,
         8 * 1024 * 1024); // Use larger 8MB stack for this thread
+    if (io_handler_thread) {
+      m_io_handler_thread = *io_handler_thread;
+    } else {
+      LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST),
+               "failed to launch host thread: {}",
+               llvm::toString(io_handler_thread.takeError()));
+    }
+  }
   return m_io_handler_thread.IsJoinable();
 }
 

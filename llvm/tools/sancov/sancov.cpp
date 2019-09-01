@@ -297,7 +297,6 @@ public:
       OS << "{";
       W->Indent++;
     }
-    Object(const Object &) = delete;
     ~Object() {
       W->Indent--;
       OS << "\n";
@@ -321,13 +320,12 @@ public:
     int Index = -1;
   };
 
-  std::unique_ptr<Object> object() { return make_unique<Object>(this, OS); }
+  Object object() { return {this, OS}; }
 
   // Helper RAII class to output JSON arrays.
   class Array {
   public:
     Array(raw_ostream &OS) : OS(OS) { OS << "["; }
-    Array(const Array &) = delete;
     ~Array() { OS << "]"; }
     void next() {
       Index++;
@@ -340,7 +338,7 @@ public:
     int Index = -1;
   };
 
-  std::unique_ptr<Array> array() { return make_unique<Array>(OS); }
+  Array array() { return {OS}; }
 
 private:
   void indent() { OS.indent(Indent * 2); }
@@ -386,7 +384,7 @@ static void operator<<(JSONWriter &W,
 
   for (const auto &P : PointsByFile) {
     std::string FileName = P.first;
-    ByFile->key(FileName);
+    ByFile.key(FileName);
 
     // Group points by function.
     auto ByFn(W.object());
@@ -401,7 +399,7 @@ static void operator<<(JSONWriter &W,
       std::string FunctionName = P.first;
       std::set<std::string> WrittenIds;
 
-      ByFn->key(FunctionName);
+      ByFn.key(FunctionName);
 
       // Output <point_id> : "<line>:<col>".
       auto ById(W.object());
@@ -413,7 +411,7 @@ static void operator<<(JSONWriter &W,
             continue;
 
           WrittenIds.insert(Point->Id);
-          ById->key(Point->Id);
+          ById.key(Point->Id);
           W << (utostr(Loc.Line) + ":" + utostr(Loc.Column));
         }
       }
@@ -425,24 +423,24 @@ static void operator<<(JSONWriter &W, const SymbolizedCoverage &C) {
   auto O(W.object());
 
   {
-    O->key("covered-points");
+    O.key("covered-points");
     auto PointsArray(W.array());
 
-    for (const auto &P : C.CoveredIds) {
-      PointsArray->next();
+    for (const std::string &P : C.CoveredIds) {
+      PointsArray.next();
       W << P;
     }
   }
 
   {
     if (!C.BinaryHash.empty()) {
-      O->key("binary-hash");
+      O.key("binary-hash");
       W << C.BinaryHash;
     }
   }
 
   {
-    O->key("point-symbol-info");
+    O.key("point-symbol-info");
     W << C.Points;
   }
 }
@@ -841,9 +839,9 @@ static void getObjectCoveragePoints(const object::ObjectFile &O,
     if (!SectSize)
       continue;
 
-    StringRef BytesStr;
-    failIfError(Section.getContents(BytesStr));
-    ArrayRef<uint8_t> Bytes = arrayRefFromStringRef(BytesStr);
+    Expected<StringRef> BytesStr = Section.getContents();
+    failIfError(BytesStr);
+    ArrayRef<uint8_t> Bytes = arrayRefFromStringRef(*BytesStr);
 
     for (uint64_t Index = 0, Size = 0; Index < Section.getSize();
          Index += Size) {

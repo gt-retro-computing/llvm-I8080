@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/CommandLine.h"
@@ -85,11 +86,13 @@ static bool isAsmComment(const char *Str, const MCAsmInfo &MAI) {
 /// simple--i.e. not a logical or arithmetic expression--size values without
 /// the optional fill value. This is primarily used for creating arbitrary
 /// sized inline asm blocks for testing purposes.
-unsigned TargetInstrInfo::getInlineAsmLength(const char *Str,
-                                             const MCAsmInfo &MAI) const {
+unsigned TargetInstrInfo::getInlineAsmLength(
+  const char *Str,
+  const MCAsmInfo &MAI, const TargetSubtargetInfo *STI) const {
   // Count the number of instructions in the asm.
   bool AtInsnStart = true;
   unsigned Length = 0;
+  const unsigned MaxInstLength = MAI.getMaxInstLength(STI);
   for (; *Str; ++Str) {
     if (*Str == '\n' || strncmp(Str, MAI.getSeparatorString(),
                                 strlen(MAI.getSeparatorString())) == 0) {
@@ -101,7 +104,7 @@ unsigned TargetInstrInfo::getInlineAsmLength(const char *Str,
     }
 
     if (AtInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
-      unsigned AddLength = MAI.getMaxInstLength();
+      unsigned AddLength = MaxInstLength;
       if (strncmp(Str, ".space", 6) == 0) {
         char *EStr;
         int SpaceSize;
@@ -135,8 +138,14 @@ TargetInstrInfo::ReplaceTailWithBranchTo(MachineBasicBlock::iterator Tail,
   // Save off the debug loc before erasing the instruction.
   DebugLoc DL = Tail->getDebugLoc();
 
-  // Remove all the dead instructions from the end of MBB.
-  MBB->erase(Tail, MBB->end());
+  // Update call site info and remove all the dead instructions
+  // from the end of MBB.
+  while (Tail != MBB->end()) {
+    auto MI = Tail++;
+    if (MI->isCall())
+      MBB->getParent()->updateCallSiteInfo(&*MI);
+    MBB->erase(MI);
+  }
 
   // If MBB isn't immediately before MBB, insert a branch to it.
   if (++MachineFunction::iterator(MBB) != MachineFunction::iterator(NewDest))
@@ -161,9 +170,9 @@ MachineInstr *TargetInstrInfo::commuteInstructionImpl(MachineInstr &MI,
   assert(MI.getOperand(Idx1).isReg() && MI.getOperand(Idx2).isReg() &&
          "This only knows how to commute register operands so far");
 
-  unsigned Reg0 = HasDef ? MI.getOperand(0).getReg() : 0;
-  unsigned Reg1 = MI.getOperand(Idx1).getReg();
-  unsigned Reg2 = MI.getOperand(Idx2).getReg();
+  Register Reg0 = HasDef ? MI.getOperand(0).getReg() : Register();
+  Register Reg1 = MI.getOperand(Idx1).getReg();
+  Register Reg2 = MI.getOperand(Idx2).getReg();
   unsigned SubReg0 = HasDef ? MI.getOperand(0).getSubReg() : 0;
   unsigned SubReg1 = MI.getOperand(Idx1).getSubReg();
   unsigned SubReg2 = MI.getOperand(Idx2).getSubReg();
@@ -522,7 +531,8 @@ static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
 
 MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
                                                  ArrayRef<unsigned> Ops, int FI,
-                                                 LiveIntervals *LIS) const {
+                                                 LiveIntervals *LIS,
+                                                 VirtRegMap *VRM) const {
   auto Flags = MachineMemOperand::MONone;
   for (unsigned OpIdx : Ops)
     Flags |= MI.getOperand(OpIdx).isDef() ? MachineMemOperand::MOStore
@@ -568,7 +578,7 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
       MBB->insert(MI, NewMI);
   } else {
     // Ask the target to do the actual folding.
-    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, FI, LIS);
+    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, FI, LIS, VRM);
   }
 
   if (NewMI) {
@@ -897,7 +907,8 @@ bool TargetInstrInfo::isReallyTriviallyReMaterializableGeneric(
     return true;
 
   // Avoid instructions obviously unsafe for remat.
-  if (MI.isNotDuplicable() || MI.mayStore() || MI.hasUnmodeledSideEffects())
+  if (MI.isNotDuplicable() || MI.mayStore() || MI.mayRaiseFPException() ||
+      MI.hasUnmodeledSideEffects())
     return false;
 
   // Don't remat inline asm. We have no idea how expensive it is
@@ -1009,7 +1020,7 @@ ScheduleHazardRecognizer *TargetInstrInfo::
 CreateTargetMIHazardRecognizer(const InstrItineraryData *II,
                                const ScheduleDAG *DAG) const {
   return (ScheduleHazardRecognizer *)
-    new ScoreboardHazardRecognizer(II, DAG, "misched");
+    new ScoreboardHazardRecognizer(II, DAG, "machine-scheduler");
 }
 
 // Default implementation of CreateTargetPostRAHazardRecognizer.
@@ -1108,6 +1119,45 @@ bool TargetInstrInfo::hasLowDefLatency(const TargetSchedModel &SchedModel,
   unsigned DefClass = DefMI.getDesc().getSchedClass();
   int DefCycle = ItinData->getOperandCycle(DefClass, DefIdx);
   return (DefCycle != -1 && DefCycle <= 1);
+}
+
+Optional<ParamLoadedValue>
+TargetInstrInfo::describeLoadedValue(const MachineInstr &MI) const {
+  const MachineOperand *Op = nullptr;
+  DIExpression *Expr = nullptr;
+
+  const MachineOperand *SrcRegOp, *DestRegOp;
+  const MachineFunction *MF = MI.getMF();
+  if (isCopyInstr(MI, SrcRegOp, DestRegOp)) {
+    Expr = DIExpression::get(MF->getFunction().getContext(), {});
+    Op = SrcRegOp;
+    return ParamLoadedValue(Op, Expr);
+  } else if (MI.isMoveImmediate()) {
+    Expr = DIExpression::get(MF->getFunction().getContext(), {});
+    Op = &MI.getOperand(1);
+    return ParamLoadedValue(Op, Expr);
+  } else if (MI.hasOneMemOperand()) {
+    int64_t Offset;
+    const auto &TRI = MF->getSubtarget().getRegisterInfo();
+    const auto &TII = MF->getSubtarget().getInstrInfo();
+    const MachineOperand *BaseOp;
+    if (!TII->getMemOperandWithOffset(MI, BaseOp, Offset, TRI))
+      return None;
+    unsigned CastedOffset = static_cast<unsigned>(Offset);
+    if (Offset > 0)
+      Expr = DIExpression::get(
+          MF->getFunction().getContext(),
+          {dwarf::DW_OP_plus_uconst, CastedOffset, dwarf::DW_OP_deref});
+    else
+      Expr = DIExpression::get(MF->getFunction().getContext(),
+                               {dwarf::DW_OP_constu, -CastedOffset,
+                                dwarf::DW_OP_minus, dwarf::DW_OP_deref});
+
+    Op = BaseOp;
+    return ParamLoadedValue(Op, Expr);
+  }
+
+  return None;
 }
 
 /// Both DefMI and UseMI must be valid.  By default, call directly to the

@@ -36,7 +36,15 @@ public:
 
   static lldb_private::ConstString GetPluginNameStatic();
 
-  bool IsVTableName(const char *name) override;
+  static char ID;
+
+  bool isA(const void *ClassID) const override {
+    return ClassID == &ID || CPPLanguageRuntime::isA(ClassID);
+  }
+
+  static bool classof(const LanguageRuntime *runtime) {
+    return runtime->isA(&ID);
+  }
 
   bool GetDynamicTypeAndAddress(ValueObject &in_value,
                                 lldb::DynamicValueType use_dynamic,
@@ -86,9 +94,8 @@ private:
 
   ItaniumABILanguageRuntime(Process *process)
       : // Call CreateInstance instead.
-        lldb_private::CPPLanguageRuntime(process),
-        m_cxx_exception_bp_sp(), m_dynamic_type_map(),
-        m_dynamic_type_map_mutex() {}
+        lldb_private::CPPLanguageRuntime(process), m_cxx_exception_bp_sp(),
+        m_dynamic_type_map(), m_dynamic_type_map_mutex() {}
 
   lldb::BreakpointSP m_cxx_exception_bp_sp;
   DynamicTypeCache m_dynamic_type_map;
