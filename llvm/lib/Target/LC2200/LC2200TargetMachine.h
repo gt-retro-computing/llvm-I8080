@@ -8,8 +8,12 @@
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
-    class LC2200TargetMachine : public LLVMTargetMachine {
-
+    class LC2200TargetMachine : public TargetMachine {
+    public:
+        LC2200TargetMachine(const llvm::Target &T, const llvm::Triple &TT, llvm::StringRef CPU,
+                            llvm::StringRef FS, const llvm::TargetOptions &Options,
+                            Optional<llvm::Reloc::Model> RM,
+                            Optional<llvm::CodeModel::Model> CM, llvm::CodeGenOpt::Level OL, bool JIT);
     };
 }
 

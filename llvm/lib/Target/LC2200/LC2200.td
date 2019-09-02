@@ -13,7 +13,7 @@ include "LC2200RegisterInfo.td"
 include "LC2200InstrInfo.td"
 include "LC2200CallingConv.td"
 
-def LC2200InstInfo : InstrInfo;
+def LC2200InstrInfo : InstrInfo;
 
 //===----------------------------------------------------------------------===//
 // LC2200 processors supported.
@@ -29,5 +29,5 @@ def : Proc<"generic", []>;
 //===----------------------------------------------------------------------===//
 
 def LC2200 : Target {
-  let InstructionSet = LC2200InstInfo;
+  let InstructionSet = LC2200InstrInfo;
 }

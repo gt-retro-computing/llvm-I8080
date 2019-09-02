@@ -11,6 +11,7 @@ namespace llvm {
 	class MCCodeEmitter;
 	class MCAsmInfo;
 	class MCCodeGenInfo;
+	class MCRegisterClass;
 	class MCInstPrinter;
 	class MCObjectWriter;
 	class MCAsmBackend;
@@ -24,8 +25,8 @@ namespace llvm {
 	MCObjectWriter *createLC2200ELFObjectWriter(raw_ostream &OS, uint8_t OSABI);
 } // End llvm namespace
 
-#define GET_REGINFO_TARGET_DESC
-//#include "LC2200GenRegisterInfo.inc"
+#define GET_REGINFO_ENUM
+#include "LC2200GenRegisterInfo.inc"
 
 #define GET_INSTRINFO_ENUM
 //#include "LC2200GenInstrInfo.inc"

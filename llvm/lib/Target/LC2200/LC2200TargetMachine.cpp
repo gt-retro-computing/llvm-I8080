@@ -15,16 +15,19 @@
 //	return false;
 //}
 //
-//using namespace llvm;
+using namespace llvm;
 //
-//LC2200TargetMachine::LC2200TargetMachine(const Target &T, StringRef TT,
-//	StringRef CPU, StringRef FS, const TargetOptions &Options,
-//	Reloc::Model RM, CodeModel::Model CM,
-//	CodeGenOpt::Level OL)
-//	: LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-//	Subtarget(TT, CPU, FS, *this) {
-//		initAsmInfo();
-//	}
+
+LC2200TargetMachine::LC2200TargetMachine(const llvm::Target &T, const llvm::Triple &TT, llvm::StringRef CPU,
+                                   llvm::StringRef FS, const llvm::TargetOptions &Options,
+                                   Optional<llvm::Reloc::Model> RM,
+                                   Optional<llvm::CodeModel::Model> CM, llvm::CodeGenOpt::Level OL, bool JIT) :
+        TargetMachine(T,
+                "e-m:e-p:16:16:16-i1:16:16-i8:8:8-i16:16:16-i32:32:32-f64:64:64-a:0:16-n16",
+                TT, CPU, FS, Options
+        ) {
+
+}
 //
 //namespace {
 //	class LC2200PassConfig : public TargetPassConfig {
@@ -55,9 +58,9 @@
 //
 //bool LC2200PassConfig::addPreEmitPass() { return false; }
 //
-//// Force static initialization.
-//extern "C" void LLVMInitializeLC2200Target() {
-//	RegisterTargetMachine<LC2200TargetMachine> X(TheLC2200Target);
-//}
+// Force static initialization.
+extern "C" void LLVMInitializeLC2200Target() {
+	RegisterTargetMachine<LC2200TargetMachine> X(TheLC2200Target);
+}
 //
 //void LC2200TargetMachine::addAnalysisPasses(PassManagerBase &PM) {}

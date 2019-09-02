@@ -13,10 +13,10 @@
 //#include "LC2200GenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_MC_DESC
-//#include "LC2200GenSubtargetInfo.inc"
+#include "LC2200GenSubtargetInfo.inc"
 
 #define GET_REGINFO_MC_DESC
-//#include "LC2200GenRegisterInfo.inc"
+#include "LC2200GenRegisterInfo.inc"
 
 using namespace llvm;
 
@@ -26,11 +26,11 @@ using namespace llvm;
 //	return X;
 //}
 
-//static MCRegisterInfo *createLC2200MCRegisterInfo(StringRef TT) {
-//	MCRegisterInfo *X = new MCRegisterInfo();
-//	InitLC2200MCRegisterInfo(X, LC2200::LR);
-//	return X;
-//}
+static MCRegisterInfo *createLC2200MCRegisterInfo(const Triple &TT) {
+	MCRegisterInfo *X = new MCRegisterInfo();
+	InitLC2200MCRegisterInfo(X, 0);
+	return X;
+}
 
 //static MCSubtargetInfo *createLC2200MCSubtargetInfo(StringRef TT, StringRef CPU,
 //	StringRef FS) {
@@ -83,7 +83,7 @@ createLC2200MCInstPrinter(const Target &T, unsigned SyntaxVariant,
 //}
 
 // Force static initialization.
-//extern "C" void LLVMInitializeLC2200TargetMC() {
+extern "C" void LLVMInitializeLC2200TargetMC() {
 
 // Register the MC asm info.
 //RegisterMCAsmInfoFn X(TheLC2200Target, createLC2200MCAsmInfo);
@@ -96,8 +96,7 @@ createLC2200MCInstPrinter(const Target &T, unsigned SyntaxVariant,
 //TargetRegistry::RegisterMCInstrInfo(TheLC2200Target,
 //createLC2200MCInstrInfo);
 //// Register the MC register info.
-//TargetRegistry::RegisterMCRegInfo(TheLC2200Target,
-//createLC2200MCRegisterInfo);
+TargetRegistry::RegisterMCRegInfo(TheLC2200Target, createLC2200MCRegisterInfo);
 //// Register the MC subtarget info.
 //TargetRegistry::RegisterMCSubtargetInfo(TheLC2200Target,
 //createLC2200MCSubtargetInfo);
@@ -116,4 +115,4 @@ createLC2200MCInstPrinter(const Target &T, unsigned SyntaxVariant,
 //// Register the MCCodeEmitter
 //TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target,
 //createLC2200MCCodeEmitter);
-//}
+}
