@@ -29,7 +29,7 @@ BenchmarkFailure::BenchmarkFailure(const llvm::Twine &S)
 
 BenchmarkRunner::BenchmarkRunner(const LLVMState &State,
                                  InstructionBenchmark::ModeE Mode)
-    : State(State), Mode(Mode), Scratch(llvm::make_unique<ScratchSpace>()) {}
+    : State(State), Mode(Mode), Scratch(std::make_unique<ScratchSpace>()) {}
 
 BenchmarkRunner::~BenchmarkRunner() = default;
 
@@ -117,14 +117,13 @@ BenchmarkRunner::runConfiguration(const BenchmarkCode &BC,
   // that the inside instructions are repeated.
   constexpr const int kMinInstructionsForSnippet = 16;
   {
-    auto ObjectFilePath = writeObjectFile(
-        BC, GenerateInstructions(BC, kMinInstructionsForSnippet));
-    if (llvm::Error E = ObjectFilePath.takeError()) {
-      InstrBenchmark.Error = llvm::toString(std::move(E));
-      return InstrBenchmark;
-    }
+    llvm::SmallString<0> Buffer;
+    llvm::raw_svector_ostream OS(Buffer);
+    assembleToStream(State.getExegesisTarget(), State.createTargetMachine(),
+                     BC.LiveIns, BC.RegisterInitialValues,
+                     GenerateInstructions(BC, kMinInstructionsForSnippet), OS);
     const ExecutableFunction EF(State.createTargetMachine(),
-                                getObjectFromFile(*ObjectFilePath));
+                                getObjectFromBuffer(OS.str()));
     const auto FnBytes = EF.getFunctionBytes();
     InstrBenchmark.AssembledSnippet.assign(FnBytes.begin(), FnBytes.end());
   }

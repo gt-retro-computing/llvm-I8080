@@ -14,18 +14,20 @@
 #include <sys/stat.h>
 
 #include "lldb/Core/StreamFile.h"
+#include "lldb/Host/Config.h"
 #include "lldb/Host/ConnectionFileDescriptor.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Host/Pipe.h"
+#include "lldb/Host/ProcessLaunchInfo.h"
 #include "lldb/Host/Socket.h"
 #include "lldb/Host/StringConvert.h"
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Host/common/TCPSocket.h"
 #include "lldb/Host/posix/ConnectionFileDescriptorPosix.h"
 #include "lldb/Target/Platform.h"
-#include "lldb/Target/Process.h"
+#include "lldb/Utility/Event.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
@@ -37,6 +39,8 @@
 
 #if defined(__APPLE__)
 #define DEBUGSERVER_BASENAME "debugserver"
+#elif defined(_WIN32)
+#define DEBUGSERVER_BASENAME "lldb-server.exe"
 #else
 #define DEBUGSERVER_BASENAME "lldb-server"
 #endif
@@ -97,9 +101,8 @@ size_t GDBRemoteCommunication::SendAck() {
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PACKETS));
   ConnectionStatus status = eConnectionStatusSuccess;
   char ch = '+';
-  const size_t bytes_written = Write(&ch, 1, status, NULL);
-  if (log)
-    log->Printf("<%4" PRIu64 "> send packet: %c", (uint64_t)bytes_written, ch);
+  const size_t bytes_written = Write(&ch, 1, status, nullptr);
+  LLDB_LOGF(log, "<%4" PRIu64 "> send packet: %c", (uint64_t)bytes_written, ch);
   m_history.AddPacket(ch, GDBRemoteCommunicationHistory::ePacketTypeSend,
                       bytes_written);
   return bytes_written;
@@ -109,9 +112,8 @@ size_t GDBRemoteCommunication::SendNack() {
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PACKETS));
   ConnectionStatus status = eConnectionStatusSuccess;
   char ch = '-';
-  const size_t bytes_written = Write(&ch, 1, status, NULL);
-  if (log)
-    log->Printf("<%4" PRIu64 "> send packet: %c", (uint64_t)bytes_written, ch);
+  const size_t bytes_written = Write(&ch, 1, status, nullptr);
+  LLDB_LOGF(log, "<%4" PRIu64 "> send packet: %c", (uint64_t)bytes_written, ch);
   m_history.AddPacket(ch, GDBRemoteCommunicationHistory::ePacketTypeSend,
                       bytes_written);
   return bytes_written;
@@ -137,7 +139,7 @@ GDBRemoteCommunication::SendRawPacketNoLock(llvm::StringRef packet,
     ConnectionStatus status = eConnectionStatusSuccess;
     const char *packet_data = packet.data();
     const size_t packet_length = packet.size();
-    size_t bytes_written = Write(packet_data, packet_length, status, NULL);
+    size_t bytes_written = Write(packet_data, packet_length, status, nullptr);
     if (log) {
       size_t binary_start_offset = 0;
       if (strncmp(packet_data, "$vFile:pwrite:", strlen("$vFile:pwrite:")) ==
@@ -171,8 +173,8 @@ GDBRemoteCommunication::SendRawPacketNoLock(llvm::StringRef packet,
         strm.Printf("%*s", (int)3, p);
         log->PutString(strm.GetString());
       } else
-        log->Printf("<%4" PRIu64 "> send packet: %.*s", (uint64_t)bytes_written,
-                    (int)packet_length, packet_data);
+        LLDB_LOGF(log, "<%4" PRIu64 "> send packet: %.*s",
+                  (uint64_t)bytes_written, (int)packet_length, packet_data);
     }
 
     m_history.AddPacket(packet.str(), packet_length,
@@ -185,9 +187,8 @@ GDBRemoteCommunication::SendRawPacketNoLock(llvm::StringRef packet,
       else
         return PacketResult::Success;
     } else {
-      if (log)
-        log->Printf("error: failed to send packet: %.*s", (int)packet_length,
-                    packet_data);
+      LLDB_LOGF(log, "error: failed to send packet: %.*s", (int)packet_length,
+                packet_data);
     }
   }
   return PacketResult::ErrorSendFailed;
@@ -273,7 +274,7 @@ GDBRemoteCommunication::WaitForPacketNoLock(StringExtractorGDBRemote &packet,
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PACKETS));
 
   // Check for a packet from our cache first without trying any reading...
-  if (CheckForPacket(NULL, 0, packet) != PacketType::Invalid)
+  if (CheckForPacket(nullptr, 0, packet) != PacketType::Invalid)
     return PacketResult::Success;
 
   bool timed_out = false;
@@ -331,11 +332,12 @@ GDBRemoteCommunication::WaitForPacketNoLock(StringExtractorGDBRemote &packet,
             std::string regex_str = "^";
             regex_str += echo_packet;
             regex_str += "$";
-            response_regex.Compile(regex_str);
+            response_regex = RegularExpression(regex_str);
           } else {
             echo_packet_len =
                 ::snprintf(echo_packet, sizeof(echo_packet), "qC");
-            response_regex.Compile(llvm::StringRef("^QC[0-9A-Fa-f]+$"));
+            response_regex =
+                RegularExpression(llvm::StringRef("^QC[0-9A-Fa-f]+$"));
           }
 
           PacketResult echo_packet_result =
@@ -469,7 +471,7 @@ bool GDBRemoteCommunication::DecompressPacket() {
       content_length = hash_mark_idx - content_start;
       std::string bufsize_str(m_bytes.data() + 2, i - 2 - 1);
       errno = 0;
-      decompressed_bufsize = ::strtoul(bufsize_str.c_str(), NULL, 10);
+      decompressed_bufsize = ::strtoul(bufsize_str.c_str(), nullptr, 10);
       if (errno != 0 || decompressed_bufsize == ULONG_MAX) {
         m_bytes.erase(0, size_of_first_packet);
         return false;
@@ -482,17 +484,16 @@ bool GDBRemoteCommunication::DecompressPacket() {
     packet_checksum_cstr[0] = m_bytes[checksum_idx];
     packet_checksum_cstr[1] = m_bytes[checksum_idx + 1];
     packet_checksum_cstr[2] = '\0';
-    long packet_checksum = strtol(packet_checksum_cstr, NULL, 16);
+    long packet_checksum = strtol(packet_checksum_cstr, nullptr, 16);
 
     long actual_checksum = CalculcateChecksum(
         llvm::StringRef(m_bytes).substr(1, hash_mark_idx - 1));
     bool success = packet_checksum == actual_checksum;
     if (!success) {
-      if (log)
-        log->Printf(
-            "error: checksum mismatch: %.*s expected 0x%2.2x, got 0x%2.2x",
-            (int)(pkt_size), m_bytes.c_str(), (uint8_t)packet_checksum,
-            (uint8_t)actual_checksum);
+      LLDB_LOGF(log,
+                "error: checksum mismatch: %.*s expected 0x%2.2x, got 0x%2.2x",
+                (int)(pkt_size), m_bytes.c_str(), (uint8_t)packet_checksum,
+                (uint8_t)actual_checksum);
     }
     // Send the ack or nack if needed
     if (!success) {
@@ -540,7 +541,7 @@ bool GDBRemoteCommunication::DecompressPacket() {
 #if defined(HAVE_LIBCOMPRESSION)
   if (m_compression_type == CompressionType::ZlibDeflate ||
       m_compression_type == CompressionType::LZFSE ||
-      m_compression_type == CompressionType::LZ4 || 
+      m_compression_type == CompressionType::LZ4 ||
       m_compression_type == CompressionType::LZMA) {
     compression_algorithm compression_type;
     if (m_compression_type == CompressionType::LZFSE)
@@ -577,7 +578,7 @@ bool GDBRemoteCommunication::DecompressPacket() {
     if (decompressed_bufsize != ULONG_MAX && decompressed_buffer != nullptr) {
       decompressed_bytes = compression_decode_buffer(
           decompressed_buffer, decompressed_bufsize,
-          (uint8_t *)unescaped_content.data(), unescaped_content.size(), 
+          (uint8_t *)unescaped_content.data(), unescaped_content.size(),
           m_decompression_scratch, compression_type);
     }
   }
@@ -650,8 +651,8 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
   if (src && src_len > 0) {
     if (log && log->GetVerbose()) {
       StreamString s;
-      log->Printf("GDBRemoteCommunication::%s adding %u bytes: %.*s",
-                  __FUNCTION__, (uint32_t)src_len, (uint32_t)src_len, src);
+      LLDB_LOGF(log, "GDBRemoteCommunication::%s adding %u bytes: %.*s",
+                __FUNCTION__, (uint32_t)src_len, (uint32_t)src_len, src);
     }
     m_bytes.append((const char *)src, src_len);
   }
@@ -732,9 +733,8 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
           break;
         }
       }
-      if (log)
-        log->Printf("GDBRemoteCommunication::%s tossing %u junk bytes: '%.*s'",
-                    __FUNCTION__, idx - 1, idx - 1, m_bytes.c_str());
+      LLDB_LOGF(log, "GDBRemoteCommunication::%s tossing %u junk bytes: '%.*s'",
+                __FUNCTION__, idx - 1, idx - 1, m_bytes.c_str());
       m_bytes.erase(0, idx - 1);
     } break;
     }
@@ -751,7 +751,6 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
       size_t content_end = content_start + content_length;
 
       bool success = true;
-      std::string &packet_str = packet.GetStringRef();
       if (log) {
         // If logging was just enabled and we have history, then dump out what
         // we have to the log so we get the historical context. The Dump() call
@@ -799,13 +798,13 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
           log->PutString(strm.GetString());
         } else {
           if (CompressionIsEnabled())
-            log->Printf("<%4" PRIu64 ":%" PRIu64 "> read packet: %.*s",
-                        (uint64_t)original_packet_size, (uint64_t)total_length,
-                        (int)(total_length), m_bytes.c_str());
+            LLDB_LOGF(log, "<%4" PRIu64 ":%" PRIu64 "> read packet: %.*s",
+                      (uint64_t)original_packet_size, (uint64_t)total_length,
+                      (int)(total_length), m_bytes.c_str());
           else
-            log->Printf("<%4" PRIu64 "> read packet: %.*s",
-                        (uint64_t)total_length, (int)(total_length),
-                        m_bytes.c_str());
+            LLDB_LOGF(log, "<%4" PRIu64 "> read packet: %.*s",
+                      (uint64_t)total_length, (int)(total_length),
+                      m_bytes.c_str());
         }
       }
 
@@ -813,11 +812,10 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
                           GDBRemoteCommunicationHistory::ePacketTypeRecv,
                           total_length);
 
-      // Clear packet_str in case there is some existing data in it.
-      packet_str.clear();
       // Copy the packet from m_bytes to packet_str expanding the run-length
       // encoding in the process. Reserve enough byte for the most common case
       // (no RLE used)
+      std ::string packet_str;
       packet_str.reserve(m_bytes.length());
       for (std::string::const_iterator c = m_bytes.begin() + content_start;
            c != m_bytes.begin() + content_end; ++c) {
@@ -840,6 +838,7 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
           packet_str.push_back(*c);
         }
       }
+      packet = StringExtractorGDBRemote(packet_str);
 
       if (m_bytes[0] == '$' || m_bytes[0] == '%') {
         assert(checksum_idx < m_bytes.size());
@@ -847,16 +846,16 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
             ::isxdigit(m_bytes[checksum_idx + 1])) {
           if (GetSendAcks()) {
             const char *packet_checksum_cstr = &m_bytes[checksum_idx];
-            char packet_checksum = strtol(packet_checksum_cstr, NULL, 16);
+            char packet_checksum = strtol(packet_checksum_cstr, nullptr, 16);
             char actual_checksum = CalculcateChecksum(
                 llvm::StringRef(m_bytes).slice(content_start, content_end));
             success = packet_checksum == actual_checksum;
             if (!success) {
-              if (log)
-                log->Printf("error: checksum mismatch: %.*s expected 0x%2.2x, "
-                            "got 0x%2.2x",
-                            (int)(total_length), m_bytes.c_str(),
-                            (uint8_t)packet_checksum, (uint8_t)actual_checksum);
+              LLDB_LOGF(log,
+                        "error: checksum mismatch: %.*s expected 0x%2.2x, "
+                        "got 0x%2.2x",
+                        (int)(total_length), m_bytes.c_str(),
+                        (uint8_t)packet_checksum, (uint8_t)actual_checksum);
             }
             // Send the ack or nack if needed
             if (!success)
@@ -866,9 +865,8 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
           }
         } else {
           success = false;
-          if (log)
-            log->Printf("error: invalid checksum in packet: '%s'\n",
-                        m_bytes.c_str());
+          LLDB_LOGF(log, "error: invalid checksum in packet: '%s'\n",
+                    m_bytes.c_str());
         }
       }
 
@@ -887,22 +885,23 @@ GDBRemoteCommunication::CheckForPacket(const uint8_t *src, size_t src_len,
 
 Status GDBRemoteCommunication::StartListenThread(const char *hostname,
                                                  uint16_t port) {
-  Status error;
-  if (m_listen_thread.IsJoinable()) {
-    error.SetErrorString("listen thread already running");
-  } else {
-    char listen_url[512];
-    if (hostname && hostname[0])
-      snprintf(listen_url, sizeof(listen_url), "listen://%s:%i", hostname,
-               port);
-    else
-      snprintf(listen_url, sizeof(listen_url), "listen://%i", port);
-    m_listen_url = listen_url;
-    SetConnection(new ConnectionFileDescriptor());
-    m_listen_thread = ThreadLauncher::LaunchThread(
-        listen_url, GDBRemoteCommunication::ListenThread, this, &error);
-  }
-  return error;
+  if (m_listen_thread.IsJoinable())
+    return Status("listen thread already running");
+
+  char listen_url[512];
+  if (hostname && hostname[0])
+    snprintf(listen_url, sizeof(listen_url), "listen://%s:%i", hostname, port);
+  else
+    snprintf(listen_url, sizeof(listen_url), "listen://%i", port);
+  m_listen_url = listen_url;
+  SetConnection(new ConnectionFileDescriptor());
+  llvm::Expected<HostThread> listen_thread = ThreadLauncher::LaunchThread(
+      listen_url, GDBRemoteCommunication::ListenThread, this);
+  if (!listen_thread)
+    return Status(listen_thread.takeError());
+  m_listen_thread = *listen_thread;
+
+  return Status();
 }
 
 bool GDBRemoteCommunication::JoinListenThread() {
@@ -922,19 +921,17 @@ GDBRemoteCommunication::ListenThread(lldb::thread_arg_t arg) {
     // Do the listen on another thread so we can continue on...
     if (connection->Connect(comm->m_listen_url.c_str(), &error) !=
         eConnectionStatusSuccess)
-      comm->SetConnection(NULL);
+      comm->SetConnection(nullptr);
   }
-  return NULL;
+  return {};
 }
 
 Status GDBRemoteCommunication::StartDebugserverProcess(
     const char *url, Platform *platform, ProcessLaunchInfo &launch_info,
     uint16_t *port, const Args *inferior_args, int pass_comm_fd) {
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
-  if (log)
-    log->Printf("GDBRemoteCommunication::%s(url=%s, port=%" PRIu16 ")",
-                __FUNCTION__, url ? url : "<empty>",
-                port ? *port : uint16_t(0));
+  LLDB_LOGF(log, "GDBRemoteCommunication::%s(url=%s, port=%" PRIu16 ")",
+            __FUNCTION__, url ? url : "<empty>", port ? *port : uint16_t(0));
 
   Status error;
   // If we locate debugserver, keep that located version around
@@ -951,10 +948,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
   if (!env_debugserver_path.empty()) {
     debugserver_file_spec.SetFile(env_debugserver_path,
                                   FileSpec::Style::native);
-    if (log)
-      log->Printf("GDBRemoteCommunication::%s() gdb-remote stub exe path set "
-                  "from environment variable: %s",
-                  __FUNCTION__, env_debugserver_path.c_str());
+    LLDB_LOGF(log,
+              "GDBRemoteCommunication::%s() gdb-remote stub exe path set "
+              "from environment variable: %s",
+              __FUNCTION__, env_debugserver_path.c_str());
   } else
     debugserver_file_spec = g_debugserver_file_spec;
   bool debugserver_exists =
@@ -966,10 +963,9 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
       debugserver_file_spec.AppendPathComponent(DEBUGSERVER_BASENAME);
       debugserver_exists = FileSystem::Instance().Exists(debugserver_file_spec);
       if (debugserver_exists) {
-        if (log)
-          log->Printf(
-              "GDBRemoteCommunication::%s() found gdb-remote stub exe '%s'",
-              __FUNCTION__, debugserver_file_spec.GetPath().c_str());
+        LLDB_LOGF(log,
+                  "GDBRemoteCommunication::%s() found gdb-remote stub exe '%s'",
+                  __FUNCTION__, debugserver_file_spec.GetPath().c_str());
 
         g_debugserver_file_spec = debugserver_file_spec;
       } else {
@@ -983,10 +979,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
           // exist
           debugserver_exists = true;
         } else {
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() could not find "
-                        "gdb-remote stub exe '%s'",
-                        __FUNCTION__, debugserver_file_spec.GetPath().c_str());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() could not find "
+                    "gdb-remote stub exe '%s'",
+                    __FUNCTION__, debugserver_file_spec.GetPath().c_str());
         }
         // Don't cache the platform specific GDB server binary as it could
         // change from platform to platform
@@ -1050,10 +1046,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
         error = socket_pipe.CreateWithUniqueName("debugserver-named-pipe",
                                                  false, named_pipe_path);
         if (error.Fail()) {
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() "
-                        "named pipe creation failed: %s",
-                        __FUNCTION__, error.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() "
+                    "named pipe creation failed: %s",
+                    __FUNCTION__, error.AsCString());
           return error;
         }
         debugserver_args.AppendArgument(llvm::StringRef("--named-pipe"));
@@ -1063,10 +1059,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
         // using using an unnamed pipe...
         error = socket_pipe.CreateNew(true);
         if (error.Fail()) {
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() "
-                        "unnamed pipe creation failed: %s",
-                        __FUNCTION__, error.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() "
+                    "unnamed pipe creation failed: %s",
+                    __FUNCTION__, error.AsCString());
           return error;
         }
         pipe_t write = socket_pipe.GetWritePipe();
@@ -1079,10 +1075,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
         // debugserver connect to us..
         error = StartListenThread("127.0.0.1", 0);
         if (error.Fail()) {
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() unable to start listen "
-                        "thread: %s",
-                        __FUNCTION__, error.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() unable to start listen "
+                    "thread: %s",
+                    __FUNCTION__, error.AsCString());
           return error;
         }
 
@@ -1102,9 +1098,8 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
             *port = port_;
         } else {
           error.SetErrorString("failed to bind to port 0 on 127.0.0.1");
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() failed: %s", __FUNCTION__,
-                        error.AsCString());
+          LLDB_LOGF(log, "GDBRemoteCommunication::%s() failed: %s",
+                    __FUNCTION__, error.AsCString());
           return error;
         }
       }
@@ -1146,10 +1141,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
 
       if (has_env_var) {
         debugserver_args.AppendArgument(llvm::StringRef(extra_arg));
-        if (log)
-          log->Printf("GDBRemoteCommunication::%s adding env var %s contents "
-                      "to stub command line (%s)",
-                      __FUNCTION__, env_var_name, extra_arg.c_str());
+        LLDB_LOGF(log,
+                  "GDBRemoteCommunication::%s adding env var %s contents "
+                  "to stub command line (%s)",
+                  __FUNCTION__, env_var_name, extra_arg.c_str());
       }
     } while (has_env_var);
 
@@ -1175,8 +1170,8 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
       StreamString string_stream;
       Platform *const platform = nullptr;
       launch_info.Dump(string_stream, platform);
-      log->Printf("launch info for gdb-remote stub:\n%s",
-                  string_stream.GetData());
+      LLDB_LOGF(log, "launch info for gdb-remote stub:\n%s",
+                string_stream.GetData());
     }
     error = Host::LaunchProcess(launch_info);
 
@@ -1186,11 +1181,10 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
       if (named_pipe_path.size() > 0) {
         error = socket_pipe.OpenAsReader(named_pipe_path, false);
         if (error.Fail())
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() "
-                        "failed to open named pipe %s for reading: %s",
-                        __FUNCTION__, named_pipe_path.c_str(),
-                        error.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() "
+                    "failed to open named pipe %s for reading: %s",
+                    __FUNCTION__, named_pipe_path.c_str(), error.AsCString());
       }
 
       if (socket_pipe.CanWrite())
@@ -1207,24 +1201,22 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
           uint16_t child_port = StringConvert::ToUInt32(port_cstr, 0);
           if (*port == 0 || *port == child_port) {
             *port = child_port;
-            if (log)
-              log->Printf("GDBRemoteCommunication::%s() "
-                          "debugserver listens %u port",
-                          __FUNCTION__, *port);
+            LLDB_LOGF(log,
+                      "GDBRemoteCommunication::%s() "
+                      "debugserver listens %u port",
+                      __FUNCTION__, *port);
           } else {
-            if (log)
-              log->Printf("GDBRemoteCommunication::%s() "
-                          "debugserver listening on port "
-                          "%d but requested port was %d",
-                          __FUNCTION__, (uint32_t)child_port,
-                          (uint32_t)(*port));
+            LLDB_LOGF(log,
+                      "GDBRemoteCommunication::%s() "
+                      "debugserver listening on port "
+                      "%d but requested port was %d",
+                      __FUNCTION__, (uint32_t)child_port, (uint32_t)(*port));
           }
         } else {
-          if (log)
-            log->Printf("GDBRemoteCommunication::%s() "
-                        "failed to read a port value from pipe %s: %s",
-                        __FUNCTION__, named_pipe_path.c_str(),
-                        error.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s() "
+                    "failed to read a port value from pipe %s: %s",
+                    __FUNCTION__, named_pipe_path.c_str(), error.AsCString());
         }
         socket_pipe.Close();
       }
@@ -1232,10 +1224,9 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
       if (named_pipe_path.size() > 0) {
         const auto err = socket_pipe.Delete(named_pipe_path);
         if (err.Fail()) {
-          if (log)
-            log->Printf(
-                "GDBRemoteCommunication::%s failed to delete pipe %s: %s",
-                __FUNCTION__, named_pipe_path.c_str(), err.AsCString());
+          LLDB_LOGF(log,
+                    "GDBRemoteCommunication::%s failed to delete pipe %s: %s",
+                    __FUNCTION__, named_pipe_path.c_str(), err.AsCString());
         }
       }
 
@@ -1247,9 +1238,8 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
   }
 
   if (error.Fail()) {
-    if (log)
-      log->Printf("GDBRemoteCommunication::%s() failed: %s", __FUNCTION__,
-                  error.AsCString());
+    LLDB_LOGF(log, "GDBRemoteCommunication::%s() failed: %s", __FUNCTION__,
+              error.AsCString());
   }
 
   return error;
@@ -1349,7 +1339,7 @@ void GDBRemoteCommunication::AppendBytesToCache(const uint8_t *bytes,
 
     if (type == PacketType::Notify) {
       // put this packet into an event
-      const char *pdata = packet.GetStringRef().c_str();
+      const char *pdata = packet.GetStringRef().data();
 
       // as the communication class, we are a broadcaster and the async thread
       // is tuned to listen to us

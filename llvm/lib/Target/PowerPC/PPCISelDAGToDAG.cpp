@@ -218,13 +218,6 @@ namespace {
     SDValue SelectCC(SDValue LHS, SDValue RHS, ISD::CondCode CC,
                      const SDLoc &dl);
 
-    /// SelectAddrImm - Returns true if the address N can be represented by
-    /// a base register plus a signed 16-bit displacement [r+imm].
-    bool SelectAddrImm(SDValue N, SDValue &Disp,
-                       SDValue &Base) {
-      return PPCLowering->SelectAddressRegImm(N, Disp, Base, *CurDAG, 0);
-    }
-
     /// SelectAddrImmOffs - Return true if the operand is valid for a preinc
     /// immediate field.  Note that the operand at this point is already the
     /// result of a prior SelectAddressRegImm call.
@@ -238,26 +231,61 @@ namespace {
       return false;
     }
 
-    /// SelectAddrIdx - Given the specified addressed, check to see if it can be
-    /// represented as an indexed [r+r] operation.  Returns false if it can
-    /// be represented by [r+imm], which are preferred.
+    /// SelectAddrIdx - Given the specified address, check to see if it can be
+    /// represented as an indexed [r+r] operation.
+    /// This is for xform instructions whose associated displacement form is D.
+    /// The last parameter \p 0 means associated D form has no requirment for 16
+    /// bit signed displacement.
+    /// Returns false if it can be represented by [r+imm], which are preferred.
     bool SelectAddrIdx(SDValue N, SDValue &Base, SDValue &Index) {
-      return PPCLowering->SelectAddressRegReg(N, Base, Index, *CurDAG);
+      return PPCLowering->SelectAddressRegReg(N, Base, Index, *CurDAG, 0);
     }
 
-    /// SelectAddrIdxOnly - Given the specified addressed, force it to be
+    /// SelectAddrIdx4 - Given the specified address, check to see if it can be
+    /// represented as an indexed [r+r] operation.
+    /// This is for xform instructions whose associated displacement form is DS.
+    /// The last parameter \p 4 means associated DS form 16 bit signed
+    /// displacement must be a multiple of 4.
+    /// Returns false if it can be represented by [r+imm], which are preferred.
+    bool SelectAddrIdxX4(SDValue N, SDValue &Base, SDValue &Index) {
+      return PPCLowering->SelectAddressRegReg(N, Base, Index, *CurDAG, 4);
+    }
+
+    /// SelectAddrIdx16 - Given the specified address, check to see if it can be
+    /// represented as an indexed [r+r] operation.
+    /// This is for xform instructions whose associated displacement form is DQ.
+    /// The last parameter \p 16 means associated DQ form 16 bit signed
+    /// displacement must be a multiple of 16.
+    /// Returns false if it can be represented by [r+imm], which are preferred.
+    bool SelectAddrIdxX16(SDValue N, SDValue &Base, SDValue &Index) {
+      return PPCLowering->SelectAddressRegReg(N, Base, Index, *CurDAG, 16);
+    }
+
+    /// SelectAddrIdxOnly - Given the specified address, force it to be
     /// represented as an indexed [r+r] operation.
     bool SelectAddrIdxOnly(SDValue N, SDValue &Base, SDValue &Index) {
       return PPCLowering->SelectAddressRegRegOnly(N, Base, Index, *CurDAG);
     }
+    
+    /// SelectAddrImm - Returns true if the address N can be represented by
+    /// a base register plus a signed 16-bit displacement [r+imm].
+    /// The last parameter \p 0 means D form has no requirment for 16 bit signed
+    /// displacement.
+    bool SelectAddrImm(SDValue N, SDValue &Disp,
+                       SDValue &Base) {
+      return PPCLowering->SelectAddressRegImm(N, Disp, Base, *CurDAG, 0);
+    }
 
     /// SelectAddrImmX4 - Returns true if the address N can be represented by
-    /// a base register plus a signed 16-bit displacement that is a multiple of 4.
-    /// Suitable for use by STD and friends.
+    /// a base register plus a signed 16-bit displacement that is a multiple of
+    /// 4 (last parameter). Suitable for use by STD and friends.
     bool SelectAddrImmX4(SDValue N, SDValue &Disp, SDValue &Base) {
       return PPCLowering->SelectAddressRegImm(N, Disp, Base, *CurDAG, 4);
     }
 
+    /// SelectAddrImmX16 - Returns true if the address N can be represented by
+    /// a base register plus a signed 16-bit displacement that is a multiple of
+    /// 16(last parameter). Suitable for use by STXV and friends.
     bool SelectAddrImmX16(SDValue N, SDValue &Disp, SDValue &Base) {
       return PPCLowering->SelectAddressRegImm(N, Disp, Base, *CurDAG, 16);
     }
@@ -343,7 +371,7 @@ void PPCDAGToDAGISel::InsertVRSaveCode(MachineFunction &Fn) {
   // by the scheduler.  Detect them now.
   bool HasVectorVReg = false;
   for (unsigned i = 0, e = RegInfo->getNumVirtRegs(); i != e; ++i) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
+    unsigned Reg = Register::index2VirtReg(i);
     if (RegInfo->getRegClass(Reg) == &PPC::VRRCRegClass) {
       HasVectorVReg = true;
       break;
@@ -363,8 +391,8 @@ void PPCDAGToDAGISel::InsertVRSaveCode(MachineFunction &Fn) {
 
   // Create two vregs - one to hold the VRSAVE register that is live-in to the
   // function and one for the value after having bits or'd into it.
-  unsigned InVRSAVE = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
-  unsigned UpdatedVRSAVE = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
+  Register InVRSAVE = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
+  Register UpdatedVRSAVE = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
 
   const TargetInstrInfo &TII = *PPCSubTarget->getInstrInfo();
   MachineBasicBlock &EntryBB = *Fn.begin();
@@ -411,14 +439,15 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
     if (PPCLowering->getPointerTy(CurDAG->getDataLayout()) == MVT::i32) {
       if (PPCSubTarget->isTargetELF()) {
         GlobalBaseReg = PPC::R30;
-        if (M->getPICLevel() == PICLevel::SmallPIC) {
+        if (!PPCSubTarget->isSecurePlt() &&
+            M->getPICLevel() == PICLevel::SmallPIC) {
           BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MoveGOTtoLR));
           BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MFLR), GlobalBaseReg);
           MF->getInfo<PPCFunctionInfo>()->setUsesPICBase(true);
         } else {
           BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR));
           BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MFLR), GlobalBaseReg);
-          unsigned TempReg = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
+          Register TempReg = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
           BuildMI(FirstMBB, MBBI, dl,
                   TII.get(PPC::UpdateGBR), GlobalBaseReg)
                   .addReg(TempReg, RegState::Define).addReg(GlobalBaseReg);
@@ -4367,11 +4396,9 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     getGlobalBaseReg();
   } break;
   case PPCISD::CALL: {
-    const Module *M = MF->getFunction().getParent();
-
     if (PPCLowering->getPointerTy(CurDAG->getDataLayout()) != MVT::i32 ||
-        (!TM.isPositionIndependent() || !PPCSubTarget->isSecurePlt()) ||
-        !PPCSubTarget->isTargetELF() || M->getPICLevel() == PICLevel::SmallPIC)
+        !TM.isPositionIndependent() || !PPCSubTarget->isSecurePlt() ||
+        !PPCSubTarget->isTargetELF())
       break;
 
     SDValue Op = N->getOperand(1);
@@ -5038,52 +5065,95 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     return;
   }
   case PPCISD::TOC_ENTRY: {
-    assert ((PPCSubTarget->isPPC64() || PPCSubTarget->isSVR4ABI()) &&
-            "Only supported for 64-bit ABI and 32-bit SVR4");
-    if (PPCSubTarget->isSVR4ABI() && !PPCSubTarget->isPPC64()) {
-      SDValue GA = N->getOperand(0);
-      SDNode *MN = CurDAG->getMachineNode(PPC::LWZtoc, dl, MVT::i32, GA,
-                                          N->getOperand(1));
-      transferMemOperands(N, MN);
-      ReplaceNode(N, MN);
-      return;
-    }
+    const bool isPPC64 = PPCSubTarget->isPPC64();
+    const bool isELFABI = PPCSubTarget->isSVR4ABI();
+    const bool isAIXABI = PPCSubTarget->isAIXABI();
 
-    // For medium and large code model, we generate two instructions as
-    // described below.  Otherwise we allow SelectCodeCommon to handle this,
+    assert(!PPCSubTarget->isDarwin() && "TOC is an ELF/XCOFF construct");
+
+    // PowerPC only support small, medium and large code model.
+    const CodeModel::Model CModel = TM.getCodeModel();
+    assert(!(CModel == CodeModel::Tiny || CModel == CodeModel::Kernel) &&
+           "PowerPC doesn't support tiny or kernel code models.");
+
+    if (isAIXABI && CModel == CodeModel::Medium)
+      report_fatal_error("Medium code model is not supported on AIX.");
+
+    // For 64-bit small code model, we allow SelectCodeCommon to handle this,
     // selecting one of LDtoc, LDtocJTI, LDtocCPT, and LDtocBA.
-    CodeModel::Model CModel = TM.getCodeModel();
-    if (CModel != CodeModel::Medium && CModel != CodeModel::Large)
+    if (isPPC64 && CModel == CodeModel::Small)
       break;
 
-    // The first source operand is a TargetGlobalAddress or a TargetJumpTable.
-    // If it must be toc-referenced according to PPCSubTarget, we generate:
-    //   LDtocL(@sym, ADDIStocHA(%x2, @sym))
+    // Handle 32-bit small code model.
+    if (!isPPC64) {
+      // Transforms the ISD::TOC_ENTRY node to a PPCISD::LWZtoc.
+      auto replaceWithLWZtoc = [this, &dl](SDNode *TocEntry) {
+        SDValue GA = TocEntry->getOperand(0);
+        SDValue TocBase = TocEntry->getOperand(1);
+        SDNode *MN = CurDAG->getMachineNode(PPC::LWZtoc, dl, MVT::i32, GA,
+                                            TocBase);
+        transferMemOperands(TocEntry, MN);
+        ReplaceNode(TocEntry, MN);
+      };
+
+      if (isELFABI) {
+        assert(TM.isPositionIndependent() &&
+               "32-bit ELF can only have TOC entries in position independent"
+               " code.");
+        // 32-bit ELF always uses a small code model toc access.
+        replaceWithLWZtoc(N);
+        return;
+      }
+
+      if (isAIXABI && CModel == CodeModel::Small) {
+        replaceWithLWZtoc(N);
+        return;
+      }
+    }
+
+    assert(CModel != CodeModel::Small && "All small code models handled.");
+
+    assert((isPPC64 || (isAIXABI && !isPPC64)) && "We are dealing with 64-bit"
+           " ELF/AIX or 32-bit AIX in the following.");
+
+    // Transforms the ISD::TOC_ENTRY node for 32-bit AIX large code model mode
+    // or 64-bit medium (ELF-only) or large (ELF and AIX) code model code. We
+    // generate two instructions as described below. The first source operand
+    // is a symbol reference. If it must be toc-referenced according to
+    // PPCSubTarget, we generate:
+    // [32-bit AIX]
+    //   LWZtocL(@sym, ADDIStocHA(%r2, @sym))
+    // [64-bit ELF/AIX]
+    //   LDtocL(@sym, ADDIStocHA8(%x2, @sym))
     // Otherwise we generate:
-    //   ADDItocL(ADDIStocHA(%x2, @sym), @sym)
+    //   ADDItocL(ADDIStocHA8(%x2, @sym), @sym)
     SDValue GA = N->getOperand(0);
     SDValue TOCbase = N->getOperand(1);
-    SDNode *Tmp = CurDAG->getMachineNode(PPC::ADDIStocHA, dl, MVT::i64,
-                                         TOCbase, GA);
+
+    EVT VT = isPPC64 ? MVT::i64 : MVT::i32;
+    SDNode *Tmp = CurDAG->getMachineNode(
+        isPPC64 ? PPC::ADDIStocHA8 : PPC::ADDIStocHA, dl, VT, TOCbase, GA);
+
     if (PPCLowering->isAccessedAsGotIndirect(GA)) {
-      // If it is access as got-indirect, we need an extra LD to load
+      // If it is accessed as got-indirect, we need an extra LWZ/LD to load
       // the address.
-      SDNode *MN = CurDAG->getMachineNode(PPC::LDtocL, dl, MVT::i64, GA,
-                                          SDValue(Tmp, 0));
+      SDNode *MN = CurDAG->getMachineNode(
+          isPPC64 ? PPC::LDtocL : PPC::LWZtocL, dl, VT, GA, SDValue(Tmp, 0));
+
       transferMemOperands(N, MN);
       ReplaceNode(N, MN);
       return;
     }
 
-    // Build the address relative to the TOC-pointer..
+    // Build the address relative to the TOC-pointer.
     ReplaceNode(N, CurDAG->getMachineNode(PPC::ADDItocL, dl, MVT::i64,
                                           SDValue(Tmp, 0), GA));
     return;
   }
   case PPCISD::PPC32_PICGOT:
     // Generate a PIC-safe GOT reference.
-    assert(!PPCSubTarget->isPPC64() && PPCSubTarget->isSVR4ABI() &&
-      "PPCISD::PPC32_PICGOT is only supported for 32-bit SVR4");
+    assert(PPCSubTarget->is32BitELFABI() &&
+           "PPCISD::PPC32_PICGOT is only supported for 32-bit SVR4");
     CurDAG->SelectNodeTo(N, PPC::PPC32PICGOT,
                          PPCLowering->getPointerTy(CurDAG->getDataLayout()),
                          MVT::i32);
@@ -5316,7 +5386,7 @@ SDValue PPCDAGToDAGISel::combineToCMPB(SDNode *N) {
     SDValue V = Queue.pop_back_val();
 
     for (const SDValue &O : V.getNode()->ops()) {
-      unsigned b;
+      unsigned b = 0;
       uint64_t M = 0, A = 0;
       SDValue OLHS, ORHS;
       if (O.getOpcode() == ISD::OR) {
@@ -6429,7 +6499,7 @@ void PPCDAGToDAGISel::PeepholePPC64() {
           continue;
 
         if (!HBase.isMachineOpcode() ||
-            HBase.getMachineOpcode() != PPC::ADDIStocHA)
+            HBase.getMachineOpcode() != PPC::ADDIStocHA8)
           continue;
 
         if (!Base.hasOneUse() || !HBase.hasOneUse())

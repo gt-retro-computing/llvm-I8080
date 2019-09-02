@@ -13,8 +13,10 @@
 #include "ArgumentCommentCheck.h"
 #include "AssertSideEffectCheck.h"
 #include "BoolPointerImplicitConversionCheck.h"
+#include "BranchCloneCheck.h"
 #include "CopyConstructorInitCheck.h"
 #include "DanglingHandleCheck.h"
+#include "DynamicStaticInitializersCheck.h"
 #include "ExceptionEscapeCheck.h"
 #include "FoldInitTypeCheck.h"
 #include "ForwardDeclarationNamespaceCheck.h"
@@ -30,6 +32,7 @@
 #include "MoveForwardingReferenceCheck.h"
 #include "MultipleStatementMacroCheck.h"
 #include "ParentVirtualCallCheck.h"
+#include "PosixReturnCheck.h"
 #include "SizeofContainerCheck.h"
 #include "SizeofExpressionCheck.h"
 #include "StringConstructorCheck.h"
@@ -46,6 +49,7 @@
 #include "TooSmallLoopVariableCheck.h"
 #include "UndefinedMemoryManipulationCheck.h"
 #include "UndelegatedConstructorCheck.h"
+#include "UnhandledSelfAssignmentCheck.h"
 #include "UnusedRaiiCheck.h"
 #include "UnusedReturnValueCheck.h"
 #include "UseAfterMoveCheck.h"
@@ -64,10 +68,14 @@ public:
         "bugprone-assert-side-effect");
     CheckFactories.registerCheck<BoolPointerImplicitConversionCheck>(
         "bugprone-bool-pointer-implicit-conversion");
+    CheckFactories.registerCheck<BranchCloneCheck>(
+        "bugprone-branch-clone");
     CheckFactories.registerCheck<CopyConstructorInitCheck>(
         "bugprone-copy-constructor-init");
     CheckFactories.registerCheck<DanglingHandleCheck>(
         "bugprone-dangling-handle");
+    CheckFactories.registerCheck<DynamicStaticInitializersCheck>(
+        "bugprone-dynamic-static-initializers");
     CheckFactories.registerCheck<ExceptionEscapeCheck>(
         "bugprone-exception-escape");
     CheckFactories.registerCheck<FoldInitTypeCheck>(
@@ -96,12 +104,12 @@ public:
         "bugprone-move-forwarding-reference");
     CheckFactories.registerCheck<MultipleStatementMacroCheck>(
         "bugprone-multiple-statement-macro");
-    CheckFactories.registerCheck<TooSmallLoopVariableCheck>(
-        "bugprone-too-small-loop-variable");
     CheckFactories.registerCheck<cppcoreguidelines::NarrowingConversionsCheck>(
         "bugprone-narrowing-conversions");
     CheckFactories.registerCheck<ParentVirtualCallCheck>(
         "bugprone-parent-virtual-call");
+    CheckFactories.registerCheck<PosixReturnCheck>(
+        "bugprone-posix-return");
     CheckFactories.registerCheck<SizeofContainerCheck>(
         "bugprone-sizeof-container");
     CheckFactories.registerCheck<SizeofExpressionCheck>(
@@ -128,10 +136,14 @@ public:
         "bugprone-terminating-continue");
     CheckFactories.registerCheck<ThrowKeywordMissingCheck>(
         "bugprone-throw-keyword-missing");
+    CheckFactories.registerCheck<TooSmallLoopVariableCheck>(
+        "bugprone-too-small-loop-variable");
     CheckFactories.registerCheck<UndefinedMemoryManipulationCheck>(
         "bugprone-undefined-memory-manipulation");
     CheckFactories.registerCheck<UndelegatedConstructorCheck>(
         "bugprone-undelegated-constructor");
+    CheckFactories.registerCheck<UnhandledSelfAssignmentCheck>(
+        "bugprone-unhandled-self-assignment");
     CheckFactories.registerCheck<UnusedRaiiCheck>(
         "bugprone-unused-raii");
     CheckFactories.registerCheck<UnusedReturnValueCheck>(

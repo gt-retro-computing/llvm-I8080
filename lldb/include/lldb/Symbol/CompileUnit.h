@@ -232,7 +232,7 @@ public:
   ///
   /// \return
   ///     A support file list object.
-  FileSpecList &GetSupportFiles();
+  const FileSpecList &GetSupportFiles();
 
   /// Get the compile unit's imported module list.
   ///
@@ -240,7 +240,7 @@ public:
   /// current module.
   ///
   /// \return
-  ///     A list of imported module names.
+  ///     A list of imported modules.
   const std::vector<SourceModule> &GetImportedModules();
 
   /// Get the SymbolFile plug-in user data.
@@ -297,6 +297,8 @@ public:
   /// \param[in] line_table
   ///     A line table object pointer that this object now owns.
   void SetLineTable(LineTable *line_table);
+
+  void SetSupportFiles(const FileSpecList &support_files);
 
   void SetDebugMacros(const DebugMacrosSP &debug_macros);
 

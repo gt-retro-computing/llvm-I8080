@@ -10,11 +10,11 @@
 ; RUN:   | FileCheck %s -check-prefix=RV32I-WITH-FP
 ; RUN: llc -mtriple=riscv64 -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s -check-prefix=RV64I
-; RUN: llc -mtriple=riscv64 -mattr=+f -target-abi ilp32f -verify-machineinstrs < %s \
+; RUN: llc -mtriple=riscv64 -mattr=+f -target-abi lp64f -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s -check-prefix=RV64I
-; RUN: llc -mtriple=riscv64 -mattr=+d -target-abi ilp32f -verify-machineinstrs < %s \
+; RUN: llc -mtriple=riscv64 -mattr=+d -target-abi lp64f -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s -check-prefix=RV64I
-; RUN: llc -mtriple=riscv64 -mattr=+d -target-abi ilp32d -verify-machineinstrs < %s \
+; RUN: llc -mtriple=riscv64 -mattr=+d -target-abi lp64d -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s -check-prefix=RV64I
 ; RUN: llc -mtriple=riscv64 -verify-machineinstrs -frame-pointer=all < %s \
 ; RUN:   | FileCheck %s -check-prefix=RV64I-WITH-FP
@@ -24,7 +24,7 @@
 ; This function tests that RISCVRegisterInfo::getCalleeSavedRegs returns
 ; something appropriate.
 
-define void @callee() {
+define void @callee() nounwind {
 ; RV32I-LABEL: callee:
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -80
@@ -108,7 +108,7 @@ define void @callee() {
 ; This function tests that RISCVRegisterInfo::getCallPreservedMask returns
 ; something appropriate.
 
-define void @caller() {
+define void @caller() nounwind {
 ; RV32I-LABEL: caller:
 ; RV32I:         lui a0, %hi(var)
 ; RV32I-NEXT:    addi s1, a0, %lo(var)

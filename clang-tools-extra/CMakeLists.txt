@@ -1,27 +1,15 @@
-if (NOT DEFINED CLANGD_BUILD_XPC)
-  if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set(CLANGD_BUILD_XPC_DEFAULT ON)
-  else ()
-    set(CLANGD_BUILD_XPC_DEFAULT OFF)
-  endif ()
-
-  set(CLANGD_BUILD_XPC ${CLANGD_BUILD_XPC_DEFAULT} CACHE BOOL "Build XPC Support For Clangd." FORCE)
-
-  unset(CLANGD_BUILD_XPC_DEFAULT)
-endif ()
+include(CMakeDependentOption)
 
 add_subdirectory(clang-apply-replacements)
 add_subdirectory(clang-reorder-fields)
 add_subdirectory(modularize)
 add_subdirectory(clang-tidy)
-add_subdirectory(clang-tidy-vs)
 
 add_subdirectory(clang-change-namespace)
 add_subdirectory(clang-doc)
 add_subdirectory(clang-include-fixer)
 add_subdirectory(clang-move)
 add_subdirectory(clang-query)
-add_subdirectory(clangd)
 add_subdirectory(pp-trace)
 add_subdirectory(tool-template)
 
@@ -37,3 +25,9 @@ if( CLANG_TOOLS_EXTRA_INCLUDE_DOCS )
   add_subdirectory(docs)
 endif()
 
+# clangd has its own CMake tree. It requires threads.
+CMAKE_DEPENDENT_OPTION(CLANG_ENABLE_CLANGD "Build clangd language server" ON
+                       "LLVM_ENABLE_THREADS" OFF)
+if (CLANG_ENABLE_CLANGD)
+  add_subdirectory(clangd)
+endif()

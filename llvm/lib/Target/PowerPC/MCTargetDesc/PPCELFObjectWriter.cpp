@@ -78,7 +78,7 @@ unsigned PPCELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
   // determine the type of the relocation
   unsigned Type;
   if (IsPCRel) {
-    switch ((unsigned)Fixup.getKind()) {
+    switch (Fixup.getTargetKind()) {
     default:
       llvm_unreachable("Unimplemented");
     case PPC::fixup_ppc_br24:
@@ -131,8 +131,11 @@ unsigned PPCELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
       break;
     }
   } else {
-    switch ((unsigned)Fixup.getKind()) {
+    switch (Fixup.getTargetKind()) {
       default: llvm_unreachable("invalid fixup kind!");
+    case FK_NONE:
+      Type = ELF::R_PPC_NONE;
+      break;
     case PPC::fixup_ppc_br24abs:
       Type = ELF::R_PPC_ADDR24;
       break;
@@ -440,5 +443,5 @@ bool PPCELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
 
 std::unique_ptr<MCObjectTargetWriter>
 llvm::createPPCELFObjectWriter(bool Is64Bit, uint8_t OSABI) {
-  return llvm::make_unique<PPCELFObjectWriter>(Is64Bit, OSABI);
+  return std::make_unique<PPCELFObjectWriter>(Is64Bit, OSABI);
 }

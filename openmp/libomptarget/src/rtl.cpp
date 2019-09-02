@@ -107,6 +107,10 @@ void RTLsTy::LoadRTLs() {
               dynlib_handle, "__tgt_rtl_run_target_team_region")))
       continue;
 
+    // Optional functions
+    *((void**) &R.init_requires) = dlsym(
+        dynlib_handle, "__tgt_rtl_init_requires");
+
     // No devices are supported by this RTL?
     if (!(R.NumberOfDevices = R.number_of_devices())) {
       DP("No devices supported in this RTL\n");
@@ -184,6 +188,46 @@ static void RegisterGlobalCtorsDtorsForImage(__tgt_bin_desc *desc,
     }
     Device.PendingGlobalsMtx.unlock();
   }
+}
+
+void RTLsTy::RegisterRequires(int64_t flags) {
+  // TODO: add more elaborate check.
+  // Minimal check: only set requires flags if previous value
+  // is undefined. This ensures that only the first call to this
+  // function will set the requires flags. All subsequent calls
+  // will be checked for compatibility.
+  assert(flags != OMP_REQ_UNDEFINED &&
+         "illegal undefined flag for requires directive!");
+  if (RequiresFlags == OMP_REQ_UNDEFINED) {
+    RequiresFlags = flags;
+    return;
+  }
+
+  // If multiple compilation units are present enforce
+  // consistency across all of them for require clauses:
+  //  - reverse_offload
+  //  - unified_address
+  //  - unified_shared_memory
+  if ((RequiresFlags & OMP_REQ_REVERSE_OFFLOAD) !=
+      (flags & OMP_REQ_REVERSE_OFFLOAD)) {
+    FATAL_MESSAGE0(1,
+        "'#pragma omp requires reverse_offload' not used consistently!");
+  }
+  if ((RequiresFlags & OMP_REQ_UNIFIED_ADDRESS) !=
+          (flags & OMP_REQ_UNIFIED_ADDRESS)) {
+    FATAL_MESSAGE0(1,
+        "'#pragma omp requires unified_address' not used consistently!");
+  }
+  if ((RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY) !=
+          (flags & OMP_REQ_UNIFIED_SHARED_MEMORY)) {
+    FATAL_MESSAGE0(1,
+        "'#pragma omp requires unified_shared_memory' not used consistently!");
+  }
+
+  // TODO: insert any other missing checks
+
+  DP("New requires flags %ld compatible with existing %ld!\n",
+     flags, RequiresFlags);
 }
 
 void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {

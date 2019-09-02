@@ -265,16 +265,20 @@ private:
   /// Mapping from __block VarDecls to BlockVarCopyInit.
   llvm::DenseMap<const VarDecl *, BlockVarCopyInit> BlockVarCopyInits;
 
-  /// Mapping from class scope functions specialization to their
-  /// template patterns.
-  llvm::DenseMap<const FunctionDecl*, FunctionDecl*>
-    ClassScopeSpecializationPattern;
-
   /// Mapping from materialized temporaries with static storage duration
   /// that appear in constant initializers to their evaluated values.  These are
   /// allocated in a std::map because their address must be stable.
   llvm::DenseMap<const MaterializeTemporaryExpr *, APValue *>
     MaterializedTemporaryValues;
+
+  /// Used to cleanups APValues stored in the AST.
+  mutable llvm::SmallVector<APValue *, 0> APValueCleanups;
+
+  /// A cache mapping a string value to a StringLiteral object with the same
+  /// value.
+  ///
+  /// This is lazily created.  This is intentionally not serialized.
+  mutable llvm::StringMap<StringLiteral *> StringLiteralCache;
 
   /// Representation of a "canonical" template template parameter that
   /// is used in canonical template names.
@@ -725,70 +729,48 @@ public:
   /// True if comments are already loaded from ExternalASTSource.
   mutable bool CommentsLoaded = false;
 
-  class RawCommentAndCacheFlags {
-  public:
-    enum Kind {
-      /// We searched for a comment attached to the particular declaration, but
-      /// didn't find any.
-      ///
-      /// getRaw() == 0.
-      NoCommentInDecl = 0,
-
-      /// We have found a comment attached to this particular declaration.
-      ///
-      /// getRaw() != 0.
-      FromDecl,
-
-      /// This declaration does not have an attached comment, and we have
-      /// searched the redeclaration chain.
-      ///
-      /// If getRaw() == 0, the whole redeclaration chain does not have any
-      /// comments.
-      ///
-      /// If getRaw() != 0, it is a comment propagated from other
-      /// redeclaration.
-      FromRedecl
-    };
-
-    Kind getKind() const LLVM_READONLY {
-      return Data.getInt();
-    }
-
-    void setKind(Kind K) {
-      Data.setInt(K);
-    }
-
-    const RawComment *getRaw() const LLVM_READONLY {
-      return Data.getPointer();
-    }
-
-    void setRaw(const RawComment *RC) {
-      Data.setPointer(RC);
-    }
-
-    const Decl *getOriginalDecl() const LLVM_READONLY {
-      return OriginalDecl;
-    }
-
-    void setOriginalDecl(const Decl *Orig) {
-      OriginalDecl = Orig;
-    }
-
-  private:
-    llvm::PointerIntPair<const RawComment *, 2, Kind> Data;
-    const Decl *OriginalDecl;
-  };
-
-  /// Mapping from declarations to comments attached to any
-  /// redeclaration.
+  /// Mapping from declaration to directly attached comment.
   ///
   /// Raw comments are owned by Comments list.  This mapping is populated
   /// lazily.
-  mutable llvm::DenseMap<const Decl *, RawCommentAndCacheFlags> RedeclComments;
+  mutable llvm::DenseMap<const Decl *, const RawComment *> DeclRawComments;
+
+  /// Mapping from canonical declaration to the first redeclaration in chain
+  /// that has a comment attached.
+  ///
+  /// Raw comments are owned by Comments list.  This mapping is populated
+  /// lazily.
+  mutable llvm::DenseMap<const Decl *, const Decl *> RedeclChainComments;
+
+  /// Keeps track of redeclaration chains that don't have any comment attached.
+  /// Mapping from canonical declaration to redeclaration chain that has no
+  /// comments attached to any redeclaration. Specifically it's mapping to
+  /// the last redeclaration we've checked.
+  ///
+  /// Shall not contain declarations that have comments attached to any
+  /// redeclaration in their chain.
+  mutable llvm::DenseMap<const Decl *, const Decl *> CommentlessRedeclChains;
 
   /// Mapping from declarations to parsed comments attached to any
   /// redeclaration.
   mutable llvm::DenseMap<const Decl *, comments::FullComment *> ParsedComments;
+
+  /// Attaches \p Comment to \p OriginalD and to its redeclaration chain
+  /// and removes the redeclaration chain from the set of commentless chains.
+  ///
+  /// Don't do anything if a comment has already been attached to \p OriginalD
+  /// or its redeclaration chain.
+  void cacheRawCommentForDecl(const Decl &OriginalD,
+                              const RawComment &Comment) const;
+
+  /// \returns searches \p CommentsInFile for doc comment for \p D.
+  ///
+  /// \p RepresentativeLocForDecl is used as a location for searching doc
+  /// comments. \p CommentsInFile is a mapping offset -> comment of files in the
+  /// same file where \p RepresentativeLocForDecl is.
+  RawComment *getRawCommentForDeclNoCacheImpl(
+      const Decl *D, const SourceLocation RepresentativeLocForDecl,
+      const std::map<unsigned, RawComment *> &CommentsInFile) const;
 
   /// Return the documentation comment attached to a given declaration,
   /// without looking into cache.
@@ -813,6 +795,16 @@ public:
   const RawComment *
   getRawCommentForAnyRedecl(const Decl *D,
                             const Decl **OriginalDecl = nullptr) const;
+
+  /// Searches existing comments for doc comments that should be attached to \p
+  /// Decls. If any doc comment is found, it is parsed.
+  ///
+  /// Requirement: All \p Decls are in the same file.
+  ///
+  /// If the last comment in the file is already attached we assume
+  /// there are not comments left to be attached to \p Decls.
+  void attachCommentsToJustParsedDecls(ArrayRef<Decl *> Decls,
+                                       const Preprocessor *PP);
 
   /// Return parsed documentation comment attached to a given declaration.
   /// Returns nullptr if no comment is attached.
@@ -890,11 +882,6 @@ public:
 
   TemplateOrSpecializationInfo
   getTemplateOrSpecializationInfo(const VarDecl *Var);
-
-  FunctionDecl *getClassScopeSpecializationPattern(const FunctionDecl *FD);
-
-  void setClassScopeSpecializationPattern(FunctionDecl *FD,
-                                          FunctionDecl *Pattern);
 
   /// Note that the static data member \p Inst is an instantiation of
   /// the static data member template \p Tmpl of a class template.
@@ -1055,6 +1042,9 @@ public:
 #define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
   CanQualType Id##Ty;
 #include "clang/Basic/OpenCLExtensionTypes.def"
+#define SVE_TYPE(Name, Id, SingletonId) \
+  CanQualType SingletonId;
+#include "clang/Basic/AArch64SVEACLETypes.def"
 
   // Types for deductions in C++0x [stmt.ranged]'s desugaring. Built on demand.
   mutable QualType AutoDeductTy;     // Deduction against 'auto'.
@@ -1333,6 +1323,10 @@ public:
                                 ArrayType::ArraySizeModifier ASM,
                                 unsigned IndexTypeQuals) const;
 
+  /// Return a type for a constant array for a string literal of the
+  /// specified element type and length.
+  QualType getStringLiteralArrayType(QualType EltTy, unsigned Length) const;
+
   /// Returns a vla type where known sizes are replaced with [*].
   QualType getVariableArrayDecayedType(QualType Ty) const;
 
@@ -1451,6 +1445,9 @@ public:
 
   QualType getParenType(QualType NamedType) const;
 
+  QualType getMacroQualifiedType(QualType UnderlyingTy,
+                                 const IdentifierInfo *MacroII) const;
+
   QualType getElaboratedType(ElaboratedTypeKeyword Keyword,
                              NestedNameSpecifier *NNS, QualType NamedType,
                              TagDecl *OwnedTagDecl = nullptr) const;
@@ -1519,7 +1516,7 @@ public:
 
   /// C++11 deduced auto type.
   QualType getAutoType(QualType DeducedType, AutoTypeKeyword Keyword,
-                       bool IsDependent) const;
+                       bool IsDependent, bool IsPack = false) const;
 
   /// C++11 deduction pattern for 'auto' type.
   QualType getAutoDeductType() const;
@@ -1984,6 +1981,7 @@ public:
 
   TemplateName getOverloadedTemplateName(UnresolvedSetIterator Begin,
                                          UnresolvedSetIterator End) const;
+  TemplateName getAssumedTemplateName(DeclarationName Name) const;
 
   TemplateName getQualifiedTemplateName(NestedNameSpecifier *NNS,
                                         bool TemplateKeyword,
@@ -2171,6 +2169,13 @@ public:
   /// it computes the value expected by CodeGen: references are treated like
   /// pointers and large arrays get extra alignment.
   CharUnits getDeclAlign(const Decl *D, bool ForAlignof = false) const;
+
+  /// Return the alignment (in bytes) of the thrown exception object. This is
+  /// only meaningful for targets that allocate C++ exceptions in a system
+  /// runtime, such as those using the Itanium C++ ABI.
+  CharUnits getExnObjectAlignment() const {
+    return toCharUnitsFromBits(Target->getExnObjectAlignment());
+  }
 
   /// Get or compute information about the layout of the specified
   /// record (struct/union/class) \p D, which indicates its size and field
@@ -2384,7 +2389,8 @@ public:
 
   /// Retrieves the default calling convention for the current target.
   CallingConv getDefaultCallingConvention(bool IsVariadic,
-                                          bool IsCXXMethod) const;
+                                          bool IsCXXMethod,
+                                          bool IsBuiltin = false) const;
 
   /// Retrieves the "canonical" template name that refers to a
   /// given template.
@@ -2701,7 +2707,7 @@ public:
   /// otherwise returns null.
   const ObjCInterfaceDecl *getObjContainingInterface(const NamedDecl *ND) const;
 
-  /// Set the copy inialization expression of a block var decl. \p CanThrow
+  /// Set the copy initialization expression of a block var decl. \p CanThrow
   /// indicates whether the copy expression can throw or not.
   void setBlockVarCopyInit(const VarDecl* VD, Expr *CopyExpr, bool CanThrow);
 
@@ -2736,12 +2742,11 @@ public:
   ///
   /// \param Data Pointer data that will be provided to the callback function
   /// when it is called.
-  void AddDeallocation(void (*Callback)(void*), void *Data);
+  void AddDeallocation(void (*Callback)(void *), void *Data) const;
 
   /// If T isn't trivially destructible, calls AddDeallocation to register it
   /// for destruction.
-  template <typename T>
-  void addDestruction(T *Ptr) {
+  template <typename T> void addDestruction(T *Ptr) const {
     if (!std::is_trivially_destructible<T>::value) {
       auto DestroyPtr = [](void *V) { static_cast<T *>(V)->~T(); };
       AddDeallocation(DestroyPtr, Ptr);
@@ -2804,6 +2809,11 @@ public:
   APValue *getMaterializedTemporaryValue(const MaterializeTemporaryExpr *E,
                                          bool MayCreate);
 
+  /// Return a string representing the human readable name for the specified
+  /// function declaration or file name. Used by SourceLocExpr and
+  /// PredefinedExpr to cache evaluated results.
+  StringLiteral *getPredefinedStringLiteralFromCache(StringRef Key) const;
+
   //===--------------------------------------------------------------------===//
   //                    Statistics
   //===--------------------------------------------------------------------===//
@@ -2863,18 +2873,51 @@ public:
 private:
   void InitBuiltinType(CanQualType &R, BuiltinType::Kind K);
 
+  class ObjCEncOptions {
+    unsigned Bits;
+
+    ObjCEncOptions(unsigned Bits) : Bits(Bits) {}
+
+  public:
+    ObjCEncOptions() : Bits(0) {}
+    ObjCEncOptions(const ObjCEncOptions &RHS) : Bits(RHS.Bits) {}
+
+#define OPT_LIST(V)                                                            \
+  V(ExpandPointedToStructures, 0)                                              \
+  V(ExpandStructures, 1)                                                       \
+  V(IsOutermostType, 2)                                                        \
+  V(EncodingProperty, 3)                                                       \
+  V(IsStructField, 4)                                                          \
+  V(EncodeBlockParameters, 5)                                                  \
+  V(EncodeClassNames, 6)                                                       \
+
+#define V(N,I) ObjCEncOptions& set##N() { Bits |= 1 << I; return *this; }
+OPT_LIST(V)
+#undef V
+
+#define V(N,I) bool N() const { return Bits & 1 << I; }
+OPT_LIST(V)
+#undef V
+
+#undef OPT_LIST
+
+    LLVM_NODISCARD ObjCEncOptions keepingOnly(ObjCEncOptions Mask) const {
+      return Bits & Mask.Bits;
+    }
+
+    LLVM_NODISCARD ObjCEncOptions forComponentType() const {
+      ObjCEncOptions Mask = ObjCEncOptions()
+                                .setIsOutermostType()
+                                .setIsStructField();
+      return Bits & ~Mask.Bits;
+    }
+  };
+
   // Return the Objective-C type encoding for a given type.
   void getObjCEncodingForTypeImpl(QualType t, std::string &S,
-                                  bool ExpandPointedToStructures,
-                                  bool ExpandStructures,
+                                  ObjCEncOptions Options,
                                   const FieldDecl *Field,
-                                  bool OutermostType = false,
-                                  bool EncodingProperty = false,
-                                  bool StructField = false,
-                                  bool EncodeBlockParameters = false,
-                                  bool EncodeClassNames = false,
-                                  bool EncodePointerToObjCTypedef = false,
-                                  QualType *NotEncodedT=nullptr) const;
+                                  QualType *NotEncodedT = nullptr) const;
 
   // Adds the encoding of the structure's members.
   void getObjCEncodingForStructureImpl(RecordDecl *RD, std::string &S,
@@ -2932,7 +2975,7 @@ private:
   // in order to track and run destructors while we're tearing things down.
   using DeallocationFunctionsAndArguments =
       llvm::SmallVector<std::pair<void (*)(void *), void *>, 16>;
-  DeallocationFunctionsAndArguments Deallocations;
+  mutable DeallocationFunctionsAndArguments Deallocations;
 
   // FIXME: This currently contains the set of StoredDeclMaps used
   // by DeclContext objects.  This probably should not be in ASTContext,

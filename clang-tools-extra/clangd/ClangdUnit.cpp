@@ -9,6 +9,7 @@
 #include "ClangdUnit.h"
 #include "../clang-tidy/ClangTidyDiagnosticConsumer.h"
 #include "../clang-tidy/ClangTidyModuleRegistry.h"
+#include "AST.h"
 #include "Compiler.h"
 #include "Diagnostics.h"
 #include "Headers.h"
@@ -19,7 +20,11 @@
 #include "index/CanonicalIncludes.h"
 #include "index/Index.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Decl.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/SourceLocation.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -28,12 +33,14 @@
 #include "clang/Index/IndexingAction.h"
 #include "clang/Lex/Lexer.h"
 #include "clang/Lex/MacroInfo.h"
+#include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Sema/Sema.h"
 #include "clang/Serialization/ASTWriter.h"
 #include "clang/Serialization/PCHContainerOperations.h"
 #include "clang/Tooling/CompilationDatabase.h"
+#include "clang/Tooling/Syntax/Tokens.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
@@ -64,8 +71,12 @@ public:
 
   bool HandleTopLevelDecl(DeclGroupRef DG) override {
     for (Decl *D : DG) {
-      if (D->isFromASTFile())
+      auto &SM = D->getASTContext().getSourceManager();
+      if (!isInsideMainFile(D->getLocation(), SM))
         continue;
+      if (const NamedDecl *ND = dyn_cast<NamedDecl>(D))
+        if (isImplicitTemplateInstantiation(ND))
+          continue;
 
       // ObjCMethodDecl are not actually top-level decls.
       if (isa<ObjCMethodDecl>(D))
@@ -87,21 +98,75 @@ public:
 protected:
   std::unique_ptr<ASTConsumer>
   CreateASTConsumer(CompilerInstance &CI, llvm::StringRef InFile) override {
-    return llvm::make_unique<DeclTrackingASTConsumer>(/*ref*/ TopLevelDecls);
+    return std::make_unique<DeclTrackingASTConsumer>(/*ref*/ TopLevelDecls);
   }
 
 private:
   std::vector<Decl *> TopLevelDecls;
 };
 
+// CollectMainFileMacroExpansions and CollectMainFileMacros are two different
+// classes as CollectMainFileMacroExpansions is only used when building the AST
+// for the main file. CollectMainFileMacros is only used when building the
+// preamble.
+class CollectMainFileMacroExpansions : public PPCallbacks {
+  const SourceManager &SM;
+  std::vector<SourceLocation> &MainFileMacroLocs;
+
+public:
+  CollectMainFileMacroExpansions(const SourceManager &SM,
+                                 std::vector<SourceLocation> &MainFileMacroLocs)
+      : SM(SM), MainFileMacroLocs(MainFileMacroLocs) {}
+
+  virtual void MacroExpands(const Token &MacroNameTok,
+                            const MacroDefinition &MD, SourceRange Range,
+                            const MacroArgs *Args) {
+    SourceLocation L = MacroNameTok.getLocation();
+    if (!L.isMacroID() && isInsideMainFile(L, SM))
+      MainFileMacroLocs.push_back(L);
+  }
+};
+
+class CollectMainFileMacros : public PPCallbacks {
+public:
+  explicit CollectMainFileMacros(const SourceManager &SM,
+                                 std::vector<std::string> *Out)
+      : SM(SM), Out(Out) {}
+
+  void FileChanged(SourceLocation Loc, FileChangeReason,
+                   SrcMgr::CharacteristicKind, FileID Prev) {
+    InMainFile = SM.isWrittenInMainFile(Loc);
+  }
+
+  void MacroDefined(const Token &MacroName, const MacroDirective *MD) {
+    if (InMainFile)
+      MainFileMacros.insert(MacroName.getIdentifierInfo()->getName());
+  }
+
+  void EndOfMainFile() {
+    for (const auto &Entry : MainFileMacros)
+      Out->push_back(Entry.getKey());
+    llvm::sort(*Out);
+  }
+
+private:
+  const SourceManager &SM;
+  bool InMainFile = true;
+  llvm::StringSet<> MainFileMacros;
+  std::vector<std::string> *Out;
+};
+
 class CppFilePreambleCallbacks : public PreambleCallbacks {
 public:
   CppFilePreambleCallbacks(PathRef File, PreambleParsedCallback ParsedCallback)
       : File(File), ParsedCallback(ParsedCallback) {
-    addSystemHeadersMapping(&CanonIncludes);
   }
 
   IncludeStructure takeIncludes() { return std::move(Includes); }
+
+  std::vector<std::string> takeMainFileMacros() {
+    return std::move(MainFileMacros);
+  }
 
   CanonicalIncludes takeCanonicalIncludes() { return std::move(CanonIncludes); }
 
@@ -113,12 +178,15 @@ public:
   }
 
   void BeforeExecute(CompilerInstance &CI) override {
+    addSystemHeadersMapping(&CanonIncludes, CI.getLangOpts());
     SourceMgr = &CI.getSourceManager();
   }
 
   std::unique_ptr<PPCallbacks> createPPCallbacks() override {
     assert(SourceMgr && "SourceMgr must be set at this point");
-    return collectIncludeStructureCallback(*SourceMgr, &Includes);
+    return std::make_unique<PPChainedCallbacks>(
+        collectIncludeStructureCallback(*SourceMgr, &Includes),
+        std::make_unique<CollectMainFileMacros>(*SourceMgr, &MainFileMacros));
   }
 
   CommentHandler *getCommentHandler() override {
@@ -131,6 +199,7 @@ private:
   PreambleParsedCallback ParsedCallback;
   IncludeStructure Includes;
   CanonicalIncludes CanonIncludes;
+  std::vector<std::string> MainFileMacros;
   std::unique_ptr<CommentHandler> IWYUHandler = nullptr;
   SourceManager *SourceMgr = nullptr;
 };
@@ -196,7 +265,8 @@ private:
     for (const auto &Inc : Includes.MainFileIncludes) {
       const FileEntry *File = nullptr;
       if (Inc.Resolved != "")
-        File = SM.getFileManager().getFile(Inc.Resolved);
+        if (auto FE = SM.getFileManager().getFile(Inc.Resolved))
+          File = *FE;
 
       llvm::StringRef WrittenFilename =
           llvm::StringRef(Inc.Written).drop_front().drop_back();
@@ -222,7 +292,9 @@ private:
                                         FilenameTok.getEndLoc()),
           File, "SearchPath", "RelPath", /*Imported=*/nullptr, Inc.FileKind);
       if (File)
-        Delegate->FileSkipped(*File, FilenameTok, Inc.FileKind);
+        // FIXME: Use correctly named FileEntryRef.
+        Delegate->FileSkipped(FileEntryRef(File->getName(), *File), FilenameTok,
+                              Inc.FileKind);
       else {
         llvm::SmallString<1> UnusedRecovery;
         Delegate->FileNotFound(WrittenFilename, UnusedRecovery);
@@ -244,7 +316,8 @@ void dumpAST(ParsedAST &AST, llvm::raw_ostream &OS) {
 }
 
 llvm::Optional<ParsedAST>
-ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
+ParsedAST::build(std::unique_ptr<clang::CompilerInvocation> CI,
+                 llvm::ArrayRef<Diag> CompilerInvocationDiags,
                  std::shared_ptr<const PreambleData> Preamble,
                  std::unique_ptr<llvm::MemoryBuffer> Buffer,
                  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
@@ -258,13 +331,14 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
 
   StoreDiags ASTDiags;
   std::string Content = Buffer->getBuffer();
+  std::string Filename = Buffer->getBufferIdentifier(); // Absolute.
 
   auto Clang = prepareCompilerInstance(std::move(CI), PreamblePCH,
                                        std::move(Buffer), VFS, ASTDiags);
   if (!Clang)
     return None;
 
-  auto Action = llvm::make_unique<ClangdFrontendAction>();
+  auto Action = std::make_unique<ClangdFrontendAction>();
   const FrontendInputFile &MainInput = Clang->getFrontendOpts().Inputs[0];
   if (!Action->BeginSourceFile(*Clang, MainInput)) {
     log("BeginSourceFile() failed when building AST for {0}",
@@ -283,17 +357,48 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   llvm::Optional<tidy::ClangTidyContext> CTContext;
   {
     trace::Span Tracer("ClangTidyInit");
-    dlog("ClangTidy configuration for file {0}: {1}", MainInput.getFile(),
+    dlog("ClangTidy configuration for file {0}: {1}", Filename,
          tidy::configurationAsText(Opts.ClangTidyOpts));
     tidy::ClangTidyCheckFactories CTFactories;
     for (const auto &E : tidy::ClangTidyModuleRegistry::entries())
       E.instantiate()->addCheckFactories(CTFactories);
-    CTContext.emplace(llvm::make_unique<tidy::DefaultOptionsProvider>(
+    CTContext.emplace(std::make_unique<tidy::DefaultOptionsProvider>(
         tidy::ClangTidyGlobalOptions(), Opts.ClangTidyOpts));
     CTContext->setDiagnosticsEngine(&Clang->getDiagnostics());
     CTContext->setASTContext(&Clang->getASTContext());
-    CTContext->setCurrentFile(MainInput.getFile());
+    CTContext->setCurrentFile(Filename);
     CTFactories.createChecks(CTContext.getPointer(), CTChecks);
+    ASTDiags.setLevelAdjuster([&CTContext](DiagnosticsEngine::Level DiagLevel,
+                                           const clang::Diagnostic &Info) {
+      if (CTContext) {
+        std::string CheckName = CTContext->getCheckName(Info.getID());
+        bool IsClangTidyDiag = !CheckName.empty();
+        if (IsClangTidyDiag) {
+          // Check for warning-as-error.
+          // We deliberately let this take precedence over suppression comments
+          // to match clang-tidy's behaviour.
+          if (DiagLevel == DiagnosticsEngine::Warning &&
+              CTContext->treatAsError(CheckName)) {
+            return DiagnosticsEngine::Error;
+          }
+
+          // Check for suppression comment. Skip the check for diagnostics not
+          // in the main file, because we don't want that function to query the
+          // source buffer for preamble files. For the same reason, we ask
+          // ShouldSuppressDiagnostic not to follow macro expansions, since
+          // those might take us into a preamble file as well.
+          bool IsInsideMainFile =
+              Info.hasSourceManager() &&
+              isInsideMainFile(Info.getLocation(), Info.getSourceManager());
+          if (IsInsideMainFile && tidy::ShouldSuppressDiagnostic(
+                                      DiagLevel, Info, *CTContext,
+                                      /* CheckMacroExpansion = */ false)) {
+            return DiagnosticsEngine::Ignored;
+          }
+        }
+      }
+      return DiagLevel;
+    });
     Preprocessor *PP = &Clang->getPreprocessor();
     for (const auto &Check : CTChecks) {
       // FIXME: the PP callbacks skip the entire preamble.
@@ -303,20 +408,20 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
     }
   }
 
-  // Add IncludeFixer which can recorver diagnostics caused by missing includes
+  // Add IncludeFixer which can recover diagnostics caused by missing includes
   // (e.g. incomplete type) and attach include insertion fixes to diagnostics.
   llvm::Optional<IncludeFixer> FixIncludes;
   auto BuildDir = VFS->getCurrentWorkingDirectory();
   if (Opts.SuggestMissingIncludes && Index && !BuildDir.getError()) {
-    auto Style = getFormatStyleForFile(MainInput.getFile(), Content, VFS.get());
+    auto Style = getFormatStyleForFile(Filename, Content, VFS.get());
     auto Inserter = std::make_shared<IncludeInserter>(
-        MainInput.getFile(), Content, Style, BuildDir.get(),
+        Filename, Content, Style, BuildDir.get(),
         &Clang->getPreprocessor().getHeaderSearchInfo());
     if (Preamble) {
       for (const auto &Inc : Preamble->Includes.MainFileIncludes)
         Inserter->addExisting(Inc);
     }
-    FixIncludes.emplace(MainInput.getFile(), Inserter, *Index,
+    FixIncludes.emplace(Filename, Inserter, *Index,
                         /*IndexRequestLimit=*/5);
     ASTDiags.contributeFixes([&FixIncludes](DiagnosticsEngine::Level DiagLevl,
                                             const clang::Diagnostic &Info) {
@@ -336,6 +441,11 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   // (We can't *just* use the replayed includes, they don't have Resolved path).
   Clang->getPreprocessor().addPPCallbacks(
       collectIncludeStructureCallback(Clang->getSourceManager(), &Includes));
+  // Collect the macro expansions in the main file.
+  std::vector<SourceLocation> MainFileMacroExpLocs;
+  Clang->getPreprocessor().addPPCallbacks(
+      std::make_unique<CollectMainFileMacroExpansions>(
+          Clang->getSourceManager(), MainFileMacroExpLocs));
 
   // Copy over the includes from the preamble, then combine with the
   // non-preamble includes below.
@@ -343,14 +453,22 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   if (Preamble)
     CanonIncludes = Preamble->CanonIncludes;
   else
-    addSystemHeadersMapping(&CanonIncludes);
+    addSystemHeadersMapping(&CanonIncludes, Clang->getLangOpts());
   std::unique_ptr<CommentHandler> IWYUHandler =
       collectIWYUHeaderMaps(&CanonIncludes);
   Clang->getPreprocessor().addCommentHandler(IWYUHandler.get());
 
-  if (!Action->Execute())
-    log("Execute() failed when building AST for {0}", MainInput.getFile());
+  // Collect tokens of the main file.
+  syntax::TokenCollector CollectTokens(Clang->getPreprocessor());
 
+  if (llvm::Error Err = Action->Execute())
+    log("Execute() failed when building AST for {0}: {1}", MainInput.getFile(),
+        toString(std::move(Err)));
+
+  // We have to consume the tokens before running clang-tidy to avoid collecting
+  // tokens from running the preprocessor inside the checks (only
+  // modernize-use-trailing-return-type does that today).
+  syntax::TokenBuffer Tokens = std::move(CollectTokens).consume();
   std::vector<Decl *> ParsedDecls = Action->takeTopLevelDecls();
   // AST traversals should exclude the preamble, to avoid performance cliffs.
   Clang->getASTContext().setTraversalScope(ParsedDecls);
@@ -371,11 +489,17 @@ ParsedAST::build(std::unique_ptr<CompilerInvocation> CI,
   // So just inform the preprocessor of EOF, while keeping everything alive.
   Clang->getPreprocessor().EndSourceFile();
 
-  std::vector<Diag> Diags = ASTDiags.take(CTContext.getPointer());
+  std::vector<Diag> Diags = CompilerInvocationDiags;
   // Add diagnostics from the preamble, if any.
   if (Preamble)
-    Diags.insert(Diags.begin(), Preamble->Diags.begin(), Preamble->Diags.end());
+    Diags.insert(Diags.end(), Preamble->Diags.begin(), Preamble->Diags.end());
+  // Finally, add diagnostics coming from the AST.
+  {
+    std::vector<Diag> D = ASTDiags.take(CTContext.getPointer());
+    Diags.insert(Diags.end(), D.begin(), D.end());
+  }
   return ParsedAST(std::move(Preamble), std::move(Clang), std::move(Action),
+                   std::move(Tokens), std::move(MainFileMacroExpLocs),
                    std::move(ParsedDecls), std::move(Diags),
                    std::move(Includes), std::move(CanonIncludes));
 }
@@ -413,6 +537,10 @@ const Preprocessor &ParsedAST::getPreprocessor() const {
 
 llvm::ArrayRef<Decl *> ParsedAST::getLocalTopLevelDecls() {
   return LocalTopLevelDecls;
+}
+
+llvm::ArrayRef<SourceLocation> ParsedAST::getMainFileExpansions() const {
+  return MainFileMacroExpLocs;
 }
 
 const std::vector<Diag> &ParsedAST::getDiagnostics() const { return Diags; }
@@ -459,20 +587,26 @@ const CanonicalIncludes &ParsedAST::getCanonicalIncludes() const {
 
 PreambleData::PreambleData(PrecompiledPreamble Preamble,
                            std::vector<Diag> Diags, IncludeStructure Includes,
+                           std::vector<std::string> MainFileMacros,
                            std::unique_ptr<PreambleFileStatusCache> StatCache,
                            CanonicalIncludes CanonIncludes)
     : Preamble(std::move(Preamble)), Diags(std::move(Diags)),
-      Includes(std::move(Includes)), StatCache(std::move(StatCache)),
-      CanonIncludes(std::move(CanonIncludes)) {}
+      Includes(std::move(Includes)), MainFileMacros(std::move(MainFileMacros)),
+      StatCache(std::move(StatCache)), CanonIncludes(std::move(CanonIncludes)) {
+}
 
 ParsedAST::ParsedAST(std::shared_ptr<const PreambleData> Preamble,
                      std::unique_ptr<CompilerInstance> Clang,
                      std::unique_ptr<FrontendAction> Action,
+                     syntax::TokenBuffer Tokens,
+                     std::vector<SourceLocation> MainFileMacroExpLocs,
                      std::vector<Decl *> LocalTopLevelDecls,
                      std::vector<Diag> Diags, IncludeStructure Includes,
                      CanonicalIncludes CanonIncludes)
     : Preamble(std::move(Preamble)), Clang(std::move(Clang)),
-      Action(std::move(Action)), Diags(std::move(Diags)),
+      Action(std::move(Action)), Tokens(std::move(Tokens)),
+      MainFileMacroExpLocs(std::move(MainFileMacroExpLocs)),
+      Diags(std::move(Diags)),
       LocalTopLevelDecls(std::move(LocalTopLevelDecls)),
       Includes(std::move(Includes)), CanonIncludes(std::move(CanonIncludes)) {
   assert(this->Clang);
@@ -487,7 +621,8 @@ buildPreamble(PathRef FileName, CompilerInvocation &CI,
               PreambleParsedCallback PreambleCallback) {
   // Note that we don't need to copy the input contents, preamble can live
   // without those.
-  auto ContentsBuffer = llvm::MemoryBuffer::getMemBuffer(Inputs.Contents);
+  auto ContentsBuffer =
+      llvm::MemoryBuffer::getMemBuffer(Inputs.Contents, FileName);
   auto Bounds =
       ComputePreambleBounds(*CI.getLangOpts(), ContentsBuffer.get(), 0);
 
@@ -525,7 +660,7 @@ buildPreamble(PathRef FileName, CompilerInvocation &CI,
 
   llvm::SmallString<32> AbsFileName(FileName);
   Inputs.FS->makeAbsolute(AbsFileName);
-  auto StatCache = llvm::make_unique<PreambleFileStatusCache>(AbsFileName);
+  auto StatCache = std::make_unique<PreambleFileStatusCache>(AbsFileName);
   auto BuiltPreamble = PrecompiledPreamble::Build(
       CI, ContentsBuffer.get(), Bounds, *PreambleDiagsEngine,
       StatCache->getProducingFS(Inputs.FS),
@@ -542,7 +677,8 @@ buildPreamble(PathRef FileName, CompilerInvocation &CI,
     std::vector<Diag> Diags = PreambleDiagnostics.take();
     return std::make_shared<PreambleData>(
         std::move(*BuiltPreamble), std::move(Diags),
-        SerializedDeclsCollector.takeIncludes(), std::move(StatCache),
+        SerializedDeclsCollector.takeIncludes(),
+        SerializedDeclsCollector.takeMainFileMacros(), std::move(StatCache),
         SerializedDeclsCollector.takeCanonicalIncludes());
   } else {
     elog("Could not build a preamble for file {0}", FileName);
@@ -552,6 +688,7 @@ buildPreamble(PathRef FileName, CompilerInvocation &CI,
 
 llvm::Optional<ParsedAST>
 buildAST(PathRef FileName, std::unique_ptr<CompilerInvocation> Invocation,
+         llvm::ArrayRef<Diag> CompilerInvocationDiags,
          const ParseInputs &Inputs,
          std::shared_ptr<const PreambleData> Preamble) {
   trace::Span Tracer("BuildAST");
@@ -566,14 +703,15 @@ buildAST(PathRef FileName, std::unique_ptr<CompilerInvocation> Invocation,
     // dirs.
   }
 
-  return ParsedAST::build(llvm::make_unique<CompilerInvocation>(*Invocation),
-                          Preamble,
-                          llvm::MemoryBuffer::getMemBufferCopy(Inputs.Contents),
-                          std::move(VFS), Inputs.Index, Inputs.Opts);
+  return ParsedAST::build(
+      std::make_unique<CompilerInvocation>(*Invocation),
+      CompilerInvocationDiags, Preamble,
+      llvm::MemoryBuffer::getMemBufferCopy(Inputs.Contents, FileName),
+      std::move(VFS), Inputs.Index, Inputs.Opts);
 }
 
-SourceLocation getBeginningOfIdentifier(ParsedAST &Unit, const Position &Pos,
-                                        const FileID FID) {
+SourceLocation getBeginningOfIdentifier(const ParsedAST &Unit,
+                                        const Position &Pos, const FileID FID) {
   const ASTContext &AST = Unit.getASTContext();
   const SourceManager &SourceMgr = AST.getSourceManager();
   auto Offset = positionToOffset(SourceMgr.getBufferData(FID), Pos);
@@ -612,22 +750,25 @@ namespace tidy {
   extern volatile int X##ModuleAnchorSource;                                   \
   static int LLVM_ATTRIBUTE_UNUSED X##ModuleAnchorDestination =                \
       X##ModuleAnchorSource
-LINK_TIDY_MODULE(CERT);
 LINK_TIDY_MODULE(Abseil);
+LINK_TIDY_MODULE(Android);
 LINK_TIDY_MODULE(Boost);
 LINK_TIDY_MODULE(Bugprone);
-LINK_TIDY_MODULE(LLVM);
+LINK_TIDY_MODULE(CERT);
 LINK_TIDY_MODULE(CppCoreGuidelines);
 LINK_TIDY_MODULE(Fuchsia);
 LINK_TIDY_MODULE(Google);
-LINK_TIDY_MODULE(Android);
+LINK_TIDY_MODULE(HICPP);
+LINK_TIDY_MODULE(LinuxKernel);
+LINK_TIDY_MODULE(LLVM);
 LINK_TIDY_MODULE(Misc);
 LINK_TIDY_MODULE(Modernize);
+// LINK_TIDY_MODULE(MPI); // clangd doesn't support static analyzer.
+LINK_TIDY_MODULE(ObjC);
+LINK_TIDY_MODULE(OpenMP);
 LINK_TIDY_MODULE(Performance);
 LINK_TIDY_MODULE(Portability);
 LINK_TIDY_MODULE(Readability);
-LINK_TIDY_MODULE(ObjC);
-LINK_TIDY_MODULE(HICPP);
 LINK_TIDY_MODULE(Zircon);
 #undef LINK_TIDY_MODULE
 } // namespace tidy

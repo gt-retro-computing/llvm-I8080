@@ -3,8 +3,10 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_unittest(SupportTests
+  AlignmentTest.cpp
   AlignOfTest.cpp
   AllocatorTest.cpp
+  AnnotationsTest.cpp
   ARMAttributeParser.cpp
   ArrayRecyclerTest.cpp
   BinaryStreamTest.cpp
@@ -29,6 +31,7 @@ add_llvm_unittest(SupportTests
   ErrorOrTest.cpp
   ErrorTest.cpp
   FileCheckTest.cpp
+  FileCollectorTest.cpp
   FileOutputBufferTest.cpp
   FormatVariadicTest.cpp
   GlobPatternTest.cpp
@@ -39,6 +42,7 @@ add_llvm_unittest(SupportTests
   LEB128Test.cpp
   LineIteratorTest.cpp
   LockFileManagerTest.cpp
+  MatchersTest.cpp
   MD5Test.cpp
   ManagedStatic.cpp
   MathExtrasTest.cpp

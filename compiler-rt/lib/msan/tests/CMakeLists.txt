@@ -11,12 +11,17 @@ set(MSAN_LIBCXX_CFLAGS
   -Wno-pedantic)
 
 # Unittest sources and build flags.
-set(MSAN_UNITTEST_SOURCES msan_test.cc msan_test_main.cc)
-set(MSAN_LOADABLE_SOURCE msan_loadable.cc)
+set(MSAN_UNITTEST_SOURCES
+  msan_test.cpp
+  msan_test_main.cpp
+  )
+set(MSAN_LOADABLE_SOURCE
+  msan_loadable.cpp
+  )
 set(MSAN_UNITTEST_HEADERS
   msan_test_config.h
   ../../../include/sanitizer/msan_interface.h
-)
+  )
 set(MSAN_UNITTEST_COMMON_CFLAGS
   -nostdinc++
   -isystem ${COMPILER_RT_LIBCXX_PATH}/include
@@ -47,6 +52,7 @@ set(MSAN_UNITTEST_INSTRUMENTED_CFLAGS
   -mllvm -msan-keep-going=1
 )
 set(MSAN_UNITTEST_LINK_FLAGS
+  ${COMPILER_RT_UNITTEST_LINK_FLAGS}
   -fsanitize=memory
   # Don't need -stdlib=libc++ because we explicitly list libc++.a in the linker
   # inputs.
@@ -73,7 +79,7 @@ macro(msan_link_shared so_list so_name arch kind)
   endif()
   clang_link_shared(${output_so}
                 OBJECTS ${SOURCE_OBJECTS}
-                LINK_FLAGS ${TARGET_LINK_FLAGS} ${SOURCE_LINK_FLAGS}
+                LINK_FLAGS ${COMPILER_RT_UNITTEST_LINK_FLAGS} ${TARGET_LINK_FLAGS} ${SOURCE_LINK_FLAGS}
                 DEPS ${SOURCE_DEPS})
   list(APPEND ${so_list} ${output_so})
 endmacro()

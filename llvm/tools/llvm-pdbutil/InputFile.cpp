@@ -66,17 +66,21 @@ getModuleDebugStream(PDBFile &File, StringRef &ModuleName, uint32_t Index) {
 static inline bool isCodeViewDebugSubsection(object::SectionRef Section,
                                              StringRef Name,
                                              BinaryStreamReader &Reader) {
-  StringRef SectionName, Contents;
-  if (Section.getName(SectionName))
+  if (Expected<StringRef> NameOrErr = Section.getName()) {
+    if (*NameOrErr != Name)
+      return false;
+  } else {
+    consumeError(NameOrErr.takeError());
     return false;
+  }
 
-  if (SectionName != Name)
+  Expected<StringRef> ContentsOrErr = Section.getContents();
+  if (!ContentsOrErr) {
+    consumeError(ContentsOrErr.takeError());
     return false;
+  }
 
-  if (Section.getContents(Contents))
-    return false;
-
-  Reader = BinaryStreamReader(Contents, support::little);
+  Reader = BinaryStreamReader(*ContentsOrErr, support::little);
   uint32_t Magic;
   if (Reader.bytesRemaining() < sizeof(uint32_t))
     return false;
@@ -381,7 +385,7 @@ InputFile::getOrCreateTypeCollection(TypeCollectionKind Kind) {
     uint32_t Count = Stream.getNumTypeRecords();
     auto Offsets = Stream.getTypeIndexOffsets();
     Collection =
-        llvm::make_unique<LazyRandomTypeCollection>(Array, Count, Offsets);
+        std::make_unique<LazyRandomTypeCollection>(Array, Count, Offsets);
     return *Collection;
   }
 
@@ -394,11 +398,11 @@ InputFile::getOrCreateTypeCollection(TypeCollectionKind Kind) {
     if (!isDebugTSection(Section, Records))
       continue;
 
-    Types = llvm::make_unique<LazyRandomTypeCollection>(Records, 100);
+    Types = std::make_unique<LazyRandomTypeCollection>(Records, 100);
     return *Types;
   }
 
-  Types = llvm::make_unique<LazyRandomTypeCollection>(100);
+  Types = std::make_unique<LazyRandomTypeCollection>(100);
   return *Types;
 }
 

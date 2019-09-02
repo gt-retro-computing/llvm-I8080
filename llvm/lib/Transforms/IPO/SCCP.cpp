@@ -14,7 +14,7 @@ PreservedAnalyses IPSCCPPass::run(Module &M, ModuleAnalysisManager &AM) {
   auto getAnalysis = [&FAM](Function &F) -> AnalysisResultsForFn {
     DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
     return {
-        make_unique<PredicateInfo>(F, DT, FAM.getResult<AssumptionAnalysis>(F)),
+        std::make_unique<PredicateInfo>(F, DT, FAM.getResult<AssumptionAnalysis>(F)),
         &DT, FAM.getCachedResult<PostDominatorTreeAnalysis>(F)};
   };
 
@@ -54,7 +54,7 @@ public:
       DominatorTree &DT =
           this->getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
       return {
-          make_unique<PredicateInfo>(
+          std::make_unique<PredicateInfo>(
               F, DT,
               this->getAnalysis<AssumptionCacheTracker>().getAssumptionCache(
                   F)),
@@ -79,6 +79,7 @@ char IPSCCPLegacyPass::ID = 0;
 INITIALIZE_PASS_BEGIN(IPSCCPLegacyPass, "ipsccp",
                       "Interprocedural Sparse Conditional Constant Propagation",
                       false, false)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(IPSCCPLegacyPass, "ipsccp",

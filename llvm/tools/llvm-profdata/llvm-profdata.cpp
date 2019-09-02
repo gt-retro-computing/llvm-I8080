@@ -37,6 +37,7 @@ enum ProfileFormat {
   PF_None = 0,
   PF_Text,
   PF_Compact_Binary,
+  PF_Ext_Binary,
   PF_GCC,
   PF_Binary
 };
@@ -136,7 +137,7 @@ public:
     if (!BufOrError)
       exitWithErrorCode(BufOrError.getError(), InputFile);
 
-    auto Remapper = llvm::make_unique<SymbolRemapper>();
+    auto Remapper = std::make_unique<SymbolRemapper>();
     Remapper->File = std::move(BufOrError.get());
 
     for (line_iterator LineIt(*Remapper->File, /*SkipBlanks=*/true, '#');
@@ -197,6 +198,32 @@ static bool isFatalError(instrprof_error IPE) {
   case instrprof_error::counter_overflow:
   case instrprof_error::value_site_count_mismatch:
     return false;
+  }
+}
+
+/// Computer the overlap b/w profile BaseFilename and TestFileName,
+/// and store the program level result to Overlap.
+static void overlapInput(const std::string &BaseFilename,
+                         const std::string &TestFilename, WriterContext *WC,
+                         OverlapStats &Overlap,
+                         const OverlapFuncFilters &FuncFilter,
+                         raw_fd_ostream &OS, bool IsCS) {
+  auto ReaderOrErr = InstrProfReader::create(TestFilename);
+  if (Error E = ReaderOrErr.takeError()) {
+    // Skip the empty profiles by returning sliently.
+    instrprof_error IPE = InstrProfError::take(std::move(E));
+    if (IPE != instrprof_error::empty_raw_profile)
+      WC->Err = make_error<InstrProfError>(IPE);
+    return;
+  }
+
+  auto Reader = std::move(ReaderOrErr.get());
+  for (auto &I : *Reader) {
+    OverlapStats FuncOverlap(OverlapStats::FunctionLevel);
+    FuncOverlap.setFuncInfo(I.Name, I.Hash);
+
+    WC->Writer.overlapRecord(std::move(I), Overlap, FuncOverlap, FuncFilter);
+    FuncOverlap.dump(OS);
   }
 }
 
@@ -288,13 +315,8 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
     exitWithError("Cannot write indexed profdata format to stdout.");
 
   if (OutputFormat != PF_Binary && OutputFormat != PF_Compact_Binary &&
-      OutputFormat != PF_Text)
+      OutputFormat != PF_Ext_Binary && OutputFormat != PF_Text)
     exitWithError("Unknown format is specified.");
-
-  std::error_code EC;
-  raw_fd_ostream Output(OutputFilename.data(), EC, sys::fs::F_None);
-  if (EC)
-    exitWithErrorCode(EC, OutputFilename);
 
   std::mutex ErrorLock;
   SmallSet<instrprof_error, 4> WriterErrorCodes;
@@ -307,7 +329,7 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
   // Initialize the writer contexts.
   SmallVector<std::unique_ptr<WriterContext>, 4> Contexts;
   for (unsigned I = 0; I < NumThreads; ++I)
-    Contexts.emplace_back(llvm::make_unique<WriterContext>(
+    Contexts.emplace_back(std::make_unique<WriterContext>(
         OutputSparse, ErrorLock, WriterErrorCodes));
 
   if (NumThreads == 1) {
@@ -358,6 +380,11 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
            WC->ErrWhence);
   }
 
+  std::error_code EC;
+  raw_fd_ostream Output(OutputFilename.data(), EC, sys::fs::OF_None);
+  if (EC)
+    exitWithErrorCode(EC, OutputFilename);
+
   InstrProfWriter &Writer = Contexts[0]->Writer;
   if (OutputFormat == PF_Text) {
     if (Error E = Writer.writeText(Output))
@@ -399,23 +426,47 @@ remapSamples(const sampleprof::FunctionSamples &Samples,
 }
 
 static sampleprof::SampleProfileFormat FormatMap[] = {
-    sampleprof::SPF_None, sampleprof::SPF_Text, sampleprof::SPF_Compact_Binary,
-    sampleprof::SPF_GCC, sampleprof::SPF_Binary};
+    sampleprof::SPF_None,
+    sampleprof::SPF_Text,
+    sampleprof::SPF_Compact_Binary,
+    sampleprof::SPF_Ext_Binary,
+    sampleprof::SPF_GCC,
+    sampleprof::SPF_Binary};
 
-static void mergeSampleProfile(const WeightedFileVector &Inputs,
-                               SymbolRemapper *Remapper,
-                               StringRef OutputFilename,
-                               ProfileFormat OutputFormat) {
+static std::unique_ptr<MemoryBuffer>
+getInputFileBuf(const StringRef &InputFile) {
+  if (InputFile == "")
+    return {};
+
+  auto BufOrError = MemoryBuffer::getFileOrSTDIN(InputFile);
+  if (!BufOrError)
+    exitWithErrorCode(BufOrError.getError(), InputFile);
+
+  return std::move(*BufOrError);
+}
+
+static void populateProfileSymbolList(MemoryBuffer *Buffer,
+                                      sampleprof::ProfileSymbolList &PSL) {
+  if (!Buffer)
+    return;
+
+  SmallVector<StringRef, 32> SymbolVec;
+  StringRef Data = Buffer->getBuffer();
+  Data.split(SymbolVec, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+
+  for (StringRef symbol : SymbolVec)
+    PSL.add(symbol);
+}
+
+static void
+mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
+                   StringRef OutputFilename, ProfileFormat OutputFormat,
+                   StringRef ProfileSymbolListFile, bool CompressProfSymList) {
   using namespace sampleprof;
-  auto WriterOrErr =
-      SampleProfileWriter::create(OutputFilename, FormatMap[OutputFormat]);
-  if (std::error_code EC = WriterOrErr.getError())
-    exitWithErrorCode(EC, OutputFilename);
-
-  auto Writer = std::move(WriterOrErr.get());
   StringMap<FunctionSamples> ProfileMap;
   SmallVector<std::unique_ptr<sampleprof::SampleProfileReader>, 5> Readers;
   LLVMContext Context;
+  sampleprof::ProfileSymbolList WriterList;
   for (const auto &Input : Inputs) {
     auto ReaderOrErr = SampleProfileReader::create(Input.Filename, Context);
     if (std::error_code EC = ReaderOrErr.getError())
@@ -446,7 +497,28 @@ static void mergeSampleProfile(const WeightedFileVector &Inputs,
         handleMergeWriterError(errorCodeToError(EC), Input.Filename, FName);
       }
     }
+
+    std::unique_ptr<sampleprof::ProfileSymbolList> ReaderList =
+        Reader->getProfileSymbolList();
+    if (ReaderList)
+      WriterList.merge(*ReaderList);
   }
+  auto WriterOrErr =
+      SampleProfileWriter::create(OutputFilename, FormatMap[OutputFormat]);
+  if (std::error_code EC = WriterOrErr.getError())
+    exitWithErrorCode(EC, OutputFilename);
+
+  // WriterList will have StringRef refering to string in Buffer.
+  // Make sure Buffer lives as long as WriterList.
+  auto Buffer = getInputFileBuf(ProfileSymbolListFile);
+  populateProfileSymbolList(Buffer.get(), WriterList);
+  WriterList.setToCompress(CompressProfSymList);
+  if (WriterList.size() > 0 && OutputFormat != PF_Ext_Binary)
+    warn("Profile Symbol list is not empty but the output format is not "
+         "ExtBinary format. The list will be lost in the output. ");
+
+  auto Writer = std::move(WriterOrErr.get());
+  Writer->setProfileSymbolList(&WriterList);
   Writer->write(ProfileMap);
 }
 
@@ -459,18 +531,6 @@ static WeightedFile parseWeightedFile(const StringRef &WeightedFilename) {
     exitWithError("Input weight must be a positive integer.");
 
   return {FileName, Weight};
-}
-
-static std::unique_ptr<MemoryBuffer>
-getInputFilenamesFileBuf(const StringRef &InputFilenamesFile) {
-  if (InputFilenamesFile == "")
-    return {};
-
-  auto BufOrError = MemoryBuffer::getFileOrSTDIN(InputFilenamesFile);
-  if (!BufOrError)
-    exitWithErrorCode(BufOrError.getError(), InputFilenamesFile);
-
-  return std::move(*BufOrError);
 }
 
 static void addWeightedInput(WeightedFileVector &WNI, const WeightedFile &WF) {
@@ -557,12 +617,14 @@ static int merge_main(int argc, const char *argv[]) {
                  clEnumVal(sample, "Sample profile")));
   cl::opt<ProfileFormat> OutputFormat(
       cl::desc("Format of output profile"), cl::init(PF_Binary),
-      cl::values(clEnumValN(PF_Binary, "binary", "Binary encoding (default)"),
-                 clEnumValN(PF_Compact_Binary, "compbinary",
-                            "Compact binary encoding"),
-                 clEnumValN(PF_Text, "text", "Text encoding"),
-                 clEnumValN(PF_GCC, "gcc",
-                            "GCC encoding (only meaningful for -sample)")));
+      cl::values(
+          clEnumValN(PF_Binary, "binary", "Binary encoding (default)"),
+          clEnumValN(PF_Compact_Binary, "compbinary",
+                     "Compact binary encoding"),
+          clEnumValN(PF_Ext_Binary, "extbinary", "Extensible binary encoding"),
+          clEnumValN(PF_Text, "text", "Text encoding"),
+          clEnumValN(PF_GCC, "gcc",
+                     "GCC encoding (only meaningful for -sample)")));
   cl::opt<bool> OutputSparse("sparse", cl::init(false),
       cl::desc("Generate a sparse profile (only meaningful for -instr)"));
   cl::opt<unsigned> NumThreads(
@@ -570,6 +632,13 @@ static int merge_main(int argc, const char *argv[]) {
       cl::desc("Number of merge threads to use (default: autodetect)"));
   cl::alias NumThreadsA("j", cl::desc("Alias for --num-threads"),
                         cl::aliasopt(NumThreads));
+  cl::opt<std::string> ProfileSymbolListFile(
+      "prof-sym-list", cl::init(""),
+      cl::desc("Path to file containing the list of function symbols "
+               "used to populate profile symbol list"));
+  cl::opt<bool> CompressProfSymList(
+      "compress-prof-sym-list", cl::init(false), cl::Hidden,
+      cl::desc("Compress profile symbol list before write it into profile. "));
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data merger\n");
 
@@ -581,7 +650,7 @@ static int merge_main(int argc, const char *argv[]) {
 
   // Make sure that the file buffer stays alive for the duration of the
   // weighted input vector's lifetime.
-  auto Buffer = getInputFilenamesFileBuf(InputFilenamesFile);
+  auto Buffer = getInputFileBuf(InputFilenamesFile);
   parseInputFilenamesFile(Buffer.get(), WeightedInputs);
 
   if (WeightedInputs.empty())
@@ -603,7 +672,67 @@ static int merge_main(int argc, const char *argv[]) {
                       OutputFormat, OutputSparse, NumThreads);
   else
     mergeSampleProfile(WeightedInputs, Remapper.get(), OutputFilename,
-                       OutputFormat);
+                       OutputFormat, ProfileSymbolListFile,
+                       CompressProfSymList);
+
+  return 0;
+}
+
+/// Computer the overlap b/w profile BaseFilename and profile TestFilename.
+static void overlapInstrProfile(const std::string &BaseFilename,
+                                const std::string &TestFilename,
+                                const OverlapFuncFilters &FuncFilter,
+                                raw_fd_ostream &OS, bool IsCS) {
+  std::mutex ErrorLock;
+  SmallSet<instrprof_error, 4> WriterErrorCodes;
+  WriterContext Context(false, ErrorLock, WriterErrorCodes);
+  WeightedFile WeightedInput{BaseFilename, 1};
+  OverlapStats Overlap;
+  Error E = Overlap.accumuateCounts(BaseFilename, TestFilename, IsCS);
+  if (E)
+    exitWithError(std::move(E), "Error in getting profile count sums");
+  if (Overlap.Base.CountSum < 1.0f) {
+    OS << "Sum of edge counts for profile " << BaseFilename << " is 0.\n";
+    exit(0);
+  }
+  if (Overlap.Test.CountSum < 1.0f) {
+    OS << "Sum of edge counts for profile " << TestFilename << " is 0.\n";
+    exit(0);
+  }
+  loadInput(WeightedInput, nullptr, &Context);
+  overlapInput(BaseFilename, TestFilename, &Context, Overlap, FuncFilter, OS,
+               IsCS);
+  Overlap.dump(OS);
+}
+
+static int overlap_main(int argc, const char *argv[]) {
+  cl::opt<std::string> BaseFilename(cl::Positional, cl::Required,
+                                    cl::desc("<base profile file>"));
+  cl::opt<std::string> TestFilename(cl::Positional, cl::Required,
+                                    cl::desc("<test profile file>"));
+  cl::opt<std::string> Output("output", cl::value_desc("output"), cl::init("-"),
+                              cl::desc("Output file"));
+  cl::alias OutputA("o", cl::desc("Alias for --output"), cl::aliasopt(Output));
+  cl::opt<bool> IsCS("cs", cl::init(false),
+                     cl::desc("For context sensitive counts"));
+  cl::opt<unsigned long long> ValueCutoff(
+      "value-cutoff", cl::init(-1),
+      cl::desc(
+          "Function level overlap information for every function in test "
+          "profile with max count value greater then the parameter value"));
+  cl::opt<std::string> FuncNameFilter(
+      "function",
+      cl::desc("Function level overlap information for matching functions"));
+  cl::ParseCommandLineOptions(argc, argv, "LLVM profile data overlap tool\n");
+
+  std::error_code EC;
+  raw_fd_ostream OS(Output.data(), EC, sys::fs::OF_Text);
+  if (EC)
+    exitWithErrorCode(EC, Output);
+
+  overlapInstrProfile(BaseFilename, TestFilename,
+                      OverlapFuncFilters{ValueCutoff, FuncNameFilter}, OS,
+                      IsCS);
 
   return 0;
 }
@@ -862,7 +991,7 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
 static int showSampleProfile(const std::string &Filename, bool ShowCounts,
                              bool ShowAllFunctions,
                              const std::string &ShowFunction,
-                             raw_fd_ostream &OS) {
+                             bool ShowProfileSymbolList, raw_fd_ostream &OS) {
   using namespace sampleprof;
   LLVMContext Context;
   auto ReaderOrErr = SampleProfileReader::create(Filename, Context);
@@ -877,6 +1006,12 @@ static int showSampleProfile(const std::string &Filename, bool ShowCounts,
     Reader->dump(OS);
   else
     Reader->dumpFunctionProfile(ShowFunction, OS);
+
+  if (ShowProfileSymbolList) {
+    std::unique_ptr<sampleprof::ProfileSymbolList> ReaderList =
+        Reader->getProfileSymbolList();
+    ReaderList->dump(OS);
+  }
 
   return 0;
 }
@@ -930,13 +1065,23 @@ static int show_main(int argc, const char *argv[]) {
       "list-below-cutoff", cl::init(false),
       cl::desc("Only output names of functions whose max count values are "
                "below the cutoff value"));
+  cl::opt<bool> ShowProfileSymbolList(
+      "show-prof-sym-list", cl::init(false),
+      cl::desc("Show profile symbol list if it exists in the profile. "));
+
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data summary\n");
 
   if (OutputFilename.empty())
     OutputFilename = "-";
 
+  if (!Filename.compare(OutputFilename)) {
+    errs() << sys::path::filename(argv[0])
+           << ": Input file name cannot be the same as the output file name!\n";
+    return 1;
+  }
+
   std::error_code EC;
-  raw_fd_ostream OS(OutputFilename.data(), EC, sys::fs::F_Text);
+  raw_fd_ostream OS(OutputFilename.data(), EC, sys::fs::OF_Text);
   if (EC)
     exitWithErrorCode(EC, OutputFilename);
 
@@ -951,7 +1096,7 @@ static int show_main(int argc, const char *argv[]) {
                             OnlyListBelow, ShowFunction, TextFormat, OS);
   else
     return showSampleProfile(Filename, ShowCounts, ShowAllFunctions,
-                             ShowFunction, OS);
+                             ShowFunction, ShowProfileSymbolList, OS);
 }
 
 int main(int argc, const char *argv[]) {
@@ -965,6 +1110,8 @@ int main(int argc, const char *argv[]) {
       func = merge_main;
     else if (strcmp(argv[1], "show") == 0)
       func = show_main;
+    else if (strcmp(argv[1], "overlap") == 0)
+      func = overlap_main;
 
     if (func) {
       std::string Invocation(ProgName.str() + " " + argv[1]);
@@ -979,7 +1126,7 @@ int main(int argc, const char *argv[]) {
              << "USAGE: " << ProgName << " <command> [args...]\n"
              << "USAGE: " << ProgName << " <command> -help\n\n"
              << "See each individual command --help for more details.\n"
-             << "Available commands: merge, show\n";
+             << "Available commands: merge, show, overlap\n";
       return 0;
     }
   }
@@ -989,6 +1136,6 @@ int main(int argc, const char *argv[]) {
   else
     errs() << ProgName << ": Unknown command!\n";
 
-  errs() << "USAGE: " << ProgName << " <merge|show> [args...]\n";
+  errs() << "USAGE: " << ProgName << " <merge|show|overlap> [args...]\n";
   return 1;
 }

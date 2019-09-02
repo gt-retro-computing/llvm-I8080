@@ -19,12 +19,13 @@
 #include "clang/Index/IndexSymbol.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Regex.h"
 #include <functional>
 
 namespace clang {
 namespace clangd {
 
-/// \brief Collect declarations (symbols) from an AST.
+/// Collect declarations (symbols) from an AST.
 /// It collects most declarations except:
 /// - Implicit declarations
 /// - Anonymous declarations (anonymous enum/class/struct, etc)
@@ -109,6 +110,12 @@ public:
 
   SymbolSlab takeSymbols() { return std::move(Symbols).build(); }
   RefSlab takeRefs() { return std::move(Refs).build(); }
+  RelationSlab takeRelations() { return std::move(Relations).build(); }
+
+  /// Returns true if we are interested in references and declarations from \p
+  /// FID. If this function return false, bodies of functions inside those files
+  /// will be skipped to decrease indexing time.
+  bool shouldIndexFile(FileID FID);
 
   void finish() override;
 
@@ -116,13 +123,29 @@ private:
   const Symbol *addDeclaration(const NamedDecl &, SymbolID,
                                bool IsMainFileSymbol);
   void addDefinition(const NamedDecl &, const Symbol &DeclSymbol);
+  void processRelations(const NamedDecl &ND, const SymbolID &ID,
+                        ArrayRef<index::SymbolRelation> Relations);
+
+  llvm::Optional<std::string> getIncludeHeader(llvm::StringRef QName, FileID);
+  bool isSelfContainedHeader(FileID);
+  // Heuristically headers that only want to be included via an umbrella.
+  static bool isDontIncludeMeHeader(llvm::StringRef);
 
   // All Symbols collected from the AST.
   SymbolSlab::Builder Symbols;
-  // All refs collected from the AST.
-  // Only symbols declared in preamble (from #include) and referenced from the
-  // main file will be included.
+  // File IDs for Symbol.IncludeHeaders.
+  // The final spelling is calculated in finish().
+  llvm::DenseMap<SymbolID, FileID> IncludeFiles;
+  void setIncludeLocation(const Symbol &S, SourceLocation);
+  // Indexed macros, to be erased if they turned out to be include guards.
+  llvm::DenseSet<const IdentifierInfo *> IndexedMacros;
+  // All refs collected from the AST. It includes:
+  //   1) symbols declared in the preamble and referenced from the main file (
+  //     which is not a header), or
+  //   2) symbols declared and referenced from the main file (which is a header)
   RefSlab::Builder Refs;
+  // All relations collected from the AST.
+  RelationSlab::Builder Relations;
   ASTContext *ASTCtx;
   std::shared_ptr<Preprocessor> PP;
   std::shared_ptr<GlobalCodeCompletionAllocator> CompletionAllocator;
@@ -141,6 +164,7 @@ private:
   llvm::DenseMap<const Decl *, const Decl *> CanonicalDecls;
   // Cache whether to index a file or not.
   llvm::DenseMap<FileID, bool> FilesToIndexCache;
+  llvm::DenseMap<FileID, bool> HeaderIsSelfContainedCache;
 };
 
 } // namespace clangd

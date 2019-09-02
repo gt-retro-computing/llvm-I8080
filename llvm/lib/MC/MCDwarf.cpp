@@ -259,7 +259,7 @@ void MCDwarfLineTable::Emit(MCObjectStreamer *MCOS,
 
 void MCDwarfDwoLineTable::Emit(MCStreamer &MCOS, MCDwarfLineTableParams Params,
                                MCSection *Section) const {
-  if (Header.MCDwarfFiles.empty())
+  if (!HasSplitLineTable)
     return;
   Optional<MCDwarfLineStr> NoLineStr(None);
   MCOS.SwitchSection(Section);
@@ -538,8 +538,17 @@ Expected<unsigned> MCDwarfLineTable::tryGetFile(StringRef &Directory,
                                                 StringRef &FileName,
                                                 Optional<MD5::MD5Result> Checksum,
                                                 Optional<StringRef> Source,
+                                                uint16_t DwarfVersion,
                                                 unsigned FileNumber) {
-  return Header.tryGetFile(Directory, FileName, Checksum, Source, FileNumber);
+  return Header.tryGetFile(Directory, FileName, Checksum, Source, DwarfVersion,
+                           FileNumber);
+}
+
+static bool isRootFile(const MCDwarfFile &RootFile, StringRef &Directory,
+                       StringRef &FileName, Optional<MD5::MD5Result> Checksum) {
+  if (RootFile.Name.empty() || RootFile.Name != FileName.data())
+    return false;
+  return RootFile.Checksum == Checksum;
 }
 
 Expected<unsigned>
@@ -547,6 +556,7 @@ MCDwarfLineTableHeader::tryGetFile(StringRef &Directory,
                                    StringRef &FileName,
                                    Optional<MD5::MD5Result> Checksum,
                                    Optional<StringRef> Source,
+                                   uint16_t DwarfVersion,
                                    unsigned FileNumber) {
   if (Directory == CompilationDir)
     Directory = "";
@@ -561,6 +571,8 @@ MCDwarfLineTableHeader::tryGetFile(StringRef &Directory,
     trackMD5Usage(Checksum.hasValue());
     HasSource = (Source != None);
   }
+  if (isRootFile(RootFile, Directory, FileName, Checksum) && DwarfVersion >= 5)
+    return 0;
   if (FileNumber == 0) {
     // File numbers start with 1 and/or after any file numbers
     // allocated by inline-assembler .file directives.
@@ -1853,11 +1865,10 @@ void MCDwarfFrameEmitter::Emit(MCObjectStreamer &Streamer, MCAsmBackend *MAB,
   // but the Android libunwindstack rejects eh_frame sections where
   // an FDE refers to a CIE other than the closest previous CIE.
   std::vector<MCDwarfFrameInfo> FrameArrayX(FrameArray.begin(), FrameArray.end());
-  std::stable_sort(
-      FrameArrayX.begin(), FrameArrayX.end(),
-      [&](const MCDwarfFrameInfo &X, const MCDwarfFrameInfo &Y) -> bool {
-        return CIEKey(X) < CIEKey(Y);
-      });
+  llvm::stable_sort(FrameArrayX,
+                    [](const MCDwarfFrameInfo &X, const MCDwarfFrameInfo &Y) {
+                      return CIEKey(X) < CIEKey(Y);
+                    });
   for (auto I = FrameArrayX.begin(), E = FrameArrayX.end(); I != E;) {
     const MCDwarfFrameInfo &Frame = *I;
     ++I;
@@ -1886,26 +1897,54 @@ void MCDwarfFrameEmitter::EmitAdvanceLoc(MCObjectStreamer &Streamer,
 }
 
 void MCDwarfFrameEmitter::EncodeAdvanceLoc(MCContext &Context,
-                                           uint64_t AddrDelta,
-                                           raw_ostream &OS) {
+                                           uint64_t AddrDelta, raw_ostream &OS,
+                                           uint32_t *Offset, uint32_t *Size) {
   // Scale the address delta by the minimum instruction length.
   AddrDelta = ScaleAddrDelta(Context, AddrDelta);
+
+  bool WithFixups = false;
+  if (Offset && Size)
+    WithFixups = true;
 
   support::endianness E =
       Context.getAsmInfo()->isLittleEndian() ? support::little : support::big;
   if (AddrDelta == 0) {
+    if (WithFixups) {
+      *Offset = 0;
+      *Size = 0;
+    }
   } else if (isUIntN(6, AddrDelta)) {
     uint8_t Opcode = dwarf::DW_CFA_advance_loc | AddrDelta;
-    OS << Opcode;
+    if (WithFixups) {
+      *Offset = OS.tell();
+      *Size = 6;
+      OS << uint8_t(dwarf::DW_CFA_advance_loc);
+    } else
+      OS << Opcode;
   } else if (isUInt<8>(AddrDelta)) {
     OS << uint8_t(dwarf::DW_CFA_advance_loc1);
-    OS << uint8_t(AddrDelta);
+    if (WithFixups) {
+      *Offset = OS.tell();
+      *Size = 8;
+      OS.write_zeros(1);
+    } else
+      OS << uint8_t(AddrDelta);
   } else if (isUInt<16>(AddrDelta)) {
     OS << uint8_t(dwarf::DW_CFA_advance_loc2);
-    support::endian::write<uint16_t>(OS, AddrDelta, E);
+    if (WithFixups) {
+      *Offset = OS.tell();
+      *Size = 16;
+      OS.write_zeros(2);
+    } else
+      support::endian::write<uint16_t>(OS, AddrDelta, E);
   } else {
     assert(isUInt<32>(AddrDelta));
     OS << uint8_t(dwarf::DW_CFA_advance_loc4);
-    support::endian::write<uint32_t>(OS, AddrDelta, E);
+    if (WithFixups) {
+      *Offset = OS.tell();
+      *Size = 32;
+      OS.write_zeros(4);
+    } else
+      support::endian::write<uint32_t>(OS, AddrDelta, E);
   }
 }

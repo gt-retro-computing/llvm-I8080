@@ -40,7 +40,7 @@ bool GCOVFile::readGCNO(GCOVBuffer &Buffer) {
   while (true) {
     if (!Buffer.readFunctionTag())
       break;
-    auto GFun = make_unique<GCOVFunction>(*this);
+    auto GFun = std::make_unique<GCOVFunction>(*this);
     if (!GFun->readGCNO(Buffer, Version))
       return false;
     Functions.push_back(std::move(GFun));
@@ -164,7 +164,7 @@ bool GCOVFunction::readGCNO(GCOVBuffer &Buff, GCOV::GCOVVersion Version) {
   for (uint32_t i = 0, e = BlockCount; i != e; ++i) {
     if (!Buff.readInt(Dummy))
       return false; // Block flags;
-    Blocks.push_back(make_unique<GCOVBlock>(*this, i));
+    Blocks.push_back(std::make_unique<GCOVBlock>(*this, i));
   }
 
   // read edges.
@@ -185,7 +185,7 @@ bool GCOVFunction::readGCNO(GCOVBuffer &Buff, GCOV::GCOVVersion Version) {
       uint32_t Dst;
       if (!Buff.readInt(Dst))
         return false;
-      Edges.push_back(make_unique<GCOVEdge>(*Blocks[BlockNo], *Blocks[Dst]));
+      Edges.push_back(std::make_unique<GCOVEdge>(*Blocks[BlockNo], *Blocks[Dst]));
       GCOVEdge *Edge = Edges.back().get();
       Blocks[BlockNo]->addDstEdge(Edge);
       Blocks[Dst]->addSrcEdge(Edge);
@@ -396,10 +396,10 @@ void GCOVBlock::addCount(size_t DstEdgeNo, uint64_t N) {
 /// sortDstEdges - Sort destination edges by block number, nop if already
 /// sorted. This is required for printing branch info in the correct order.
 void GCOVBlock::sortDstEdges() {
-  if (!DstEdgesAreSorted) {
-    SortDstEdgesFunctor SortEdges;
-    std::stable_sort(DstEdges.begin(), DstEdges.end(), SortEdges);
-  }
+  if (!DstEdgesAreSorted)
+    llvm::stable_sort(DstEdges, [](const GCOVEdge *E1, const GCOVEdge *E2) {
+      return E1->Dst.Number < E2->Dst.Number;
+    });
 }
 
 /// collectLineCounts - Collect line counts. This must be used after
@@ -702,14 +702,14 @@ std::string FileInfo::getCoveragePath(StringRef Filename,
 std::unique_ptr<raw_ostream>
 FileInfo::openCoveragePath(StringRef CoveragePath) {
   if (Options.NoOutput)
-    return llvm::make_unique<raw_null_ostream>();
+    return std::make_unique<raw_null_ostream>();
 
   std::error_code EC;
   auto OS =
-      llvm::make_unique<raw_fd_ostream>(CoveragePath, EC, sys::fs::F_Text);
+      std::make_unique<raw_fd_ostream>(CoveragePath, EC, sys::fs::OF_Text);
   if (EC) {
     errs() << EC.message() << "\n";
-    return llvm::make_unique<raw_null_ostream>();
+    return std::make_unique<raw_null_ostream>();
   }
   return std::move(OS);
 }

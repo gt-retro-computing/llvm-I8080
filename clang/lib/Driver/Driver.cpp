@@ -38,6 +38,7 @@
 #include "ToolChains/NetBSD.h"
 #include "ToolChains/OpenBSD.h"
 #include "ToolChains/PS4CPU.h"
+#include "ToolChains/PPCLinux.h"
 #include "ToolChains/RISCVToolchain.h"
 #include "ToolChains/Solaris.h"
 #include "ToolChains/TCE.h"
@@ -132,7 +133,7 @@ Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
 
   // Provide a sane fallback if no VFS is specified.
   if (!this->VFS)
-    this->VFS = llvm::vfs::getRealFileSystem();
+    this->VFS = llvm::vfs::createPhysicalFileSystem().release();
 
   Name = llvm::sys::path::filename(ClangExecutable);
   Dir = llvm::sys::path::parent_path(ClangExecutable);
@@ -279,11 +280,13 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
 
     // -{fsyntax-only,-analyze,emit-ast} only run up to the compiler.
   } else if ((PhaseArg = DAL.getLastArg(options::OPT_fsyntax_only)) ||
+             (PhaseArg = DAL.getLastArg(options::OPT_print_supported_cpus)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_module_file_info)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_verify_pch)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_legacy_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT__migrate)) ||
+             (PhaseArg = DAL.getLastArg(options::OPT_emit_iterface_stubs)) ||
              (PhaseArg = DAL.getLastArg(options::OPT__analyze,
                                         options::OPT__analyze_auto)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_emit_ast))) {
@@ -623,7 +626,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     // because the device toolchain we create depends on both.
     auto &CudaTC = ToolChains[CudaTriple.str() + "/" + HostTriple.str()];
     if (!CudaTC) {
-      CudaTC = llvm::make_unique<toolchains::CudaToolChain>(
+      CudaTC = std::make_unique<toolchains::CudaToolChain>(
           *this, CudaTriple, *HostTC, C.getInputArgs(), OFK);
     }
     C.addOffloadDeviceToolChain(CudaTC.get(), OFK);
@@ -638,7 +641,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     // because the device toolchain we create depends on both.
     auto &HIPTC = ToolChains[HIPTriple.str() + "/" + HostTriple.str()];
     if (!HIPTC) {
-      HIPTC = llvm::make_unique<toolchains::HIPToolChain>(
+      HIPTC = std::make_unique<toolchains::HIPToolChain>(
           *this, HIPTriple, *HostTC, C.getInputArgs());
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
@@ -696,7 +699,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
               auto &CudaTC =
                   ToolChains[TT.str() + "/" + HostTC->getTriple().normalize()];
               if (!CudaTC)
-                CudaTC = llvm::make_unique<toolchains::CudaToolChain>(
+                CudaTC = std::make_unique<toolchains::CudaToolChain>(
                     *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
               TC = CudaTC.get();
             } else
@@ -757,7 +760,7 @@ bool Driver::readConfigFile(StringRef FileName) {
   llvm::sys::path::native(CfgFileName);
   ConfigFile = CfgFileName.str();
   bool ContainErrors;
-  CfgOptions = llvm::make_unique<InputArgList>(
+  CfgOptions = std::make_unique<InputArgList>(
       ParseArgStrings(NewCfgArgs, IsCLMode(), ContainErrors));
   if (ContainErrors) {
     CfgOptions.reset();
@@ -951,7 +954,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
 
   // Arguments specified in command line.
   bool ContainsError;
-  CLOptions = llvm::make_unique<InputArgList>(
+  CLOptions = std::make_unique<InputArgList>(
       ParseArgStrings(ArgList.slice(1), IsCLMode(), ContainsError));
 
   // Try parsing configuration file.
@@ -963,6 +966,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   InputArgList Args = std::move(HasConfigFile ? std::move(*CfgOptions)
                                               : std::move(*CLOptions));
 
+  // The args for config files or /clang: flags belong to different InputArgList
+  // objects than Args. This copies an Arg from one of those other InputArgLists
+  // to the ownership of Args.
   auto appendOneArg = [&Args](const Arg *Opt, const Arg *BaseArg) {
       unsigned Index = Args.MakeIndex(Opt->getSpelling());
       Arg *Copy = new llvm::opt::Arg(Opt->getOption(), Opt->getSpelling(),
@@ -994,7 +1000,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
     if (!CLModePassThroughArgList.empty()) {
       // Parse any pass through args using default clang processing rather
       // than clang-cl processing.
-      auto CLModePassThroughOptions = llvm::make_unique<InputArgList>(
+      auto CLModePassThroughOptions = std::make_unique<InputArgList>(
           ParseArgStrings(CLModePassThroughArgList, false, ContainsError));
 
       if (!ContainsError)
@@ -1003,6 +1009,11 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
         }
     }
   }
+
+  // Check for working directory option before accessing any files
+  if (Arg *WD = Args.getLastArg(options::OPT_working_directory))
+    if (VFS->setCurrentWorkingDirectory(WD->getValue()))
+      Diag(diag::err_drv_unable_to_set_working_directory) << WD->getValue();
 
   // FIXME: This stuff needs to go into the Compilation, not the driver.
   bool CCCPrintPhases;
@@ -1082,7 +1093,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   }
 
   std::unique_ptr<llvm::opt::InputArgList> UArgs =
-      llvm::make_unique<InputArgList>(std::move(Args));
+      std::make_unique<InputArgList>(std::move(Args));
 
   // Perform the default argument translations.
   DerivedArgList *TranslatedArgs = TranslateInputArgs(*UArgs);
@@ -1665,7 +1676,8 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
   }
 
   if (C.getArgs().hasArg(options::OPT_v) ||
-      C.getArgs().hasArg(options::OPT__HASH_HASH_HASH)) {
+      C.getArgs().hasArg(options::OPT__HASH_HASH_HASH) ||
+      C.getArgs().hasArg(options::OPT_print_supported_cpus)) {
     PrintVersion(C, llvm::errs());
     SuppressMissingInputWarning = true;
   }
@@ -1694,7 +1706,7 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
     bool separator = false;
     for (const std::string &Path : TC.getProgramPaths()) {
       if (separator)
-        llvm::outs() << ':';
+        llvm::outs() << llvm::sys::EnvPathSeparator;
       llvm::outs() << Path;
       separator = true;
     }
@@ -1705,7 +1717,7 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
 
     for (const std::string &Path : TC.getFilePaths()) {
       // Always print a separator. ResourceDir was the first item shown.
-      llvm::outs() << ':';
+      llvm::outs() << llvm::sys::EnvPathSeparator;
       // Interpretation of leading '=' is needed only for NetBSD.
       if (Path[0] == '=')
         llvm::outs() << sysroot << Path.substr(1);
@@ -1974,31 +1986,20 @@ void Driver::BuildUniversalActions(Compilation &C, const ToolChain &TC,
   }
 }
 
-/// Check that the file referenced by Value exists. If it doesn't,
-/// issue a diagnostic and return false.
-static bool DiagnoseInputExistence(const Driver &D, const DerivedArgList &Args,
-                                   StringRef Value, types::ID Ty) {
-  if (!D.getCheckInputsExist())
+bool Driver::DiagnoseInputExistence(const DerivedArgList &Args, StringRef Value,
+                                    types::ID Ty, bool TypoCorrect) const {
+  if (!getCheckInputsExist())
     return true;
 
   // stdin always exists.
   if (Value == "-")
     return true;
 
-  SmallString<64> Path(Value);
-  if (Arg *WorkDir = Args.getLastArg(options::OPT_working_directory)) {
-    if (!llvm::sys::path::is_absolute(Path)) {
-      SmallString<64> Directory(WorkDir->getValue());
-      llvm::sys::path::append(Directory, Value);
-      Path.assign(Directory);
-    }
-  }
-
-  if (D.getVFS().exists(Path))
+  if (getVFS().exists(Value))
     return true;
 
-  if (D.IsCLMode()) {
-    if (!llvm::sys::path::is_absolute(Twine(Path)) &&
+  if (IsCLMode()) {
+    if (!llvm::sys::path::is_absolute(Twine(Value)) &&
         llvm::sys::Process::FindInEnvPath("LIB", Value))
       return true;
 
@@ -2010,7 +2011,26 @@ static bool DiagnoseInputExistence(const Driver &D, const DerivedArgList &Args,
     }
   }
 
-  D.Diag(clang::diag::err_drv_no_such_file) << Path;
+  if (TypoCorrect) {
+    // Check if the filename is a typo for an option flag. OptTable thinks
+    // that all args that are not known options and that start with / are
+    // filenames, but e.g. `/diagnostic:caret` is more likely a typo for
+    // the option `/diagnostics:caret` than a reference to a file in the root
+    // directory.
+    unsigned IncludedFlagsBitmask;
+    unsigned ExcludedFlagsBitmask;
+    std::tie(IncludedFlagsBitmask, ExcludedFlagsBitmask) =
+        getIncludeExcludeOptionFlagMasks(IsCLMode());
+    std::string Nearest;
+    if (getOpts().findNearest(Value, Nearest, IncludedFlagsBitmask,
+                              ExcludedFlagsBitmask) <= 1) {
+      Diag(clang::diag::err_drv_no_such_file_with_suggestion)
+          << Value << Nearest;
+      return false;
+    }
+  }
+
+  Diag(clang::diag::err_drv_no_such_file) << Value;
   return false;
 }
 
@@ -2099,6 +2119,12 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
               Diag(clang::diag::warn_drv_treating_input_as_cxx)
                   << getTypeName(OldTy) << getTypeName(Ty);
           }
+
+          // If running with -fthinlto-index=, extensions that normally identify
+          // native object files actually identify LLVM bitcode files.
+          if (Args.hasArgNoClaim(options::OPT_fthinlto_index_EQ) &&
+              Ty == types::TY_Object)
+            Ty = types::TY_LLVM_BC;
         }
 
         // -ObjC and -ObjC++ override the default language, but only for "source
@@ -2127,19 +2153,21 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
         }
       }
 
-      if (DiagnoseInputExistence(*this, Args, Value, Ty))
+      if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true))
         Inputs.push_back(std::make_pair(Ty, A));
 
     } else if (A->getOption().matches(options::OPT__SLASH_Tc)) {
       StringRef Value = A->getValue();
-      if (DiagnoseInputExistence(*this, Args, Value, types::TY_C)) {
+      if (DiagnoseInputExistence(Args, Value, types::TY_C,
+                                 /*TypoCorrect=*/false)) {
         Arg *InputArg = MakeInputArg(Args, *Opts, A->getValue());
         Inputs.push_back(std::make_pair(types::TY_C, InputArg));
       }
       A->claim();
     } else if (A->getOption().matches(options::OPT__SLASH_Tp)) {
       StringRef Value = A->getValue();
-      if (DiagnoseInputExistence(*this, Args, Value, types::TY_CXX)) {
+      if (DiagnoseInputExistence(Args, Value, types::TY_CXX,
+                                 /*TypoCorrect=*/false)) {
         Arg *InputArg = MakeInputArg(Args, *Opts, A->getValue());
         Inputs.push_back(std::make_pair(types::TY_CXX, InputArg));
       }
@@ -2161,7 +2189,7 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
         Diag(clang::diag::err_drv_unknown_language) << A->getValue();
         InputType = types::TY_Object;
       }
-    } else if (A->getOption().getID() == options::OPT__SLASH_U) {
+    } else if (A->getOption().getID() == options::OPT_U) {
       assert(A->getNumValues() == 1 && "The /U option has one value.");
       StringRef Val = A->getValue(0);
       if (Val.find_first_of("/\\") != StringRef::npos) {
@@ -2195,7 +2223,7 @@ class OffloadingActionBuilder final {
   /// Builder interface. It doesn't build anything or keep any state.
   class DeviceActionBuilder {
   public:
-    typedef llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PhasesTy;
+    typedef const llvm::SmallVectorImpl<phases::ID> PhasesTy;
 
     enum ActionBuilderReturnCode {
       // The builder acted successfully on the current action.
@@ -3120,13 +3148,23 @@ public:
 };
 } // anonymous namespace.
 
-void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
-                          const InputList &Inputs, ActionList &Actions) const {
-  llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
+void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
+                             const InputList &Inputs,
+                             ActionList &Actions) const {
 
-  if (!SuppressMissingInputWarning && Inputs.empty()) {
-    Diag(clang::diag::err_drv_no_input_files);
-    return;
+  // Ignore /Yc/Yu if both /Yc and /Yu passed but with different filenames.
+  Arg *YcArg = Args.getLastArg(options::OPT__SLASH_Yc);
+  Arg *YuArg = Args.getLastArg(options::OPT__SLASH_Yu);
+  if (YcArg && YuArg && strcmp(YcArg->getValue(), YuArg->getValue()) != 0) {
+    Diag(clang::diag::warn_drv_ycyu_different_arg_clang_cl);
+    Args.eraseArg(options::OPT__SLASH_Yc);
+    Args.eraseArg(options::OPT__SLASH_Yu);
+    YcArg = YuArg = nullptr;
+  }
+  if (YcArg && Inputs.size() > 1) {
+    Diag(clang::diag::warn_drv_yc_multiple_inputs_clang_cl);
+    Args.eraseArg(options::OPT__SLASH_Yc);
+    YcArg = nullptr;
   }
 
   Arg *FinalPhaseArg;
@@ -3138,6 +3176,102 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     if (IsCLMode() && LTOMode != LTOK_None &&
         !Args.getLastArgValue(options::OPT_fuse_ld_EQ).equals_lower("lld"))
       Diag(clang::diag::err_drv_lto_without_lld);
+  }
+
+  if (FinalPhase == phases::Preprocess || Args.hasArg(options::OPT__SLASH_Y_)) {
+    // If only preprocessing or /Y- is used, all pch handling is disabled.
+    // Rather than check for it everywhere, just remove clang-cl pch-related
+    // flags here.
+    Args.eraseArg(options::OPT__SLASH_Fp);
+    Args.eraseArg(options::OPT__SLASH_Yc);
+    Args.eraseArg(options::OPT__SLASH_Yu);
+    YcArg = YuArg = nullptr;
+  }
+
+  unsigned LastPLSize = 0;
+  for (auto &I : Inputs) {
+    types::ID InputType = I.first;
+    const Arg *InputArg = I.second;
+
+    llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PL;
+    types::getCompilationPhases(InputType, PL);
+    LastPLSize = PL.size();
+
+    // If the first step comes after the final phase we are doing as part of
+    // this compilation, warn the user about it.
+    phases::ID InitialPhase = PL[0];
+    if (InitialPhase > FinalPhase) {
+      if (InputArg->isClaimed())
+        continue;
+
+      // Claim here to avoid the more general unused warning.
+      InputArg->claim();
+
+      // Suppress all unused style warnings with -Qunused-arguments
+      if (Args.hasArg(options::OPT_Qunused_arguments))
+        continue;
+
+      // Special case when final phase determined by binary name, rather than
+      // by a command-line argument with a corresponding Arg.
+      if (CCCIsCPP())
+        Diag(clang::diag::warn_drv_input_file_unused_by_cpp)
+            << InputArg->getAsString(Args) << getPhaseName(InitialPhase);
+      // Special case '-E' warning on a previously preprocessed file to make
+      // more sense.
+      else if (InitialPhase == phases::Compile &&
+               (Args.getLastArg(options::OPT__SLASH_EP,
+                                options::OPT__SLASH_P) ||
+                Args.getLastArg(options::OPT_E) ||
+                Args.getLastArg(options::OPT_M, options::OPT_MM)) &&
+               getPreprocessedType(InputType) == types::TY_INVALID)
+        Diag(clang::diag::warn_drv_preprocessed_input_file_unused)
+            << InputArg->getAsString(Args) << !!FinalPhaseArg
+            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
+      else
+        Diag(clang::diag::warn_drv_input_file_unused)
+            << InputArg->getAsString(Args) << getPhaseName(InitialPhase)
+            << !!FinalPhaseArg
+            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
+      continue;
+    }
+
+    if (YcArg) {
+      // Add a separate precompile phase for the compile phase.
+      if (FinalPhase >= phases::Compile) {
+        const types::ID HeaderType = lookupHeaderTypeForSourceType(InputType);
+        llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PCHPL;
+        types::getCompilationPhases(HeaderType, PCHPL);
+        // Build the pipeline for the pch file.
+        Action *ClangClPch = C.MakeAction<InputAction>(*InputArg, HeaderType);
+        for (phases::ID Phase : PCHPL)
+          ClangClPch = ConstructPhaseAction(C, Args, Phase, ClangClPch);
+        assert(ClangClPch);
+        Actions.push_back(ClangClPch);
+        // The driver currently exits after the first failed command.  This
+        // relies on that behavior, to make sure if the pch generation fails,
+        // the main compilation won't run.
+        // FIXME: If the main compilation fails, the PCH generation should
+        // probably not be considered successful either.
+      }
+    }
+  }
+
+  // If we are linking, claim any options which are obviously only used for
+  // compilation.
+  // FIXME: Understand why the last Phase List length is used here.
+  if (FinalPhase == phases::Link && LastPLSize == 1) {
+    Args.ClaimAllArgs(options::OPT_CompileOnly_Group);
+    Args.ClaimAllArgs(options::OPT_cl_compile_Group);
+  }
+}
+
+void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
+                          const InputList &Inputs, ActionList &Actions) const {
+  llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
+
+  if (!SuppressMissingInputWarning && Inputs.empty()) {
+    Diag(clang::diag::err_drv_no_input_files);
+    return;
   }
 
   // Reject -Z* at the top level, these options should never have been exposed
@@ -3178,29 +3312,7 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     }
   }
 
-  // Ignore /Yc/Yu if both /Yc and /Yu passed but with different filenames.
-  Arg *YcArg = Args.getLastArg(options::OPT__SLASH_Yc);
-  Arg *YuArg = Args.getLastArg(options::OPT__SLASH_Yu);
-  if (YcArg && YuArg && strcmp(YcArg->getValue(), YuArg->getValue()) != 0) {
-    Diag(clang::diag::warn_drv_ycyu_different_arg_clang_cl);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    Args.eraseArg(options::OPT__SLASH_Yu);
-    YcArg = YuArg = nullptr;
-  }
-  if (YcArg && Inputs.size() > 1) {
-    Diag(clang::diag::warn_drv_yc_multiple_inputs_clang_cl);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    YcArg = nullptr;
-  }
-  if (FinalPhase == phases::Preprocess || Args.hasArg(options::OPT__SLASH_Y_)) {
-    // If only preprocessing or /Y- is used, all pch handling is disabled.
-    // Rather than check for it everywhere, just remove clang-cl pch-related
-    // flags here.
-    Args.eraseArg(options::OPT__SLASH_Fp);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    Args.eraseArg(options::OPT__SLASH_Yu);
-    YcArg = YuArg = nullptr;
-  }
+  handleArguments(C, Args, Inputs, Actions);
 
   // Builder to be used to build offloading actions.
   OffloadingActionBuilder OffloadBuilder(C, Args, Inputs);
@@ -3209,69 +3321,17 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
   HeaderModulePrecompileJobAction *HeaderModuleAction = nullptr;
   ActionList LinkerInputs;
 
-  llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PL;
   for (auto &I : Inputs) {
     types::ID InputType = I.first;
     const Arg *InputArg = I.second;
 
-    PL.clear();
-    types::getCompilationPhases(InputType, PL);
-
-    // If the first step comes after the final phase we are doing as part of
-    // this compilation, warn the user about it.
-    phases::ID InitialPhase = PL[0];
-    if (InitialPhase > FinalPhase) {
-      if (InputArg->isClaimed())
-        continue;
-
-      // Claim here to avoid the more general unused warning.
-      InputArg->claim();
-
-      // Suppress all unused style warnings with -Qunused-arguments
-      if (Args.hasArg(options::OPT_Qunused_arguments))
-        continue;
-
-      // Special case when final phase determined by binary name, rather than
-      // by a command-line argument with a corresponding Arg.
-      if (CCCIsCPP())
-        Diag(clang::diag::warn_drv_input_file_unused_by_cpp)
-            << InputArg->getAsString(Args) << getPhaseName(InitialPhase);
-      // Special case '-E' warning on a previously preprocessed file to make
-      // more sense.
-      else if (InitialPhase == phases::Compile &&
-               FinalPhase == phases::Preprocess &&
-               getPreprocessedType(InputType) == types::TY_INVALID)
-        Diag(clang::diag::warn_drv_preprocessed_input_file_unused)
-            << InputArg->getAsString(Args) << !!FinalPhaseArg
-            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
-      else
-        Diag(clang::diag::warn_drv_input_file_unused)
-            << InputArg->getAsString(Args) << getPhaseName(InitialPhase)
-            << !!FinalPhaseArg
-            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
+    llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PL;
+    types::getCompilationPhases(*this, Args, InputType, PL);
+    if (PL.empty())
       continue;
-    }
 
-    if (YcArg) {
-      // Add a separate precompile phase for the compile phase.
-      if (FinalPhase >= phases::Compile) {
-        const types::ID HeaderType = lookupHeaderTypeForSourceType(InputType);
-        llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PCHPL;
-        types::getCompilationPhases(HeaderType, PCHPL);
-        // Build the pipeline for the pch file.
-        Action *ClangClPch =
-            C.MakeAction<InputAction>(*InputArg, HeaderType);
-        for (phases::ID Phase : PCHPL)
-          ClangClPch = ConstructPhaseAction(C, Args, Phase, ClangClPch);
-        assert(ClangClPch);
-        Actions.push_back(ClangClPch);
-        // The driver currently exits after the first failed command.  This
-        // relies on that behavior, to make sure if the pch generation fails,
-        // the main compilation won't run.
-        // FIXME: If the main compilation fails, the PCH generation should
-        // probably not be considered successful either.
-      }
-    }
+    llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> FullPL;
+    types::getCompilationPhases(InputType, FullPL);
 
     // Build the pipeline for this file.
     Action *Current = C.MakeAction<InputAction>(*InputArg, InputType);
@@ -3281,23 +3341,17 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     if (OffloadBuilder.addHostDependenceToDeviceActions(Current, InputArg))
       break;
 
-    for (SmallVectorImpl<phases::ID>::iterator i = PL.begin(), e = PL.end();
-         i != e; ++i) {
-      phases::ID Phase = *i;
-
-      // We are done if this step is past what the user requested.
-      if (Phase > FinalPhase)
-        break;
+    for (phases::ID Phase : PL) {
 
       // Add any offload action the host action depends on.
       Current = OffloadBuilder.addDeviceDependencesToHostAction(
-          Current, InputArg, Phase, FinalPhase, PL);
+          Current, InputArg, Phase, PL.back(), FullPL);
       if (!Current)
         break;
 
       // Queue linker inputs.
       if (Phase == phases::Link) {
-        assert((i + 1) == e && "linking must be final compilation step.");
+        assert(Phase == PL.back() && "linking must be final compilation step.");
         LinkerInputs.push_back(Current);
         Current = nullptr;
         break;
@@ -3352,11 +3406,16 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     Actions.push_back(LA);
   }
 
-  // If we are linking, claim any options which are obviously only used for
-  // compilation.
-  if (FinalPhase == phases::Link && PL.size() == 1) {
-    Args.ClaimAllArgs(options::OPT_CompileOnly_Group);
-    Args.ClaimAllArgs(options::OPT_cl_compile_Group);
+  // If --print-supported-cpus, -mcpu=? or -mtune=? is specified, build a custom
+  // Compile phase that prints out supported cpu models and quits.
+  if (Arg *A = Args.getLastArg(options::OPT_print_supported_cpus)) {
+    // Use the -mcpu=? flag as the dummy input to cc1.
+    Actions.clear();
+    Action *InputAc = C.MakeAction<InputAction>(*A, types::TY_C);
+    Actions.push_back(
+        C.MakeAction<PrecompileJobAction>(InputAc, types::TY_Nothing));
+    for (auto &I : Inputs)
+      I.second->claim();
   }
 
   // Claim ignored clang-cl options.
@@ -3444,6 +3503,8 @@ Action *Driver::ConstructPhaseAction(
       return C.MakeAction<CompileJobAction>(Input, types::TY_ModuleFile);
     if (Args.hasArg(options::OPT_verify_pch))
       return C.MakeAction<VerifyPCHJobAction>(Input, types::TY_Nothing);
+    if (Args.hasArg(options::OPT_emit_iterface_stubs))
+      return C.MakeAction<CompileJobAction>(Input, types::TY_IFS);
     return C.MakeAction<CompileJobAction>(Input, types::TY_LLVM_BC);
   }
   case phases::Backend: {
@@ -3981,9 +4042,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
     Input.claim();
     if (Input.getOption().matches(options::OPT_INPUT)) {
       const char *Name = Input.getValue();
-      return InputInfo(A, Name, /* BaseInput = */ Name);
+      return InputInfo(A, Name, /* _BaseInput = */ Name);
     }
-    return InputInfo(A, &Input, /* BaseInput = */ "");
+    return InputInfo(A, &Input, /* _BaseInput = */ "");
   }
 
   if (const BindArchAction *BAA = dyn_cast<BindArchAction>(A)) {
@@ -4262,6 +4323,8 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     Arg *A = C.getArgs().getLastArg(options::OPT_fcrash_diagnostics_dir);
     if (CCGenDiagnostics && A) {
       SmallString<128> CrashDirectory(A->getValue());
+      if (!getVFS().exists(CrashDirectory))
+        llvm::sys::fs::create_directories(CrashDirectory);
       llvm::sys::path::append(CrashDirectory, Split.first);
       const char *Middle = Suffix ? "-%%%%%%." : "-%%%%%%";
       std::error_code EC = llvm::sys::fs::createUniqueFile(
@@ -4419,6 +4482,11 @@ std::string Driver::GetFilePath(StringRef Name, const ToolChain &TC) const {
   if (llvm::sys::fs::exists(Twine(P)))
     return P.str();
 
+  SmallString<128> D(Dir);
+  llvm::sys::path::append(D, "..", Name);
+  if (llvm::sys::fs::exists(Twine(D)))
+    return D.str();
+
   if (auto P = SearchPaths(TC.getLibraryPaths()))
     return *P;
 
@@ -4537,145 +4605,152 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::Haiku:
-      TC = llvm::make_unique<toolchains::Haiku>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Haiku>(*this, Target, Args);
       break;
     case llvm::Triple::Ananas:
-      TC = llvm::make_unique<toolchains::Ananas>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Ananas>(*this, Target, Args);
       break;
     case llvm::Triple::CloudABI:
-      TC = llvm::make_unique<toolchains::CloudABI>(*this, Target, Args);
+      TC = std::make_unique<toolchains::CloudABI>(*this, Target, Args);
       break;
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:
     case llvm::Triple::IOS:
     case llvm::Triple::TvOS:
     case llvm::Triple::WatchOS:
-      TC = llvm::make_unique<toolchains::DarwinClang>(*this, Target, Args);
+      TC = std::make_unique<toolchains::DarwinClang>(*this, Target, Args);
       break;
     case llvm::Triple::DragonFly:
-      TC = llvm::make_unique<toolchains::DragonFly>(*this, Target, Args);
+      TC = std::make_unique<toolchains::DragonFly>(*this, Target, Args);
       break;
     case llvm::Triple::OpenBSD:
-      TC = llvm::make_unique<toolchains::OpenBSD>(*this, Target, Args);
+      TC = std::make_unique<toolchains::OpenBSD>(*this, Target, Args);
       break;
     case llvm::Triple::NetBSD:
-      TC = llvm::make_unique<toolchains::NetBSD>(*this, Target, Args);
+      TC = std::make_unique<toolchains::NetBSD>(*this, Target, Args);
       break;
     case llvm::Triple::FreeBSD:
-      TC = llvm::make_unique<toolchains::FreeBSD>(*this, Target, Args);
+      TC = std::make_unique<toolchains::FreeBSD>(*this, Target, Args);
       break;
     case llvm::Triple::Minix:
-      TC = llvm::make_unique<toolchains::Minix>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Minix>(*this, Target, Args);
       break;
     case llvm::Triple::Linux:
     case llvm::Triple::ELFIAMCU:
       if (Target.getArch() == llvm::Triple::hexagon)
-        TC = llvm::make_unique<toolchains::HexagonToolChain>(*this, Target,
+        TC = std::make_unique<toolchains::HexagonToolChain>(*this, Target,
                                                              Args);
       else if ((Target.getVendor() == llvm::Triple::MipsTechnologies) &&
                !Target.hasEnvironment())
-        TC = llvm::make_unique<toolchains::MipsLLVMToolChain>(*this, Target,
+        TC = std::make_unique<toolchains::MipsLLVMToolChain>(*this, Target,
+                                                              Args);
+      else if (Target.getArch() == llvm::Triple::ppc ||
+               Target.getArch() == llvm::Triple::ppc64 ||
+               Target.getArch() == llvm::Triple::ppc64le)
+        TC = std::make_unique<toolchains::PPCLinuxToolChain>(*this, Target,
                                                               Args);
       else
-        TC = llvm::make_unique<toolchains::Linux>(*this, Target, Args);
+        TC = std::make_unique<toolchains::Linux>(*this, Target, Args);
       break;
     case llvm::Triple::NaCl:
-      TC = llvm::make_unique<toolchains::NaClToolChain>(*this, Target, Args);
+      TC = std::make_unique<toolchains::NaClToolChain>(*this, Target, Args);
       break;
     case llvm::Triple::Fuchsia:
-      TC = llvm::make_unique<toolchains::Fuchsia>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Fuchsia>(*this, Target, Args);
       break;
     case llvm::Triple::Solaris:
-      TC = llvm::make_unique<toolchains::Solaris>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Solaris>(*this, Target, Args);
       break;
     case llvm::Triple::AMDHSA:
-      TC = llvm::make_unique<toolchains::AMDGPUToolChain>(*this, Target, Args);
+    case llvm::Triple::AMDPAL:
+    case llvm::Triple::Mesa3D:
+      TC = std::make_unique<toolchains::AMDGPUToolChain>(*this, Target, Args);
       break;
     case llvm::Triple::Win32:
       switch (Target.getEnvironment()) {
       default:
         if (Target.isOSBinFormatELF())
-          TC = llvm::make_unique<toolchains::Generic_ELF>(*this, Target, Args);
+          TC = std::make_unique<toolchains::Generic_ELF>(*this, Target, Args);
         else if (Target.isOSBinFormatMachO())
-          TC = llvm::make_unique<toolchains::MachO>(*this, Target, Args);
+          TC = std::make_unique<toolchains::MachO>(*this, Target, Args);
         else
-          TC = llvm::make_unique<toolchains::Generic_GCC>(*this, Target, Args);
+          TC = std::make_unique<toolchains::Generic_GCC>(*this, Target, Args);
         break;
       case llvm::Triple::GNU:
-        TC = llvm::make_unique<toolchains::MinGW>(*this, Target, Args);
+        TC = std::make_unique<toolchains::MinGW>(*this, Target, Args);
         break;
       case llvm::Triple::Itanium:
-        TC = llvm::make_unique<toolchains::CrossWindowsToolChain>(*this, Target,
+        TC = std::make_unique<toolchains::CrossWindowsToolChain>(*this, Target,
                                                                   Args);
         break;
       case llvm::Triple::MSVC:
       case llvm::Triple::UnknownEnvironment:
         if (Args.getLastArgValue(options::OPT_fuse_ld_EQ)
                 .startswith_lower("bfd"))
-          TC = llvm::make_unique<toolchains::CrossWindowsToolChain>(
+          TC = std::make_unique<toolchains::CrossWindowsToolChain>(
               *this, Target, Args);
         else
           TC =
-              llvm::make_unique<toolchains::MSVCToolChain>(*this, Target, Args);
+              std::make_unique<toolchains::MSVCToolChain>(*this, Target, Args);
         break;
       }
       break;
     case llvm::Triple::PS4:
-      TC = llvm::make_unique<toolchains::PS4CPU>(*this, Target, Args);
+      TC = std::make_unique<toolchains::PS4CPU>(*this, Target, Args);
       break;
     case llvm::Triple::Contiki:
-      TC = llvm::make_unique<toolchains::Contiki>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Contiki>(*this, Target, Args);
       break;
     case llvm::Triple::Hurd:
-      TC = llvm::make_unique<toolchains::Hurd>(*this, Target, Args);
+      TC = std::make_unique<toolchains::Hurd>(*this, Target, Args);
       break;
     default:
       // Of these targets, Hexagon is the only one that might have
       // an OS of Linux, in which case it got handled above already.
       switch (Target.getArch()) {
       case llvm::Triple::tce:
-        TC = llvm::make_unique<toolchains::TCEToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::TCEToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::tcele:
-        TC = llvm::make_unique<toolchains::TCELEToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::TCELEToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::hexagon:
-        TC = llvm::make_unique<toolchains::HexagonToolChain>(*this, Target,
+        TC = std::make_unique<toolchains::HexagonToolChain>(*this, Target,
                                                              Args);
         break;
       case llvm::Triple::lanai:
-        TC = llvm::make_unique<toolchains::LanaiToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::LanaiToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::xcore:
-        TC = llvm::make_unique<toolchains::XCoreToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::XCoreToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::wasm32:
       case llvm::Triple::wasm64:
-        TC = llvm::make_unique<toolchains::WebAssembly>(*this, Target, Args);
+        TC = std::make_unique<toolchains::WebAssembly>(*this, Target, Args);
         break;
       case llvm::Triple::avr:
-        TC = llvm::make_unique<toolchains::AVRToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::AVRToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::msp430:
         TC =
-            llvm::make_unique<toolchains::MSP430ToolChain>(*this, Target, Args);
+            std::make_unique<toolchains::MSP430ToolChain>(*this, Target, Args);
         break;
       case llvm::Triple::riscv32:
       case llvm::Triple::riscv64:
-        TC = llvm::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
+        TC = std::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
         break;
       default:
         if (Target.getVendor() == llvm::Triple::Myriad)
-          TC = llvm::make_unique<toolchains::MyriadToolChain>(*this, Target,
+          TC = std::make_unique<toolchains::MyriadToolChain>(*this, Target,
                                                               Args);
         else if (toolchains::BareMetal::handlesTarget(Target))
-          TC = llvm::make_unique<toolchains::BareMetal>(*this, Target, Args);
+          TC = std::make_unique<toolchains::BareMetal>(*this, Target, Args);
         else if (Target.isOSBinFormatELF())
-          TC = llvm::make_unique<toolchains::Generic_ELF>(*this, Target, Args);
+          TC = std::make_unique<toolchains::Generic_ELF>(*this, Target, Args);
         else if (Target.isOSBinFormatMachO())
-          TC = llvm::make_unique<toolchains::MachO>(*this, Target, Args);
+          TC = std::make_unique<toolchains::MachO>(*this, Target, Args);
         else
-          TC = llvm::make_unique<toolchains::Generic_GCC>(*this, Target, Args);
+          TC = std::make_unique<toolchains::Generic_GCC>(*this, Target, Args);
       }
     }
   }

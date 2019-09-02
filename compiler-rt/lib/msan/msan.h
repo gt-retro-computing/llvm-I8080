@@ -267,7 +267,7 @@ inline bool addr_is_type(uptr addr, MappingDesc::Type mapping_type) {
 #define MEM_IS_SHADOW(mem) addr_is_type((uptr)(mem), MappingDesc::SHADOW)
 #define MEM_IS_ORIGIN(mem) addr_is_type((uptr)(mem), MappingDesc::ORIGIN)
 
-// These constants must be kept in sync with the ones in MemorySanitizer.cc.
+// These constants must be kept in sync with the ones in MemorySanitizer.cpp.
 const int kMsanParamTlsSize = 800;
 const int kMsanRetvalTlsSize = 800;
 
@@ -288,6 +288,7 @@ void MsanDeallocate(StackTrace *stack, void *ptr);
 void *msan_malloc(uptr size, StackTrace *stack);
 void *msan_calloc(uptr nmemb, uptr size, StackTrace *stack);
 void *msan_realloc(void *ptr, uptr size, StackTrace *stack);
+void *msan_reallocarray(void *ptr, uptr nmemb, uptr size, StackTrace *stack);
 void *msan_valloc(uptr size, StackTrace *stack);
 void *msan_pvalloc(uptr size, StackTrace *stack);
 void *msan_aligned_alloc(uptr alignment, uptr size, StackTrace *stack);

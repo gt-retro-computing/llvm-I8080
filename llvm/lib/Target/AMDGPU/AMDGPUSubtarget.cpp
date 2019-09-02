@@ -40,6 +40,11 @@ using namespace llvm;
 #undef AMDGPUSubtarget
 #include "R600GenSubtargetInfo.inc"
 
+static cl::opt<bool> DisablePowerSched(
+  "amdgpu-disable-power-sched",
+  cl::desc("Disable scheduling to minimize mAI power bursts"),
+  cl::init(false));
+
 GCNSubtarget::~GCNSubtarget() = default;
 
 R600Subtarget &
@@ -78,7 +83,7 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   // unset everything else if it is disabled
 
   // Assuming ECC is enabled is the conservative default.
-  SmallString<256> FullFS("+promote-alloca,+load-store-opt,+sram-ecc,");
+  SmallString<256> FullFS("+promote-alloca,+load-store-opt,+sram-ecc,+xnack,");
 
   if (isAmdHsaOS()) // Turn on FlatForGlobal for HSA.
     FullFS += "+flat-for-global,+unaligned-buffer-access,+trap-handler,";
@@ -93,6 +98,16 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   }
 
   FullFS += "+enable-prt-strict-null,"; // This is overridden by a disable in FS
+
+  // Disable mutually exclusive bits.
+  if (FS.find_lower("+wavefrontsize") != StringRef::npos) {
+    if (FS.find_lower("wavefrontsize16") == StringRef::npos)
+      FullFS += "-wavefrontsize16,";
+    if (FS.find_lower("wavefrontsize32") == StringRef::npos)
+      FullFS += "-wavefrontsize32,";
+    if (FS.find_lower("wavefrontsize64") == StringRef::npos)
+      FullFS += "-wavefrontsize64,";
+  }
 
   FullFS += FS;
 
@@ -130,6 +145,11 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
 
   HasFminFmaxLegacy = getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS;
 
+  if (DoesNotSupportXNACK && EnableXNACK) {
+    ToggleFeature(AMDGPU::FeatureXNACK);
+    EnableXNACK = false;
+  }
+
   // ECC is on by default, but turn it off if the hardware doesn't support it
   // anyway. This matters for the gfx9 targets with d16 loads, but don't support
   // ECC.
@@ -155,6 +175,7 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT) :
   HasFminFmaxLegacy(true),
   EnablePromoteAlloca(false),
   HasTrigReducedRange(false),
+  MaxWavesPerEU(10),
   LocalMemorySize(0),
   WavefrontSize(0)
   { }
@@ -181,9 +202,10 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
 
     HasApertureRegs(false),
     EnableXNACK(false),
+    DoesNotSupportXNACK(false),
+    EnableCuMode(false),
     TrapHandler(false),
 
-    EnableHugePrivateBuffer(false),
     EnableLoadStoreOpt(false),
     EnableUnsafeDSOffsetFolding(false),
     EnableSIScheduler(false),
@@ -196,6 +218,7 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     CIInsts(false),
     GFX8Insts(false),
     GFX9Insts(false),
+    GFX10Insts(false),
     GFX7GFX8GFX9Insts(false),
     SGPRInitBug(false),
     HasSMemRealTime(false),
@@ -211,30 +234,78 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasSDWAMac(false),
     HasSDWAOutModsVOPC(false),
     HasDPP(false),
+    HasDPP8(false),
     HasR128A16(false),
+    HasNSAEncoding(false),
     HasDLInsts(false),
     HasDot1Insts(false),
     HasDot2Insts(false),
+    HasDot3Insts(false),
+    HasDot4Insts(false),
+    HasDot5Insts(false),
+    HasDot6Insts(false),
+    HasMAIInsts(false),
+    HasPkFmacF16Inst(false),
+    HasAtomicFaddInsts(false),
     EnableSRAMECC(false),
     DoesNotSupportSRAMECC(false),
+    HasNoSdstCMPX(false),
+    HasVscnt(false),
+    HasRegisterBanking(false),
+    HasVOP3Literal(false),
+    HasNoDataDepHazard(false),
     FlatAddressSpace(false),
     FlatInstOffsets(false),
     FlatGlobalInsts(false),
     FlatScratchInsts(false),
+    ScalarFlatScratchInsts(false),
     AddNoCarryInsts(false),
     HasUnpackedD16VMem(false),
+    LDSMisalignedBug(false),
+    HasMFMAInlineLiteralBug(false),
 
     ScalarizeGlobal(false),
+
+    HasVcmpxPermlaneHazard(false),
+    HasVMEMtoScalarWriteHazard(false),
+    HasSMEMtoVectorWriteHazard(false),
+    HasInstFwdPrefetchBug(false),
+    HasVcmpxExecWARHazard(false),
+    HasLdsBranchVmemWARHazard(false),
+    HasNSAtoVMEMBug(false),
+    HasOffset3fBug(false),
+    HasFlatSegmentOffsetBug(false),
 
     FeatureDisable(false),
     InstrInfo(initializeSubtargetDependencies(TT, GPU, FS)),
     TLInfo(TM, *this),
     FrameLowering(TargetFrameLowering::StackGrowsUp, getStackAlignment(), 0) {
+  MaxWavesPerEU = AMDGPU::IsaInfo::getMaxWavesPerEU(this);
   CallLoweringInfo.reset(new AMDGPUCallLowering(*getTargetLowering()));
   Legalizer.reset(new AMDGPULegalizerInfo(*this, TM));
   RegBankInfo.reset(new AMDGPURegisterBankInfo(*getRegisterInfo()));
   InstSelector.reset(new AMDGPUInstructionSelector(
   *this, *static_cast<AMDGPURegisterBankInfo *>(RegBankInfo.get()), TM));
+}
+
+unsigned GCNSubtarget::getConstantBusLimit(unsigned Opcode) const {
+  if (getGeneration() < GFX10)
+    return 1;
+
+  switch (Opcode) {
+  case AMDGPU::V_LSHLREV_B64:
+  case AMDGPU::V_LSHLREV_B64_gfx10:
+  case AMDGPU::V_LSHL_B64:
+  case AMDGPU::V_LSHRREV_B64:
+  case AMDGPU::V_LSHRREV_B64_gfx10:
+  case AMDGPU::V_LSHR_B64:
+  case AMDGPU::V_ASHRREV_I64:
+  case AMDGPU::V_ASHRREV_I64_gfx10:
+  case AMDGPU::V_ASHR_I64:
+    return 1;
+  }
+
+  return 2;
 }
 
 unsigned AMDGPUSubtarget::getMaxLocalMemSizeWithWaveCount(unsigned NWaves,
@@ -243,6 +314,8 @@ unsigned AMDGPUSubtarget::getMaxLocalMemSizeWithWaveCount(unsigned NWaves,
     return getLocalMemorySize();
   unsigned WorkGroupSize = getFlatWorkGroupSizes(F).second;
   unsigned WorkGroupsPerCu = getMaxWorkGroupsPerCU(WorkGroupSize);
+  if (!WorkGroupsPerCu)
+    return 0;
   unsigned MaxWaves = getMaxWavesPerEU();
   return getLocalMemorySize() * MaxWaves / WorkGroupsPerCu / NWaves;
 }
@@ -251,6 +324,8 @@ unsigned AMDGPUSubtarget::getOccupancyWithLocalMemSize(uint32_t Bytes,
   const Function &F) const {
   unsigned WorkGroupSize = getFlatWorkGroupSizes(F).second;
   unsigned WorkGroupsPerCu = getMaxWorkGroupsPerCU(WorkGroupSize);
+  if (!WorkGroupsPerCu)
+    return 0;
   unsigned MaxWaves = getMaxWavesPerEU();
   unsigned Limit = getLocalMemorySize() * MaxWaves / WorkGroupsPerCu;
   unsigned NumWaves = Limit / (Bytes ? Bytes : 1u);
@@ -271,7 +346,8 @@ AMDGPUSubtarget::getDefaultFlatWorkGroupSize(CallingConv::ID CC) const {
   case CallingConv::AMDGPU_CS:
   case CallingConv::AMDGPU_KERNEL:
   case CallingConv::SPIR_KERNEL:
-    return std::make_pair(getWavefrontSize() * 2, getWavefrontSize() * 4);
+    return std::make_pair(getWavefrontSize() * 2,
+                          std::max(getWavefrontSize() * 4, 256u));
   case CallingConv::AMDGPU_VS:
   case CallingConv::AMDGPU_LS:
   case CallingConv::AMDGPU_HS:
@@ -290,12 +366,6 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getFlatWorkGroupSizes(
   // Default minimum/maximum flat work group sizes.
   std::pair<unsigned, unsigned> Default =
     getDefaultFlatWorkGroupSize(F.getCallingConv());
-
-  // TODO: Do not process "amdgpu-max-work-group-size" attribute once mesa
-  // starts using "amdgpu-flat-work-group-size" attribute.
-  Default.second = AMDGPU::getIntegerAttribute(
-    F, "amdgpu-max-work-group-size", Default.second);
-  Default.first = std::min(Default.first, Default.second);
 
   // Requested minimum/maximum flat work group sizes.
   std::pair<unsigned, unsigned> Requested = AMDGPU::getIntegerPairAttribute(
@@ -330,10 +400,7 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getWavesPerEU(
     getMaxWavesPerEU(FlatWorkGroupSizes.second);
   bool RequestedFlatWorkGroupSize = false;
 
-  // TODO: Do not process "amdgpu-max-work-group-size" attribute once mesa
-  // starts using "amdgpu-flat-work-group-size" attribute.
-  if (F.hasFnAttribute("amdgpu-max-work-group-size") ||
-      F.hasFnAttribute("amdgpu-flat-work-group-size")) {
+  if (F.hasFnAttribute("amdgpu-flat-work-group-size")) {
     Default.first = MinImpliedByFlatWorkGroupSize;
     RequestedFlatWorkGroupSize = true;
   }
@@ -496,7 +563,14 @@ void GCNSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
     Policy.ShouldTrackLaneMasks = true;
 }
 
+bool GCNSubtarget::hasMadF16() const {
+  return InstrInfo.pseudoToMCOpcode(AMDGPU::V_MAD_F16) != -1;
+}
+
 unsigned GCNSubtarget::getOccupancyWithNumSGPRs(unsigned SGPRs) const {
+  if (getGeneration() >= AMDGPUSubtarget::GFX10)
+    return getMaxWavesPerEU();
+
   if (getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS) {
     if (SGPRs <= 80)
       return 10;
@@ -520,29 +594,19 @@ unsigned GCNSubtarget::getOccupancyWithNumSGPRs(unsigned SGPRs) const {
 }
 
 unsigned GCNSubtarget::getOccupancyWithNumVGPRs(unsigned VGPRs) const {
-  if (VGPRs <= 24)
-    return 10;
-  if (VGPRs <= 28)
-    return 9;
-  if (VGPRs <= 32)
-    return 8;
-  if (VGPRs <= 36)
-    return 7;
-  if (VGPRs <= 40)
-    return 6;
-  if (VGPRs <= 48)
-    return 5;
-  if (VGPRs <= 64)
-    return 4;
-  if (VGPRs <= 84)
-    return 3;
-  if (VGPRs <= 128)
-    return 2;
-  return 1;
+  unsigned MaxWaves = getMaxWavesPerEU();
+  unsigned Granule = getVGPRAllocGranule();
+  if (VGPRs < Granule)
+    return MaxWaves;
+  unsigned RoundedRegs = ((VGPRs + Granule - 1) / Granule) * Granule;
+  return std::min(getTotalNumVGPRs() / RoundedRegs, MaxWaves);
 }
 
 unsigned GCNSubtarget::getReservedNumSGPRs(const MachineFunction &MF) const {
   const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+  if (getGeneration() >= AMDGPUSubtarget::GFX10)
+    return 2; // VCC. FLAT_SCRATCH and XNACK are no longer in SGPRs.
+
   if (MFI.hasFlatScratchInit()) {
     if (getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
       return 6; // FLAT_SCRATCH, XNACK, VCC (in that order).
@@ -553,6 +617,20 @@ unsigned GCNSubtarget::getReservedNumSGPRs(const MachineFunction &MF) const {
   if (isXNACKEnabled())
     return 4; // XNACK, VCC (in that order).
   return 2; // VCC.
+}
+
+unsigned GCNSubtarget::computeOccupancy(const MachineFunction &MF,
+                                        unsigned LDSSize,
+                                        unsigned NumSGPRs,
+                                        unsigned NumVGPRs) const {
+  unsigned Occupancy =
+    std::min(getMaxWavesPerEU(),
+             getOccupancyWithLocalMemSize(LDSSize, MF.getFunction()));
+  if (NumSGPRs)
+    Occupancy = std::min(Occupancy, getOccupancyWithNumSGPRs(NumSGPRs));
+  if (NumVGPRs)
+    Occupancy = std::min(Occupancy, getOccupancyWithNumVGPRs(NumVGPRs));
+  return Occupancy;
 }
 
 unsigned GCNSubtarget::getMaxNumSGPRs(const MachineFunction &MF) const {
@@ -682,11 +760,130 @@ struct MemOpClusterMutation : ScheduleDAGMutation {
     }
   }
 };
+
+struct FillMFMAShadowMutation : ScheduleDAGMutation {
+  const SIInstrInfo *TII;
+
+  ScheduleDAGMI *DAG;
+
+  FillMFMAShadowMutation(const SIInstrInfo *tii) : TII(tii) {}
+
+  bool isSALU(const SUnit *SU) const {
+    const MachineInstr *MI = SU->getInstr();
+    return MI && TII->isSALU(*MI) && !MI->isTerminator();
+  }
+
+  bool canAddEdge(const SUnit *Succ, const SUnit *Pred) const {
+    if (Pred->NodeNum < Succ->NodeNum)
+      return true;
+
+    SmallVector<const SUnit*, 64> Succs({Succ}), Preds({Pred});
+
+    for (unsigned I = 0; I < Succs.size(); ++I) {
+      for (const SDep &SI : Succs[I]->Succs) {
+        const SUnit *SU = SI.getSUnit();
+        if (SU != Succs[I] && llvm::find(Succs, SU) == Succs.end())
+          Succs.push_back(SU);
+      }
+    }
+
+    SmallPtrSet<const SUnit*, 32> Visited;
+    while (!Preds.empty()) {
+      const SUnit *SU = Preds.pop_back_val();
+      if (llvm::find(Succs, SU) != Succs.end())
+        return false;
+      Visited.insert(SU);
+      for (const SDep &SI : SU->Preds)
+        if (SI.getSUnit() != SU && !Visited.count(SI.getSUnit()))
+          Preds.push_back(SI.getSUnit());
+    }
+
+    return true;
+  }
+
+  // Link as much SALU intructions in chain as possible. Return the size
+  // of the chain. Links up to MaxChain instructions.
+  unsigned linkSALUChain(SUnit *From, SUnit *To, unsigned MaxChain,
+                         SmallPtrSetImpl<SUnit *> &Visited) const {
+    SmallVector<SUnit *, 8> Worklist({To});
+    unsigned Linked = 0;
+
+    while (!Worklist.empty() && MaxChain-- > 0) {
+      SUnit *SU = Worklist.pop_back_val();
+      if (!Visited.insert(SU).second)
+        continue;
+
+      LLVM_DEBUG(dbgs() << "Inserting edge from\n" ; DAG->dumpNode(*From);
+                 dbgs() << "to\n"; DAG->dumpNode(*SU); dbgs() << '\n');
+
+      if (SU->addPred(SDep(From, SDep::Artificial), false))
+        ++Linked;
+
+      for (SDep &SI : From->Succs) {
+        SUnit *SUv = SI.getSUnit();
+        if (SUv != From && TII->isVALU(*SUv->getInstr()) && canAddEdge(SUv, SU))
+          SUv->addPred(SDep(SU, SDep::Artificial), false);
+      }
+
+      for (SDep &SI : SU->Succs) {
+        SUnit *Succ = SI.getSUnit();
+        if (Succ != SU && isSALU(Succ) && canAddEdge(From, Succ))
+          Worklist.push_back(Succ);
+      }
+    }
+
+    return Linked;
+  }
+
+  void apply(ScheduleDAGInstrs *DAGInstrs) override {
+    const GCNSubtarget &ST = DAGInstrs->MF.getSubtarget<GCNSubtarget>();
+    if (!ST.hasMAIInsts() || DisablePowerSched)
+      return;
+    DAG = static_cast<ScheduleDAGMI*>(DAGInstrs);
+    const TargetSchedModel *TSchedModel = DAGInstrs->getSchedModel();
+    if (!TSchedModel || DAG->SUnits.empty())
+      return;
+
+    // Scan for MFMA long latency instructions and try to add a dependency
+    // of available SALU instructions to give them a chance to fill MFMA
+    // shadow. That is desirable to fill MFMA shadow with SALU instructions
+    // rather than VALU to prevent power consumption bursts and throttle.
+    auto LastSALU = DAG->SUnits.begin();
+    auto E = DAG->SUnits.end();
+    SmallPtrSet<SUnit*, 32> Visited;
+    for (SUnit &SU : DAG->SUnits) {
+      MachineInstr &MAI = *SU.getInstr();
+      if (!TII->isMAI(MAI) ||
+           MAI.getOpcode() == AMDGPU::V_ACCVGPR_WRITE_B32 ||
+           MAI.getOpcode() == AMDGPU::V_ACCVGPR_READ_B32)
+        continue;
+
+      unsigned Lat = TSchedModel->computeInstrLatency(&MAI) - 1;
+
+      LLVM_DEBUG(dbgs() << "Found MFMA: "; DAG->dumpNode(SU);
+                 dbgs() << "Need " << Lat
+                        << " instructions to cover latency.\n");
+
+      // Find up to Lat independent scalar instructions as early as
+      // possible such that they can be scheduled after this MFMA.
+      for ( ; Lat && LastSALU != E; ++LastSALU) {
+        if (Visited.count(&*LastSALU))
+          continue;
+
+        if (!isSALU(&*LastSALU) || !canAddEdge(&*LastSALU, &SU))
+          continue;
+
+        Lat -= linkSALUChain(&SU, &*LastSALU, Lat, Visited);
+      }
+    }
+  }
+};
 } // namespace
 
 void GCNSubtarget::getPostRAMutations(
     std::vector<std::unique_ptr<ScheduleDAGMutation>> &Mutations) const {
-  Mutations.push_back(llvm::make_unique<MemOpClusterMutation>(&InstrInfo));
+  Mutations.push_back(std::make_unique<MemOpClusterMutation>(&InstrInfo));
+  Mutations.push_back(std::make_unique<FillMFMAShadowMutation>(&InstrInfo));
 }
 
 const AMDGPUSubtarget &AMDGPUSubtarget::get(const MachineFunction &MF) {

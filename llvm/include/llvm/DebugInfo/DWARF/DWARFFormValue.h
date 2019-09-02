@@ -70,7 +70,7 @@ public:
   static DWARFFormValue createFromBlockValue(dwarf::Form F,
                                              ArrayRef<uint8_t> D);
   static DWARFFormValue createFromUnit(dwarf::Form F, const DWARFUnit *Unit,
-                                       uint32_t *OffsetPtr);
+                                       uint64_t *OffsetPtr);
 
   dwarf::Form getForm() const { return Form; }
   uint64_t getRawUValue() const { return Value.uval; }
@@ -87,12 +87,12 @@ public:
   /// in \p FormParams is needed to interpret some forms. The optional
   /// \p Context and \p Unit allows extracting information if the form refers
   /// to other sections (e.g., .debug_str).
-  bool extractValue(const DWARFDataExtractor &Data, uint32_t *OffsetPtr,
+  bool extractValue(const DWARFDataExtractor &Data, uint64_t *OffsetPtr,
                     dwarf::FormParams FormParams,
                     const DWARFContext *Context = nullptr,
                     const DWARFUnit *Unit = nullptr);
 
-  bool extractValue(const DWARFDataExtractor &Data, uint32_t *OffsetPtr,
+  bool extractValue(const DWARFDataExtractor &Data, uint64_t *OffsetPtr,
                     dwarf::FormParams FormParams, const DWARFUnit *U) {
     return extractValue(Data, OffsetPtr, FormParams, nullptr, U);
   }
@@ -104,6 +104,11 @@ public:
   /// getAsFoo functions below return the extracted value as Foo if only
   /// DWARFFormValue has form class is suitable for representing Foo.
   Optional<uint64_t> getAsReference() const;
+  struct UnitOffset {
+    DWARFUnit *Unit;
+    uint64_t Offset;
+  };
+  Optional<UnitOffset> getAsRelativeReference() const;
   Optional<uint64_t> getAsUnsignedConstant() const;
   Optional<int64_t> getAsSignedConstant() const;
   Optional<const char *> getAsCString() const;
@@ -123,7 +128,7 @@ public:
   /// \param OffsetPtr A reference to the offset that will be updated.
   /// \param Params DWARF parameters to help interpret forms.
   /// \returns true on success, false if the form was not skipped.
-  bool skipValue(DataExtractor DebugInfoData, uint32_t *OffsetPtr,
+  bool skipValue(DataExtractor DebugInfoData, uint64_t *OffsetPtr,
                  const dwarf::FormParams Params) const {
     return DWARFFormValue::skipValue(Form, DebugInfoData, OffsetPtr, Params);
   }
@@ -139,7 +144,7 @@ public:
   /// \param FormParams DWARF parameters to help interpret forms.
   /// \returns true on success, false if the form was not skipped.
   static bool skipValue(dwarf::Form Form, DataExtractor DebugInfoData,
-                        uint32_t *OffsetPtr,
+                        uint64_t *OffsetPtr,
                         const dwarf::FormParams FormParams);
 
 private:
@@ -157,6 +162,19 @@ inline Optional<const char *> toString(const Optional<DWARFFormValue> &V) {
   if (V)
     return V->getAsCString();
   return None;
+}
+
+/// Take an optional DWARFFormValue and try to extract a string value from it.
+///
+/// \param V and optional DWARFFormValue to attempt to extract the value from.
+/// \returns an optional value that contains a value if the form value
+/// was valid and was a string.
+inline StringRef toStringRef(const Optional<DWARFFormValue> &V,
+                             StringRef Default = {}) {
+  if (V)
+    if (auto S = V->getAsCString())
+      return *S;
+  return Default;
 }
 
 /// Take an optional DWARFFormValue and extract a string value from it.

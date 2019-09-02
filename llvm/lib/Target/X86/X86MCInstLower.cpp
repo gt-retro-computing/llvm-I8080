@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstPrinter/X86ATTInstPrinter.h"
-#include "InstPrinter/X86InstComments.h"
+#include "MCTargetDesc/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86InstComments.h"
 #include "MCTargetDesc/X86TargetStreamer.h"
 #include "Utils/X86ShuffleDecode.h"
 #include "X86AsmPrinter.h"
@@ -427,6 +427,41 @@ X86MCInstLower::LowerMachineOperand(const MachineInstr *MI,
   }
 }
 
+// Replace TAILJMP opcodes with their equivalent opcodes that have encoding
+// information.
+static unsigned convertTailJumpOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case X86::TAILJMPr:
+    Opcode = X86::JMP32r;
+    break;
+  case X86::TAILJMPm:
+    Opcode = X86::JMP32m;
+    break;
+  case X86::TAILJMPr64:
+    Opcode = X86::JMP64r;
+    break;
+  case X86::TAILJMPm64:
+    Opcode = X86::JMP64m;
+    break;
+  case X86::TAILJMPr64_REX:
+    Opcode = X86::JMP64r_REX;
+    break;
+  case X86::TAILJMPm64_REX:
+    Opcode = X86::JMP64m_REX;
+    break;
+  case X86::TAILJMPd:
+  case X86::TAILJMPd64:
+    Opcode = X86::JMP_1;
+    break;
+  case X86::TAILJMPd_CC:
+  case X86::TAILJMPd64_CC:
+    Opcode = X86::JCC_1;
+    break;
+  }
+
+  return Opcode;
+}
+
 void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(MI->getOpcode());
 
@@ -500,20 +535,14 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
     break;
   }
 
-  // TAILJMPr64, CALL64r, CALL64pcrel32 - These instructions have register
-  // inputs modeled as normal uses instead of implicit uses.  As such, truncate
-  // off all but the first operand (the callee).  FIXME: Change isel.
-  case X86::TAILJMPr64:
-  case X86::TAILJMPr64_REX:
+  // CALL64r, CALL64pcrel32 - These instructions used to have
+  // register inputs modeled as normal uses instead of implicit uses.  As such,
+  // they we used to truncate off all but the first operand (the callee). This
+  // issue seems to have been fixed at some point. This assert verifies that.
   case X86::CALL64r:
-  case X86::CALL64pcrel32: {
-    unsigned Opcode = OutMI.getOpcode();
-    MCOperand Saved = OutMI.getOperand(0);
-    OutMI = MCInst();
-    OutMI.setOpcode(Opcode);
-    OutMI.addOperand(Saved);
+  case X86::CALL64pcrel32:
+    assert(OutMI.getNumOperands() == 1 && "Unexpected number of operands!");
     break;
-  }
 
   case X86::EH_RETURN:
   case X86::EH_RETURN64: {
@@ -539,36 +568,30 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
     break;
   }
 
-    // TAILJMPd, TAILJMPd64, TailJMPd_cc - Lower to the correct jump
-    // instruction.
-    {
-      unsigned Opcode;
-    case X86::TAILJMPr:
-      Opcode = X86::JMP32r;
-      goto SetTailJmpOpcode;
-    case X86::TAILJMPd:
-    case X86::TAILJMPd64:
-      Opcode = X86::JMP_1;
-      goto SetTailJmpOpcode;
-
-    SetTailJmpOpcode:
-      MCOperand Saved = OutMI.getOperand(0);
-      OutMI = MCInst();
-      OutMI.setOpcode(Opcode);
-      OutMI.addOperand(Saved);
-      break;
-    }
+  // TAILJMPd, TAILJMPd64, TailJMPd_cc - Lower to the correct jump
+  // instruction.
+  case X86::TAILJMPr:
+  case X86::TAILJMPr64:
+  case X86::TAILJMPr64_REX:
+  case X86::TAILJMPd:
+  case X86::TAILJMPd64:
+    assert(OutMI.getNumOperands() == 1 && "Unexpected number of operands!");
+    OutMI.setOpcode(convertTailJumpOpcode(OutMI.getOpcode()));
+    break;
 
   case X86::TAILJMPd_CC:
-  case X86::TAILJMPd64_CC: {
-    MCOperand Saved = OutMI.getOperand(0);
-    MCOperand Saved2 = OutMI.getOperand(1);
-    OutMI = MCInst();
-    OutMI.setOpcode(X86::JCC_1);
-    OutMI.addOperand(Saved);
-    OutMI.addOperand(Saved2);
+  case X86::TAILJMPd64_CC:
+    assert(OutMI.getNumOperands() == 2 && "Unexpected number of operands!");
+    OutMI.setOpcode(convertTailJumpOpcode(OutMI.getOpcode()));
     break;
-  }
+
+  case X86::TAILJMPm:
+  case X86::TAILJMPm64:
+  case X86::TAILJMPm64_REX:
+    assert(OutMI.getNumOperands() == X86::AddrNumOperands &&
+           "Unexpected number of operands!");
+    OutMI.setOpcode(convertTailJumpOpcode(OutMI.getOpcode()));
+    break;
 
   case X86::DEC16r:
   case X86::DEC32r:
@@ -683,16 +706,9 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
 
 void X86AsmPrinter::LowerTlsAddr(X86MCInstLower &MCInstLowering,
                                  const MachineInstr &MI) {
-
-  bool is64Bits = MI.getOpcode() == X86::TLS_addr64 ||
+  bool Is64Bits = MI.getOpcode() == X86::TLS_addr64 ||
                   MI.getOpcode() == X86::TLS_base_addr64;
-
-  bool needsPadding = MI.getOpcode() == X86::TLS_addr64;
-
-  MCContext &context = OutStreamer->getContext();
-
-  if (needsPadding)
-    EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
+  MCContext &Ctx = OutStreamer->getContext();
 
   MCSymbolRefExpr::VariantKind SRVK;
   switch (MI.getOpcode()) {
@@ -710,51 +726,86 @@ void X86AsmPrinter::LowerTlsAddr(X86MCInstLower &MCInstLowering,
     llvm_unreachable("unexpected opcode");
   }
 
-  MCSymbol *sym = MCInstLowering.GetSymbolFromOperand(MI.getOperand(3));
-  const MCSymbolRefExpr *symRef = MCSymbolRefExpr::create(sym, SRVK, context);
+  const MCSymbolRefExpr *Sym = MCSymbolRefExpr::create(
+      MCInstLowering.GetSymbolFromOperand(MI.getOperand(3)), SRVK, Ctx);
 
-  MCInst LEA;
-  if (is64Bits) {
-    LEA.setOpcode(X86::LEA64r);
-    LEA.addOperand(MCOperand::createReg(X86::RDI)); // dest
-    LEA.addOperand(MCOperand::createReg(X86::RIP)); // base
-    LEA.addOperand(MCOperand::createImm(1));        // scale
-    LEA.addOperand(MCOperand::createReg(0));        // index
-    LEA.addOperand(MCOperand::createExpr(symRef));  // disp
-    LEA.addOperand(MCOperand::createReg(0));        // seg
-  } else if (SRVK == MCSymbolRefExpr::VK_TLSLDM) {
-    LEA.setOpcode(X86::LEA32r);
-    LEA.addOperand(MCOperand::createReg(X86::EAX)); // dest
-    LEA.addOperand(MCOperand::createReg(X86::EBX)); // base
-    LEA.addOperand(MCOperand::createImm(1));        // scale
-    LEA.addOperand(MCOperand::createReg(0));        // index
-    LEA.addOperand(MCOperand::createExpr(symRef));  // disp
-    LEA.addOperand(MCOperand::createReg(0));        // seg
+  // As of binutils 2.32, ld has a bogus TLS relaxation error when the GD/LD
+  // code sequence using R_X86_64_GOTPCREL (instead of R_X86_64_GOTPCRELX) is
+  // attempted to be relaxed to IE/LE (binutils PR24784). Work around the bug by
+  // only using GOT when GOTPCRELX is enabled.
+  // TODO Delete the workaround when GOTPCRELX becomes commonplace.
+  bool UseGot = MMI->getModule()->getRtLibUseGOT() &&
+                Ctx.getAsmInfo()->canRelaxRelocations();
+
+  if (Is64Bits) {
+    bool NeedsPadding = SRVK == MCSymbolRefExpr::VK_TLSGD;
+    if (NeedsPadding)
+      EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
+    EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+                                .addReg(X86::RDI)
+                                .addReg(X86::RIP)
+                                .addImm(1)
+                                .addReg(0)
+                                .addExpr(Sym)
+                                .addReg(0));
+    const MCSymbol *TlsGetAddr = Ctx.getOrCreateSymbol("__tls_get_addr");
+    if (NeedsPadding) {
+      if (!UseGot)
+        EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
+      EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
+      EmitAndCountInstruction(MCInstBuilder(X86::REX64_PREFIX));
+    }
+    if (UseGot) {
+      const MCExpr *Expr = MCSymbolRefExpr::create(
+          TlsGetAddr, MCSymbolRefExpr::VK_GOTPCREL, Ctx);
+      EmitAndCountInstruction(MCInstBuilder(X86::CALL64m)
+                                  .addReg(X86::RIP)
+                                  .addImm(1)
+                                  .addReg(0)
+                                  .addExpr(Expr)
+                                  .addReg(0));
+    } else {
+      EmitAndCountInstruction(
+          MCInstBuilder(X86::CALL64pcrel32)
+              .addExpr(MCSymbolRefExpr::create(TlsGetAddr,
+                                               MCSymbolRefExpr::VK_PLT, Ctx)));
+    }
   } else {
-    LEA.setOpcode(X86::LEA32r);
-    LEA.addOperand(MCOperand::createReg(X86::EAX)); // dest
-    LEA.addOperand(MCOperand::createReg(0));        // base
-    LEA.addOperand(MCOperand::createImm(1));        // scale
-    LEA.addOperand(MCOperand::createReg(X86::EBX)); // index
-    LEA.addOperand(MCOperand::createExpr(symRef));  // disp
-    LEA.addOperand(MCOperand::createReg(0));        // seg
+    if (SRVK == MCSymbolRefExpr::VK_TLSGD && !UseGot) {
+      EmitAndCountInstruction(MCInstBuilder(X86::LEA32r)
+                                  .addReg(X86::EAX)
+                                  .addReg(0)
+                                  .addImm(1)
+                                  .addReg(X86::EBX)
+                                  .addExpr(Sym)
+                                  .addReg(0));
+    } else {
+      EmitAndCountInstruction(MCInstBuilder(X86::LEA32r)
+                                  .addReg(X86::EAX)
+                                  .addReg(X86::EBX)
+                                  .addImm(1)
+                                  .addReg(0)
+                                  .addExpr(Sym)
+                                  .addReg(0));
+    }
+
+    const MCSymbol *TlsGetAddr = Ctx.getOrCreateSymbol("___tls_get_addr");
+    if (UseGot) {
+      const MCExpr *Expr =
+          MCSymbolRefExpr::create(TlsGetAddr, MCSymbolRefExpr::VK_GOT, Ctx);
+      EmitAndCountInstruction(MCInstBuilder(X86::CALL32m)
+                                  .addReg(X86::EBX)
+                                  .addImm(1)
+                                  .addReg(0)
+                                  .addExpr(Expr)
+                                  .addReg(0));
+    } else {
+      EmitAndCountInstruction(
+          MCInstBuilder(X86::CALLpcrel32)
+              .addExpr(MCSymbolRefExpr::create(TlsGetAddr,
+                                               MCSymbolRefExpr::VK_PLT, Ctx)));
+    }
   }
-  EmitAndCountInstruction(LEA);
-
-  if (needsPadding) {
-    EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
-    EmitAndCountInstruction(MCInstBuilder(X86::DATA16_PREFIX));
-    EmitAndCountInstruction(MCInstBuilder(X86::REX64_PREFIX));
-  }
-
-  StringRef name = is64Bits ? "__tls_get_addr" : "___tls_get_addr";
-  MCSymbol *tlsGetAddr = context.getOrCreateSymbol(name);
-  const MCSymbolRefExpr *tlsRef =
-      MCSymbolRefExpr::create(tlsGetAddr, MCSymbolRefExpr::VK_PLT, context);
-
-  EmitAndCountInstruction(
-      MCInstBuilder(is64Bits ? X86::CALL64pcrel32 : X86::CALLpcrel32)
-          .addExpr(tlsRef));
 }
 
 /// Emit the largest nop instruction smaller than or equal to \p NumBytes
@@ -767,7 +818,7 @@ static unsigned EmitNop(MCStreamer &OS, unsigned NumBytes, bool Is64Bit,
 
   unsigned NopSize;
   unsigned Opc, BaseReg, ScaleVal, IndexReg, Displacement, SegmentReg;
-  Opc = IndexReg = Displacement = SegmentReg = 0;
+  IndexReg = Displacement = SegmentReg = 0;
   BaseReg = X86::RAX;
   ScaleVal = 1;
   switch (NumBytes) {
@@ -930,7 +981,7 @@ void X86AsmPrinter::LowerFAULTING_OP(const MachineInstr &FaultingMI,
   // FAULTING_LOAD_OP <def>, <faltinf type>, <MBB handler>,
   //                  <opcode>, <operands>
 
-  unsigned DefRegister = FaultingMI.getOperand(0).getReg();
+  Register DefRegister = FaultingMI.getOperand(0).getReg();
   FaultMaps::FaultKind FK =
       static_cast<FaultMaps::FaultKind>(FaultingMI.getOperand(1).getImm());
   MCSymbol *HandlerLabel = FaultingMI.getOperand(2).getMBB()->getSymbol();
@@ -1051,7 +1102,7 @@ void X86AsmPrinter::LowerPATCHPOINT(const MachineInstr &MI,
 
     // Emit MOV to materialize the target address and the CALL to target.
     // This is encoded with 12-13 bytes, depending on which register is used.
-    unsigned ScratchReg = MI.getOperand(ScratchIdx).getReg();
+    Register ScratchReg = MI.getOperand(ScratchIdx).getReg();
     if (X86II::isX86_64ExtendedReg(ScratchReg))
       EncodedBytes = 13;
     else
@@ -1341,6 +1392,7 @@ void X86AsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI,
   recordSled(CurSled, MI, SledKind::TAIL_CALL);
 
   unsigned OpCode = MI.getOperand(0).getImm();
+  OpCode = convertTailJumpOpcode(OpCode);
   MCInst TC;
   TC.setOpcode(OpCode);
 
@@ -1364,7 +1416,8 @@ PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
     MBB = MBB->getPrevNode();
     MBBI = MBB->end();
   }
-  return --MBBI;
+  --MBBI;
+  return MBBI;
 }
 
 static const Constant *getConstantFromPool(const MachineInstr &MI,
@@ -1509,8 +1562,6 @@ static void printConstant(const Constant *COp, raw_ostream &CS) {
 void X86AsmPrinter::EmitSEHInstruction(const MachineInstr *MI) {
   assert(MF->hasWinCFI() && "SEH_ instruction in function without WinCFI?");
   assert(getSubtarget().isOSWindows() && "SEH_ instruction Windows only");
-  const X86RegisterInfo *RI =
-      MF->getSubtarget<X86Subtarget>().getRegisterInfo();
 
   // Use the .cv_fpo directives if we're emitting CodeView on 32-bit x86.
   if (EmitFPOData) {
@@ -1548,17 +1599,16 @@ void X86AsmPrinter::EmitSEHInstruction(const MachineInstr *MI) {
   // Otherwise, use the .seh_ directives for all other Windows platforms.
   switch (MI->getOpcode()) {
   case X86::SEH_PushReg:
-    OutStreamer->EmitWinCFIPushReg(
-        RI->getSEHRegNum(MI->getOperand(0).getImm()));
+    OutStreamer->EmitWinCFIPushReg(MI->getOperand(0).getImm());
     break;
 
   case X86::SEH_SaveReg:
-    OutStreamer->EmitWinCFISaveReg(RI->getSEHRegNum(MI->getOperand(0).getImm()),
+    OutStreamer->EmitWinCFISaveReg(MI->getOperand(0).getImm(),
                                    MI->getOperand(1).getImm());
     break;
 
   case X86::SEH_SaveXMM:
-    OutStreamer->EmitWinCFISaveXMM(RI->getSEHRegNum(MI->getOperand(0).getImm()),
+    OutStreamer->EmitWinCFISaveXMM(MI->getOperand(0).getImm(),
                                    MI->getOperand(1).getImm());
     break;
 
@@ -1567,9 +1617,8 @@ void X86AsmPrinter::EmitSEHInstruction(const MachineInstr *MI) {
     break;
 
   case X86::SEH_SetFrame:
-    OutStreamer->EmitWinCFISetFrame(
-        RI->getSEHRegNum(MI->getOperand(0).getImm()),
-        MI->getOperand(1).getImm());
+    OutStreamer->EmitWinCFISetFrame(MI->getOperand(0).getImm(),
+                                    MI->getOperand(1).getImm());
     break;
 
   case X86::SEH_PushFrame:
@@ -1621,7 +1670,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case X86::EH_RETURN:
   case X86::EH_RETURN64: {
     // Lower these as normal, but add some comments.
-    unsigned Reg = MI->getOperand(0).getReg();
+    Register Reg = MI->getOperand(0).getReg();
     OutStreamer->AddComment(StringRef("eh_return, addr: %") +
                             X86ATTInstPrinter::getRegisterName(Reg));
     break;
@@ -1657,6 +1706,73 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case X86::TLS_base_addr32:
   case X86::TLS_base_addr64:
     return LowerTlsAddr(MCInstLowering, *MI);
+
+  // Loading/storing mask pairs requires two kmov operations. The second one of these
+  // needs a 2 byte displacement relative to the specified address (with 32 bit spill
+  // size). The pairs of 1bit masks up to 16 bit masks all use the same spill size,
+  // they all are stored using MASKPAIR16STORE, loaded using MASKPAIR16LOAD.
+  //
+  // The displacement value might wrap around in theory, thus the asserts in both
+  // cases.
+  case X86::MASKPAIR16LOAD: {
+    int64_t Disp = MI->getOperand(1 + X86::AddrDisp).getImm();
+    assert(Disp >= 0 && Disp <= INT32_MAX - 2 && "Unexpected displacement");
+    Register Reg = MI->getOperand(0).getReg();
+    Register Reg0 = RI->getSubReg(Reg, X86::sub_mask_0);
+    Register Reg1 = RI->getSubReg(Reg, X86::sub_mask_1);
+
+    // Load the first mask register
+    MCInstBuilder MIB = MCInstBuilder(X86::KMOVWkm);
+    MIB.addReg(Reg0);
+    for (int i = 0; i < X86::AddrNumOperands; ++i) {
+      auto Op = MCInstLowering.LowerMachineOperand(MI, MI->getOperand(1 + i));
+      MIB.addOperand(Op.getValue());
+    }
+    EmitAndCountInstruction(MIB);
+
+    // Load the second mask register of the pair
+    MIB = MCInstBuilder(X86::KMOVWkm);
+    MIB.addReg(Reg1);
+    for (int i = 0; i < X86::AddrNumOperands; ++i) {
+      if (i == X86::AddrDisp) {
+        MIB.addImm(Disp + 2);
+      } else {
+        auto Op = MCInstLowering.LowerMachineOperand(MI, MI->getOperand(1 + i));
+        MIB.addOperand(Op.getValue());
+      }
+    }
+    EmitAndCountInstruction(MIB);
+    return;
+  }
+
+  case X86::MASKPAIR16STORE: {
+    int64_t Disp = MI->getOperand(X86::AddrDisp).getImm();
+    assert(Disp >= 0 && Disp <= INT32_MAX - 2 && "Unexpected displacement");
+    Register Reg = MI->getOperand(X86::AddrNumOperands).getReg();
+    Register Reg0 = RI->getSubReg(Reg, X86::sub_mask_0);
+    Register Reg1 = RI->getSubReg(Reg, X86::sub_mask_1);
+
+    // Store the first mask register
+    MCInstBuilder MIB = MCInstBuilder(X86::KMOVWmk);
+    for (int i = 0; i < X86::AddrNumOperands; ++i)
+      MIB.addOperand(MCInstLowering.LowerMachineOperand(MI, MI->getOperand(i)).getValue());
+    MIB.addReg(Reg0);
+    EmitAndCountInstruction(MIB);
+
+    // Store the second mask register of the pair
+    MIB = MCInstBuilder(X86::KMOVWmk);
+    for (int i = 0; i < X86::AddrNumOperands; ++i) {
+      if (i == X86::AddrDisp) {
+        MIB.addImm(Disp + 2);
+      } else {
+        auto Op = MCInstLowering.LowerMachineOperand(MI, MI->getOperand(0 + i));
+        MIB.addOperand(Op.getValue());
+      }
+    }
+    MIB.addReg(Reg1);
+    EmitAndCountInstruction(MIB);
+    return;
+  }
 
   case X86::MOVPC32r: {
     // This is a pseudo op for a two instruction sequence with a label, which
@@ -1801,6 +1917,20 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           EmitAndCountInstruction(MCInstBuilder(X86::NOOP));
         break;
       }
+    }
+    return;
+  }
+
+  case X86::SEH_NoReturn: {
+    // Materialize an int3 if this instruction is in the last basic block in the
+    // function. The int3 serves the same purpose as the noop emitted above for
+    // SEH_Epilogue, which is to make the Win64 unwinder happy. If the return
+    // address of the preceding call appears to precede an epilogue or a new
+    // function, then the unwinder may get lost.
+    const MachineBasicBlock *MBB = MI->getParent();
+    const MachineBasicBlock *NextMBB = MBB->getNextNode();
+    if (!NextMBB || NextMBB->isEHPad()) {
+      EmitAndCountInstruction(MCInstBuilder(X86::INT3));
     }
     return;
   }

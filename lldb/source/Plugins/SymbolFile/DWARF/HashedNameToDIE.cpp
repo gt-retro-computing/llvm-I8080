@@ -13,8 +13,7 @@ void DWARFMappedHash::ExtractDIEArray(const DIEInfoArray &die_info_array,
                                       DIEArray &die_offsets) {
   const size_t count = die_info_array.size();
   for (size_t i = 0; i < count; ++i)
-    die_offsets.emplace_back(die_info_array[i].cu_offset,
-                             die_info_array[i].offset);
+    die_offsets.emplace_back(die_info_array[i]);
 }
 
 void DWARFMappedHash::ExtractDIEArray(const DIEInfoArray &die_info_array,
@@ -33,8 +32,7 @@ void DWARFMappedHash::ExtractDIEArray(const DIEInfoArray &die_info_array,
               tag == DW_TAG_structure_type || tag == DW_TAG_class_type;
       }
       if (tag_matches)
-        die_offsets.emplace_back(die_info_array[i].cu_offset,
-                                 die_info_array[i].offset);
+        die_offsets.emplace_back(die_info_array[i]);
     }
   }
 }
@@ -58,8 +56,7 @@ void DWARFMappedHash::ExtractDIEArray(const DIEInfoArray &die_info_array,
               tag == DW_TAG_structure_type || tag == DW_TAG_class_type;
       }
       if (tag_matches)
-        die_offsets.emplace_back(die_info_array[i].cu_offset,
-                                 die_info_array[i].offset);
+        die_offsets.emplace_back(die_info_array[i]);
     }
   }
 }
@@ -77,17 +74,14 @@ void DWARFMappedHash::ExtractClassOrStructDIEArray(
           // We found the one true definition for this class, so only return
           // that
           die_offsets.clear();
-          die_offsets.emplace_back(die_info_array[i].cu_offset,
-                                   die_info_array[i].offset);
+          die_offsets.emplace_back(die_info_array[i]);
           return;
         } else {
           // Put the one true definition as the first entry so it matches first
-          die_offsets.emplace(die_offsets.begin(), die_info_array[i].cu_offset,
-                              die_info_array[i].offset);
+          die_offsets.emplace(die_offsets.begin(), die_info_array[i]);
         }
       } else {
-        die_offsets.emplace_back(die_info_array[i].cu_offset,
-                                 die_info_array[i].offset);
+        die_offsets.emplace_back(die_info_array[i]);
       }
     }
   }
@@ -99,8 +93,7 @@ void DWARFMappedHash::ExtractTypesFromDIEArray(
   const size_t count = die_info_array.size();
   for (size_t i = 0; i < count; ++i) {
     if ((die_info_array[i].type_flags & type_flag_mask) == type_flag_value)
-      die_offsets.emplace_back(die_info_array[i].cu_offset,
-                               die_info_array[i].offset);
+      die_offsets.emplace_back(die_info_array[i]);
   }
 }
 
@@ -124,19 +117,15 @@ const char *DWARFMappedHash::GetAtomTypeName(uint16_t atom) {
   return "<invalid>";
 }
 
-DWARFMappedHash::DIEInfo::DIEInfo()
-    : cu_offset(DW_INVALID_OFFSET), offset(DW_INVALID_OFFSET), tag(0),
-      type_flags(0), qualified_name_hash(0) {}
-
-DWARFMappedHash::DIEInfo::DIEInfo(dw_offset_t c, dw_offset_t o, dw_tag_t t,
-                                  uint32_t f, uint32_t h)
-    : cu_offset(c), offset(o), tag(t), type_flags(f), qualified_name_hash(h) {}
+DWARFMappedHash::DIEInfo::DIEInfo(dw_offset_t o, dw_tag_t t, uint32_t f,
+                                  uint32_t h)
+    : die_offset(o), tag(t), type_flags(f), qualified_name_hash(h) {}
 
 DWARFMappedHash::Prologue::Prologue(dw_offset_t _die_base_offset)
     : die_base_offset(_die_base_offset), atoms(), atom_mask(0),
       min_hash_data_byte_size(0), hash_data_has_fixed_byte_size(true) {
   // Define an array of DIE offsets by first defining an array, and then define
-  // the atom type for the array, in this case we have an array of DIE offsets
+  // the atom type for the array, in this case we have an array of DIE offsets.
   AppendAtom(eAtomTypeDIEOffset, DW_FORM_data4);
 }
 
@@ -219,9 +208,10 @@ DWARFMappedHash::Prologue::Read(const lldb_private::DataExtractor &data,
 
   const uint32_t atom_count = data.GetU32(&offset);
   if (atom_count == 0x00060003u) {
-    // Old format, deal with contents of old pre-release format
-    while (data.GetU32(&offset))
+    // Old format, deal with contents of old pre-release format.
+    while (data.GetU32(&offset)) {
       /* do nothing */;
+    }
 
     // Hardcode to the only known value for now.
     AppendAtom(eAtomTypeDIEOffset, DW_FORM_data4);
@@ -237,7 +227,7 @@ DWARFMappedHash::Prologue::Read(const lldb_private::DataExtractor &data,
 
 size_t DWARFMappedHash::Prologue::GetByteSize() const {
   // Add an extra count to the atoms size for the zero termination Atom that
-  // gets written to disk
+  // gets written to disk.
   return sizeof(die_base_offset) + sizeof(uint32_t) +
          atoms.size() * sizeof(Atom);
 }
@@ -271,14 +261,14 @@ bool DWARFMappedHash::Header::Read(const lldb_private::DWARFDataExtractor &data,
     return false;
 
   for (size_t i = 0; i < num_atoms; ++i) {
-    DWARFFormValue form_value(NULL, header_data.atoms[i].form);
+    DWARFFormValue form_value(nullptr, header_data.atoms[i].form);
 
     if (!form_value.ExtractValue(data, offset_ptr))
       return false;
 
     switch (header_data.atoms[i].type) {
     case eAtomTypeDIEOffset: // DIE offset, check form for encoding
-      hash_data.offset =
+      hash_data.die_offset =
           DWARFFormValue::IsDataForm(form_value.Form())
               ? form_value.Unsigned()
               : form_value.Reference(header_data.die_base_offset);
@@ -297,11 +287,11 @@ bool DWARFMappedHash::Header::Read(const lldb_private::DWARFDataExtractor &data,
       break;
 
     default:
-      // We can always skip atoms we don't know about
+      // We can always skip atoms we don't know about.
       break;
     }
   }
-  return true;
+  return hash_data.die_offset != DW_INVALID_OFFSET;
 }
 
 DWARFMappedHash::MemoryTable::MemoryTable(
@@ -319,8 +309,8 @@ DWARFMappedHash::MemoryTable::GetStringForKeyType(KeyType key) const {
 bool DWARFMappedHash::MemoryTable::ReadHashData(uint32_t hash_data_offset,
                                                 HashData &hash_data) const {
   lldb::offset_t offset = hash_data_offset;
-  offset += 4; // Skip string table offset that contains offset of hash name in
-               // .debug_str
+  // Skip string table offset that contains offset of hash name in .debug_str.
+  offset += 4;
   const uint32_t count = m_data.GetU32(&offset);
   if (count > 0) {
     hash_data.resize(count);
@@ -346,9 +336,9 @@ DWARFMappedHash::MemoryTable::GetHashDataForName(
     return eResultEndOfHashData;
 
   // There definitely should be a string for this string offset, if there
-  // isn't, there is something wrong, return and error
+  // isn't, there is something wrong, return and error.
   const char *strp_cstr = m_string_table.PeekCStr(pair.key);
-  if (strp_cstr == NULL) {
+  if (strp_cstr == nullptr) {
     *hash_data_offset_ptr = UINT32_MAX;
     return eResultError;
   }
@@ -356,9 +346,8 @@ DWARFMappedHash::MemoryTable::GetHashDataForName(
   const uint32_t count = m_data.GetU32(hash_data_offset_ptr);
   const size_t min_total_hash_data_size =
       count * m_header.header_data.GetMinimumHashDataByteSize();
-  if (count > 0 &&
-      m_data.ValidOffsetForDataOfSize(*hash_data_offset_ptr,
-                                      min_total_hash_data_size)) {
+  if (count > 0 && m_data.ValidOffsetForDataOfSize(*hash_data_offset_ptr,
+                                                   min_total_hash_data_size)) {
     // We have at least one HashData entry, and we have enough data to parse at
     // least "count" HashData entries.
 
@@ -381,21 +370,22 @@ DWARFMappedHash::MemoryTable::GetHashDataForName(
           if (match)
             pair.value.push_back(die_info);
         } else {
-          // Something went wrong while reading the data
+          // Something went wrong while reading the data.
           *hash_data_offset_ptr = UINT32_MAX;
           return eResultError;
         }
       }
     }
     // Return the correct response depending on if the string matched or not...
-    if (match)
-      return eResultKeyMatch; // The key (cstring) matches and we have lookup
-                              // results!
-    else
-      return eResultKeyMismatch; // The key doesn't match, this function will
-                                 // get called
-    // again for the next key/value or the key terminator which in our case is
-    // a zero .debug_str offset.
+    if (match) {
+      // The key (cstring) matches and we have lookup results!
+      return eResultKeyMatch;
+    } else {
+      // The key doesn't match, this function will get called again for the
+      // next key/value or the key terminator which in our case is a zero
+      // .debug_str offset.
+      return eResultKeyMismatch;
+    }
   } else {
     *hash_data_offset_ptr = UINT32_MAX;
     return eResultError;
@@ -413,17 +403,16 @@ DWARFMappedHash::MemoryTable::AppendHashDataForRegularExpression(
     return eResultEndOfHashData;
 
   // There definitely should be a string for this string offset, if there
-  // isn't, there is something wrong, return and error
+  // isn't, there is something wrong, return and error.
   const char *strp_cstr = m_string_table.PeekCStr(pair.key);
-  if (strp_cstr == NULL)
+  if (strp_cstr == nullptr)
     return eResultError;
 
   const uint32_t count = m_data.GetU32(hash_data_offset_ptr);
   const size_t min_total_hash_data_size =
       count * m_header.header_data.GetMinimumHashDataByteSize();
-  if (count > 0 &&
-      m_data.ValidOffsetForDataOfSize(*hash_data_offset_ptr,
-                                      min_total_hash_data_size)) {
+  if (count > 0 && m_data.ValidOffsetForDataOfSize(*hash_data_offset_ptr,
+                                                   min_total_hash_data_size)) {
     const bool match = regex.Execute(llvm::StringRef(strp_cstr));
 
     if (!match && m_header.header_data.HashDataHasFixedByteSize()) {
@@ -449,14 +438,15 @@ DWARFMappedHash::MemoryTable::AppendHashDataForRegularExpression(
       }
     }
     // Return the correct response depending on if the string matched or not...
-    if (match)
-      return eResultKeyMatch; // The key (cstring) matches and we have lookup
-                              // results!
-    else
-      return eResultKeyMismatch; // The key doesn't match, this function will
-                                 // get called
-    // again for the next key/value or the key terminator which in our case is
-    // a zero .debug_str offset.
+    if (match) {
+      // The key (cstring) matches and we have lookup results!
+      return eResultKeyMatch;
+    } else {
+      // The key doesn't match, this function will get called again for the
+      // next key/value or the key terminator which in our case is a zero
+      // .debug_str offset.
+      return eResultKeyMismatch;
+    }
   } else {
     *hash_data_offset_ptr = UINT32_MAX;
     return eResultError;
@@ -477,7 +467,7 @@ size_t DWARFMappedHash::MemoryTable::AppendAllDIEsThatMatchingRegex(
       if (prev_hash_data_offset == hash_data_offset)
         break;
 
-      // Check the result of getting our hash data
+      // Check the result of getting our hash data.
       switch (hash_result) {
       case eResultKeyMatch:
       case eResultKeyMismatch:
@@ -513,10 +503,10 @@ size_t DWARFMappedHash::MemoryTable::AppendAllDIEsInRange(
       for (uint32_t i = 0; i < count; ++i) {
         DIEInfo die_info;
         if (m_header.Read(m_data, &hash_data_offset, die_info)) {
-          if (die_info.offset == 0)
+          if (die_info.die_offset == 0)
             done = true;
-          if (die_offset_start <= die_info.offset &&
-              die_info.offset < die_offset_end)
+          if (die_offset_start <= die_info.die_offset &&
+              die_info.die_offset < die_offset_end)
             die_info_array.push_back(die_info);
         }
       }

@@ -11,7 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstPrinter/XCoreInstPrinter.h"
+#include "MCTargetDesc/XCoreInstPrinter.h"
+#include "TargetInfo/XCoreTargetInfo.h"
 #include "XCore.h"
 #include "XCoreInstrInfo.h"
 #include "XCoreMCInstLower.h"
@@ -114,7 +115,7 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
 
   MCSymbol *GVSym = getSymbol(GV);
   const Constant *C = GV->getInitializer();
-  unsigned Align = (unsigned)DL.getPreferredTypeAlignmentShift(C->getType());
+  unsigned Align = Log2_32(DL.getPrefTypeAlignment(C->getType()));
 
   // Mark the start of the global
   getTargetStreamer().emitCCTopData(GVSym->getName());
@@ -213,7 +214,7 @@ void XCoreAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
     MO.getMBB()->getSymbol()->print(O, MAI);
     break;
   case MachineOperand::MO_GlobalAddress:
-    getSymbol(MO.getGlobal())->print(O, MAI);
+    PrintSymbolOperand(MO, O);
     break;
   case MachineOperand::MO_ConstantPoolIndex:
     O << DL.getPrivateGlobalPrefix() << "CPI" << getFunctionNumber() << '_'

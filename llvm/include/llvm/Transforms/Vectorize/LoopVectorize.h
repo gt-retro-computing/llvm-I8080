@@ -76,15 +76,58 @@ class ScalarEvolution;
 class TargetLibraryInfo;
 class TargetTransformInfo;
 
+extern cl::opt<bool> EnableLoopInterleaving;
+extern cl::opt<bool> EnableLoopVectorization;
+
+struct LoopVectorizeOptions {
+  /// If false, consider all loops for interleaving.
+  /// If true, only loops that explicitly request interleaving are considered.
+  bool InterleaveOnlyWhenForced;
+
+  /// If false, consider all loops for vectorization.
+  /// If true, only loops that explicitly request vectorization are considered.
+  bool VectorizeOnlyWhenForced;
+
+  /// The current defaults when creating the pass with no arguments are:
+  /// EnableLoopInterleaving = true and EnableLoopVectorization = true. This
+  /// means that interleaving default is consistent with the cl::opt flag, while
+  /// vectorization is not.
+  /// FIXME: The default for EnableLoopVectorization in the cl::opt should be
+  /// set to true, and the corresponding change to account for this be made in
+  /// opt.cpp. The initializations below will become:
+  /// InterleaveOnlyWhenForced(!EnableLoopInterleaving)
+  /// VectorizeOnlyWhenForced(!EnableLoopVectorization).
+  LoopVectorizeOptions()
+      : InterleaveOnlyWhenForced(false), VectorizeOnlyWhenForced(false) {}
+  LoopVectorizeOptions(bool InterleaveOnlyWhenForced,
+                       bool VectorizeOnlyWhenForced)
+      : InterleaveOnlyWhenForced(InterleaveOnlyWhenForced),
+        VectorizeOnlyWhenForced(VectorizeOnlyWhenForced) {}
+
+  LoopVectorizeOptions &setInterleaveOnlyWhenForced(bool Value) {
+    InterleaveOnlyWhenForced = Value;
+    return *this;
+  }
+
+  LoopVectorizeOptions &setVectorizeOnlyWhenForced(bool Value) {
+    VectorizeOnlyWhenForced = Value;
+    return *this;
+  }
+};
+
 /// The LoopVectorize Pass.
 struct LoopVectorizePass : public PassInfoMixin<LoopVectorizePass> {
   /// If false, consider all loops for interleaving.
   /// If true, only loops that explicitly request interleaving are considered.
-  bool InterleaveOnlyWhenForced = false;
+  bool InterleaveOnlyWhenForced;
 
   /// If false, consider all loops for vectorization.
   /// If true, only loops that explicitly request vectorization are considered.
-  bool VectorizeOnlyWhenForced = false;
+  bool VectorizeOnlyWhenForced;
+
+  LoopVectorizePass(LoopVectorizeOptions Opts = {})
+      : InterleaveOnlyWhenForced(Opts.InterleaveOnlyWhenForced),
+        VectorizeOnlyWhenForced(Opts.VectorizeOnlyWhenForced) {}
 
   ScalarEvolution *SE;
   LoopInfo *LI;
@@ -111,6 +154,14 @@ struct LoopVectorizePass : public PassInfoMixin<LoopVectorizePass> {
 
   bool processLoop(Loop *L);
 };
+
+/// Reports a vectorization failure: print \p DebugMsg for debugging
+/// purposes along with the corresponding optimization remark \p RemarkName.
+/// If \p I is passed, it is an instruction that prevents vectorization.
+/// Otherwise, the loop \p TheLoop is used for the location of the remark.
+void reportVectorizationFailure(const StringRef DebugMsg,
+    const StringRef OREMsg, const StringRef ORETag,
+    OptimizationRemarkEmitter *ORE, Loop *TheLoop, Instruction *I = nullptr);
 
 } // end namespace llvm
 

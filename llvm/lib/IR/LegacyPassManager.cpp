@@ -310,7 +310,7 @@ void PassManagerPrettyStackEntry::print(raw_ostream &OS) const {
     OS << "value";
 
   OS << " '";
-  V->printAsOperand(OS, /*PrintTy=*/false, M);
+  V->printAsOperand(OS, /*PrintType=*/false, M);
   OS << "'\n";
 }
 
@@ -1629,13 +1629,13 @@ bool FPPassManager::runOnFunction(Function &F) {
     FunctionSize = F.getInstructionCount();
   }
 
-  bool ProfileTime = llvm::timeTraceProfilerEnabled();
-  if (ProfileTime)
-    llvm::timeTraceProfilerBegin("OptFunction", F.getName());
+  llvm::TimeTraceScope FunctionScope("OptFunction", F.getName());
 
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     FunctionPass *FP = getContainedPass(Index);
     bool LocalChanged = false;
+
+    llvm::TimeTraceScope PassScope("RunPass", FP->getPassName());
 
     dumpPassInfo(FP, EXECUTION_MSG, ON_FUNCTION_MSG, F.getName());
     dumpRequiredSet(FP);
@@ -1673,9 +1673,6 @@ bool FPPassManager::runOnFunction(Function &F) {
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
   }
-
-  if (ProfileTime)
-    llvm::timeTraceProfilerEnd();
 
   return Changed;
 }
@@ -1730,14 +1727,12 @@ MPPassManager::runOnModule(Module &M) {
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
     Changed |= getContainedPass(Index)->doInitialization(M);
 
-  unsigned InstrCount, ModuleCount = 0;
+  unsigned InstrCount;
   StringMap<std::pair<unsigned, unsigned>> FunctionToInstrCount;
   bool EmitICRemark = M.shouldEmitInstrCountChangedRemark();
   // Collect the initial size of the module.
-  if (EmitICRemark) {
+  if (EmitICRemark)
     InstrCount = initSizeRemarkInfo(M, FunctionToInstrCount);
-    ModuleCount = InstrCount;
-  }
 
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     ModulePass *MP = getContainedPass(Index);
@@ -1755,7 +1750,7 @@ MPPassManager::runOnModule(Module &M) {
       LocalChanged |= MP->runOnModule(M);
       if (EmitICRemark) {
         // Update the size of the module.
-        ModuleCount = M.getInstructionCount();
+        unsigned ModuleCount = M.getInstructionCount();
         if (ModuleCount != InstrCount) {
           int64_t Delta = static_cast<int64_t>(ModuleCount) -
                           static_cast<int64_t>(InstrCount);

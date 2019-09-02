@@ -46,7 +46,9 @@ const RegisterBank &X86RegisterBankInfo::getRegBankFromRegClass(
   if (X86::GR8RegClass.hasSubClassEq(&RC) ||
       X86::GR16RegClass.hasSubClassEq(&RC) ||
       X86::GR32RegClass.hasSubClassEq(&RC) ||
-      X86::GR64RegClass.hasSubClassEq(&RC))
+      X86::GR64RegClass.hasSubClassEq(&RC) ||
+      X86::LOW32_ADDR_ACCESSRegClass.hasSubClassEq(&RC) ||
+      X86::LOW32_ADDR_ACCESS_RBPRegClass.hasSubClassEq(&RC))
     return getRegBank(X86::GPRRegBankID);
 
   if (X86::FR32XRegClass.hasSubClassEq(&RC) ||
@@ -159,7 +161,7 @@ const RegisterBankInfo::InstructionMapping &
 X86RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   const MachineFunction &MF = *MI.getParent()->getParent();
   const MachineRegisterInfo &MRI = MF.getRegInfo();
-  auto Opc = MI.getOpcode();
+  unsigned Opc = MI.getOpcode();
 
   // Try the default logic for non-generic instructions that are either copies
   // or already have some operands assigned to banks.
@@ -182,9 +184,6 @@ X86RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case TargetOpcode::G_SHL:
   case TargetOpcode::G_LSHR:
   case TargetOpcode::G_ASHR: {
-    const MachineFunction &MF = *MI.getParent()->getParent();
-    const MachineRegisterInfo &MRI = MF.getRegInfo();
-
     unsigned NumOperands = MI.getNumOperands();
     LLT Ty = MRI.getType(MI.getOperand(0).getReg());
 

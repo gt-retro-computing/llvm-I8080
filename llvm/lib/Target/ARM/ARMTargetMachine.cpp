@@ -16,6 +16,7 @@
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
+#include "TargetInfo/ARMTargetInfo.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -94,14 +95,16 @@ extern "C" void LLVMInitializeARMTarget() {
   initializeARMExecutionDomainFixPass(Registry);
   initializeARMExpandPseudoPass(Registry);
   initializeThumb2SizeReducePass(Registry);
+  initializeMVEVPTBlockPass(Registry);
+  initializeARMLowOverheadLoopsPass(Registry);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   if (TT.isOSBinFormatMachO())
-    return llvm::make_unique<TargetLoweringObjectFileMachO>();
+    return std::make_unique<TargetLoweringObjectFileMachO>();
   if (TT.isOSWindows())
-    return llvm::make_unique<TargetLoweringObjectFileCOFF>();
-  return llvm::make_unique<ARMElfTargetObjectFile>();
+    return std::make_unique<TargetLoweringObjectFileCOFF>();
+  return std::make_unique<ARMElfTargetObjectFile>();
 }
 
 static ARMBaseTargetMachine::ARMABI
@@ -279,7 +282,7 @@ ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<ARMSubtarget>(TargetTriple, CPU, FS, *this, isLittle,
+    I = std::make_unique<ARMSubtarget>(TargetTriple, CPU, FS, *this, isLittle,
                                         F.hasMinSize());
 
     if (!I->isThumb() && !I->hasARMOps())
@@ -444,6 +447,9 @@ bool ARMPassConfig::addPreISel() {
                                   MergeExternalByDefault));
   }
 
+  if (TM->getOptLevel() != CodeGenOpt::None)
+    addPass(createHardwareLoopsPass());
+
   return false;
 }
 
@@ -507,6 +513,7 @@ void ARMPassConfig::addPreSched2() {
       return !MF.getSubtarget<ARMSubtarget>().isThumb1Only();
     }));
   }
+  addPass(createMVEVPTBlockPass());
   addPass(createThumb2ITBlockPass());
 }
 
@@ -523,4 +530,5 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMOptimizeBarriersPass());
 
   addPass(createARMConstantIslandPass());
+  addPass(createARMLowOverheadLoopsPass());
 }

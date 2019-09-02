@@ -12,21 +12,22 @@ include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckSymbolExists)
 
-if(CMAKE_LINKER MATCHES "lld-link\.exe" OR (WIN32 AND LLVM_USE_LINKER STREQUAL "lld") OR LLVM_ENABLE_LLD)
+if(CMAKE_LINKER MATCHES "lld-link" OR (WIN32 AND LLVM_USE_LINKER STREQUAL "lld") OR LLVM_ENABLE_LLD)
   set(LINKER_IS_LLD_LINK TRUE)
 else()
   set(LINKER_IS_LLD_LINK FALSE)
 endif()
 
-set(LLVM_CXX_STD_default "c++11")
+set(LLVM_CXX_STD_default "c++14")
 # Preserve behaviour of legacy cache variables
-if (LLVM_ENABLE_CXX1Y)
-  set(LLVM_CXX_STD_default "c++1y")
-elseif (LLVM_ENABLE_CXX1Z)
+if (LLVM_ENABLE_CXX1Z)
   set(LLVM_CXX_STD_default "c++1z")
 endif()
+if (LLVM_CXX_STD STREQUAL "c++11")
+  set(LLVM_CXX_STD_force FORCE)
+endif()
 set(LLVM_CXX_STD ${LLVM_CXX_STD_default}
-    CACHE STRING "C++ standard to use for compilation.")
+    CACHE STRING "C++ standard to use for compilation." ${LLVM_CXX_STD_force})
 
 set(LLVM_ENABLE_LTO OFF CACHE STRING "Build LLVM with LTO. May be specified as Thin or Full to use a particular kind of LTO")
 string(TOUPPER "${LLVM_ENABLE_LTO}" uppercase_LLVM_ENABLE_LTO)
@@ -169,7 +170,7 @@ endif()
 
 # Pass -Wl,-z,defs. This makes sure all symbols are defined. Otherwise a DSO
 # build might work on ELF but fail on MachO/COFF.
-if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin|FreeBSD|OpenBSD|DragonFly|AIX" OR
+if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin|FreeBSD|OpenBSD|DragonFly|AIX|SunOS" OR
         WIN32 OR CYGWIN) AND
    NOT LLVM_USE_SANITIZER)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,defs")
@@ -220,10 +221,10 @@ function(add_flag_or_print_warning flag name)
 endfunction()
 
 if( LLVM_ENABLE_LLD )
-	if ( LLVM_USE_LINKER )
-		message(FATAL_ERROR "LLVM_ENABLE_LLD and LLVM_USE_LINKER can't be set at the same time")
-	endif()
-	set(LLVM_USE_LINKER "lld")
+  if ( LLVM_USE_LINKER )
+    message(FATAL_ERROR "LLVM_ENABLE_LLD and LLVM_USE_LINKER can't be set at the same time")
+  endif()
+  set(LLVM_USE_LINKER "lld")
 endif()
 
 if( LLVM_USE_LINKER )
@@ -231,7 +232,7 @@ if( LLVM_USE_LINKER )
   set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -fuse-ld=${LLVM_USE_LINKER}")
   check_cxx_source_compiles("int main() { return 0; }" CXX_SUPPORTS_CUSTOM_LINKER)
   if ( NOT CXX_SUPPORTS_CUSTOM_LINKER )
-	  message(FATAL_ERROR "Host compiler does not support '-fuse-ld=${LLVM_USE_LINKER}'")
+    message(FATAL_ERROR "Host compiler does not support '-fuse-ld=${LLVM_USE_LINKER}'")
   endif()
   set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
   append("-fuse-ld=${LLVM_USE_LINKER}"
@@ -247,6 +248,11 @@ if( LLVM_ENABLE_PIC )
     # On Windows all code is PIC. MinGW warns if -fPIC is used.
   else()
     add_flag_or_print_warning("-fPIC" FPIC)
+  endif()
+  # GCC for MIPS can miscompile LLVM due to PR37701.
+  if(CMAKE_COMPILER_IS_GNUCXX AND LLVM_NATIVE_ARCH STREQUAL "Mips" AND
+         NOT Uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+    add_flag_or_print_warning("-fno-shrink-wrap" FNO_SHRINK_WRAP)
   endif()
 endif()
 
@@ -348,17 +354,7 @@ elseif(MINGW) # FIXME: Also cygwin?
 endif()
 
 if( MSVC )
-  if( CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.0 )
-    # For MSVC 2013, disable iterator null pointer checking in debug mode,
-    # especially so std::equal(nullptr, nullptr, nullptr) will not assert.
-    add_definitions("-D_DEBUG_POINTER_IMPL=")
-  endif()
-
   include(ChooseMSVCCRT)
-
-  if( MSVC11 )
-    add_definitions(-D_VARIADIC_MAX=10)
-  endif()
 
   # Add definitions that make MSVC much less annoying.
   add_definitions(
@@ -396,16 +392,10 @@ if( MSVC )
           CMAKE_SHARED_LINKER_FLAGS)
   endif()
 
-  # /Zc:strictStrings is incompatible with VS12's (Visual Studio 2013's)
-  # debug mode headers. Instead of only enabling them in VS2013's debug mode,
-  # we'll just enable them for Visual Studio 2015 (VS 14, MSVC_VERSION 1900)
-  # and up.
-  if (NOT (MSVC_VERSION LESS 1900))
-    # Disable string literal const->non-const type conversion.
-    # "When specified, the compiler requires strict const-qualification
-    # conformance for pointers initialized by using string literals."
-    append("/Zc:strictStrings" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-  endif(NOT (MSVC_VERSION LESS 1900))
+  # Disable string literal const->non-const type conversion.
+  # "When specified, the compiler requires strict const-qualification
+  # conformance for pointers initialized by using string literals."
+  append("/Zc:strictStrings" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
 
   # "Generate Intrinsic Functions".
   append("/Oi" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
@@ -441,12 +431,22 @@ if( MSVC )
       endif()
     endif()
   endif()
+endif( MSVC )
 
-elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
+# Warnings-as-errors handling for GCC-compatible compilers:
+if ( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   append_if(LLVM_ENABLE_WERROR "-Werror" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   append_if(LLVM_ENABLE_WERROR "-Wno-error" CMAKE_REQUIRED_FLAGS)
+endif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
+
+# Specific default warnings-as-errors for compilers accepting GCC-compatible warning flags:
+if ( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
   add_flag_if_supported("-Werror=date-time" WERROR_DATE_TIME)
   add_flag_if_supported("-Werror=unguarded-availability-new" WERROR_UNGUARDED_AVAILABILITY_NEW)
+endif( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
+
+# C++ language standard selection for compilers accepting the GCC-style option:
+if ( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
   check_cxx_compiler_flag("-std=${LLVM_CXX_STD}" CXX_SUPPORTS_CXX_STD)
   if (CXX_SUPPORTS_CXX_STD)
    if (CYGWIN OR MINGW)
@@ -460,39 +460,41 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   else()
     message(FATAL_ERROR "The host compiler does not support '-std=${LLVM_CXX_STD}'.")
   endif()
-  if (LLVM_ENABLE_MODULES)
-    set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-    set(module_flags "-fmodules -fmodules-cache-path=${PROJECT_BINARY_DIR}/module.cache")
-    if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-      # On Darwin -fmodules does not imply -fcxx-modules.
-      set(module_flags "${module_flags} -fcxx-modules")
-    endif()
-    if (LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY)
-      set(module_flags "${module_flags} -Xclang -fmodules-local-submodule-visibility")
-    endif()
-    if (LLVM_ENABLE_MODULE_DEBUGGING AND
-        ((uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG") OR
-         (uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")))
-      set(module_flags "${module_flags} -gmodules")
-    endif()
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${module_flags}")
+endif( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
 
-    # Check that we can build code with modules enabled, and that repeatedly
-    # including <cassert> still manages to respect NDEBUG properly.
-    CHECK_CXX_SOURCE_COMPILES("#undef NDEBUG
-                               #include <cassert>
-                               #define NDEBUG
-                               #include <cassert>
-                               int main() { assert(this code is not compiled); }"
-                               CXX_SUPPORTS_MODULES)
-    set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
-    if (CXX_SUPPORTS_MODULES)
-      append("${module_flags}" CMAKE_CXX_FLAGS)
-    else()
-      message(FATAL_ERROR "LLVM_ENABLE_MODULES is not supported by this compiler")
-    endif()
-  endif(LLVM_ENABLE_MODULES)
-endif( MSVC )
+# Modules enablement for GCC-compatible compilers:
+if ( LLVM_COMPILER_IS_GCC_COMPATIBLE AND LLVM_ENABLE_MODULES )
+  set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
+  set(module_flags "-fmodules -fmodules-cache-path=${PROJECT_BINARY_DIR}/module.cache")
+  if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    # On Darwin -fmodules does not imply -fcxx-modules.
+    set(module_flags "${module_flags} -fcxx-modules")
+  endif()
+  if (LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY)
+    set(module_flags "${module_flags} -Xclang -fmodules-local-submodule-visibility")
+  endif()
+  if (LLVM_ENABLE_MODULE_DEBUGGING AND
+      ((uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG") OR
+       (uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")))
+    set(module_flags "${module_flags} -gmodules")
+  endif()
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${module_flags}")
+
+  # Check that we can build code with modules enabled, and that repeatedly
+  # including <cassert> still manages to respect NDEBUG properly.
+  CHECK_CXX_SOURCE_COMPILES("#undef NDEBUG
+                             #include <cassert>
+                             #define NDEBUG
+                             #include <cassert>
+                             int main() { assert(this code is not compiled); }"
+                             CXX_SUPPORTS_MODULES)
+  set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
+  if (CXX_SUPPORTS_MODULES)
+    append("${module_flags}" CMAKE_CXX_FLAGS)
+  else()
+    message(FATAL_ERROR "LLVM_ENABLE_MODULES is not supported by this compiler")
+  endif()
+endif( LLVM_COMPILER_IS_GCC_COMPATIBLE AND LLVM_ENABLE_MODULES )
 
 if (MSVC)
   if (NOT CLANG_CL)
@@ -507,7 +509,6 @@ if (MSVC)
       -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
       -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
       -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
-      -wd4355 # Suppress ''this' : used in base member initializer list'
       -wd4456 # Suppress 'declaration of 'var' hides local variable'
       -wd4457 # Suppress 'declaration of 'var' hides function parameter'
       -wd4458 # Suppress 'declaration of 'var' hides class member'
@@ -515,7 +516,6 @@ if (MSVC)
       -wd4503 # Suppress ''identifier' : decorated name length exceeded, name was truncated'
       -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
       -wd4722 # Suppress 'function' : destructor never returns, potential memory leak
-      -wd4800 # Suppress ''type' : forcing value to bool 'true' or 'false' (performance warning)'
       -wd4100 # Suppress 'unreferenced formal parameter'
       -wd4127 # Suppress 'conditional expression is constant'
       -wd4512 # Suppress 'assignment operator could not be generated'
@@ -543,12 +543,10 @@ if (MSVC)
           # is fixed.
       -wd4709 # Suppress comma operator within array index expression
 
-      # Ideally, we'd like this warning to be enabled, but MSVC 2013 doesn't
+      # Ideally, we'd like this warning to be enabled, but even MSVC 2019 doesn't
       # support the 'aligned' attribute in the way that clang sources requires (for
       # any code that uses the LLVM_ALIGNAS macro), so this is must be disabled to
       # avoid unwanted alignment warnings.
-      # When we switch to requiring a version of MSVC that supports the 'alignas'
-      # specifier (MSVC 2015?) this warning can be re-enabled.
       -wd4324 # Suppress 'structure was padded due to __declspec(align())'
 
       # Promoted warnings.
@@ -682,14 +680,8 @@ macro(append_common_sanitizer_flags)
   elseif (CLANG_CL)
     # Keep frame pointers around.
     append("/Oy-" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-    if (LINKER_IS_LLD_LINK)
-      # Use DWARF debug info with LLD.
-      append("-gdwarf" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-    else()
-      # Enable codeview otherwise.
-      append("/Z7" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-    endif()
     # Always ask the linker to produce symbols with asan.
+    append("/Z7" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     append("-debug" CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   endif()
 endmacro()
@@ -700,6 +692,9 @@ if(LLVM_USE_SANITIZER)
     if (LLVM_USE_SANITIZER STREQUAL "Address")
       append_common_sanitizer_flags()
       append("-fsanitize=address" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    elseif (LLVM_USE_SANITIZER STREQUAL "HWAddress")
+      append_common_sanitizer_flags()
+      append("-fsanitize=hwaddress" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     elseif (LLVM_USE_SANITIZER MATCHES "Memory(WithOrigins)?")
       append_common_sanitizer_flags()
       append("-fsanitize=memory" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
@@ -915,18 +910,6 @@ if(LLVM_LINK_LLVM_DYLIB AND LLVM_EXPORT_SYMBOLS_FOR_PLUGINS)
   message(FATAL_ERROR "LLVM_LINK_LLVM_DYLIB not compatible with LLVM_EXPORT_SYMBOLS_FOR_PLUGINS")
 endif()
 
-# Plugin support
-# FIXME: Make this configurable.
-if(WIN32 OR CYGWIN)
-  if(BUILD_SHARED_LIBS OR LLVM_BUILD_LLVM_DYLIB)
-    set(LLVM_ENABLE_PLUGINS ON)
-  else()
-    set(LLVM_ENABLE_PLUGINS OFF)
-  endif()
-else()
-  set(LLVM_ENABLE_PLUGINS ON)
-endif()
-
 # By default we should enable LLVM_ENABLE_IDE only for multi-configuration
 # generators. This option disables optional build system features that make IDEs
 # less usable.
@@ -983,4 +966,20 @@ if(macos_signposts_available)
                           " \"${LLVM_ENABLE_SUPPORT_XCODE_SIGNPOSTS}\"!")
     endif()
   endif()
+endif()
+
+option(LLVM_USE_RELATIVE_PATHS_IN_DEBUG_INFO "Use relative paths in debug info" OFF)
+set(LLVM_SOURCE_PREFIX "" CACHE STRING "Use prefix for sources in debug info")
+
+if(LLVM_USE_RELATIVE_PATHS_IN_DEBUG_INFO)
+  check_c_compiler_flag("-fdebug-prefix-map=foo=bar" SUPPORTS_FDEBUG_PREFIX_MAP)
+  if(LLVM_ENABLE_PROJECTS_USED)
+    get_filename_component(source_root "${LLVM_MAIN_SRC_DIR}/.." ABSOLUTE)
+  else()
+    set(source_root "${LLVM_MAIN_SRC_DIR}")
+  endif()
+  file(RELATIVE_PATH relative_root "${source_root}" "${CMAKE_BINARY_DIR}")
+  append_if(SUPPORTS_FDEBUG_PREFIX_MAP "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=${relative_root}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  append_if(SUPPORTS_FDEBUG_PREFIX_MAP "-fdebug-prefix-map=${source_root}/=${LLVM_SOURCE_PREFIX}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  add_flag_if_supported("-no-canonical-prefixes" NO_CANONICAL_PREFIXES)
 endif()

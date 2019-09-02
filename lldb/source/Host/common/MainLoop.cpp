@@ -61,10 +61,12 @@ using namespace lldb_private;
 
 static sig_atomic_t g_signal_flags[NSIG];
 
+#ifndef SIGNAL_POLLING_UNSUPPORTED
 static void SignalHandler(int signo, siginfo_t *info, void *) {
   assert(signo < NSIG);
   g_signal_flags[signo] = 1;
 }
+#endif
 
 class MainLoop::RunImpl {
 public:
@@ -318,6 +320,7 @@ MainLoop::RegisterSignal(int signo, const Callback &callback, Status &error) {
   // Even if using kqueue, the signal handler will still be invoked, so it's
   // important to replace it with our "benign" handler.
   int ret = sigaction(signo, &new_action, &info.old_action);
+  (void)ret;
   assert(ret == 0 && "sigaction failed");
 
 #if HAVE_SYS_EVENT_H

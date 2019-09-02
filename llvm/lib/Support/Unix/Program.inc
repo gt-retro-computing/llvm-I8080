@@ -136,7 +136,7 @@ static bool RedirectIO_PS(const std::string *Path, int FD, std::string *ErrMsg,
   if (int Err = posix_spawn_file_actions_addopen(
           FileActions, FD, File,
           FD == 0 ? O_RDONLY : O_WRONLY | O_CREAT, 0666))
-    return MakeErrMsg(ErrMsg, "Cannot dup2", Err);
+    return MakeErrMsg(ErrMsg, "Cannot posix_spawn_file_actions_addopen", Err);
   return false;
 }
 #endif
@@ -245,12 +245,16 @@ static bool Execute(ProcessInfo &PI, StringRef Program,
       Envp = const_cast<const char **>(*_NSGetEnviron());
 #endif
 
-    // Explicitly initialized to prevent what appears to be a valgrind false
-    // positive.
-    pid_t PID = 0;
-    int Err = posix_spawn(&PID, Program.str().c_str(), FileActions,
-                          /*attrp*/ nullptr, const_cast<char **>(Argv),
-                          const_cast<char **>(Envp));
+    constexpr int maxRetries = 8;
+    int retries = 0;
+    pid_t PID;
+    int Err;
+    do {
+      PID = 0; // Make Valgrind happy.
+      Err = posix_spawn(&PID, Program.str().c_str(), FileActions,
+                        /*attrp*/ nullptr, const_cast<char **>(Argv),
+                        const_cast<char **>(Envp));
+    } while (Err == EINTR && ++retries < maxRetries);
 
     if (FileActions)
       posix_spawn_file_actions_destroy(FileActions);
@@ -440,7 +444,7 @@ std::error_code
 llvm::sys::writeFileWithEncoding(StringRef FileName, StringRef Contents,
                                  WindowsEncodingMethod Encoding /*unused*/) {
   std::error_code EC;
-  llvm::raw_fd_ostream OS(FileName, EC, llvm::sys::fs::OpenFlags::F_Text);
+  llvm::raw_fd_ostream OS(FileName, EC, llvm::sys::fs::OpenFlags::OF_Text);
 
   if (EC)
     return EC;

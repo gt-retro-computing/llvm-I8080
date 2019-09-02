@@ -16,8 +16,9 @@ math(EXPR VERSION_PATCH "(${PARALLELSTL_VERSION_SOURCE} % 10)")
 
 project(ParallelSTL VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH} LANGUAGES CXX)
 
-option(PARALLELSTL_USE_PARALLEL_POLICIES "Enable parallel policies" OFF)
-set(PARALLELSTL_BACKEND "tbb" CACHE STRING "Threading backend; defaults to TBB")
+set(PSTL_PARALLEL_BACKEND "serial" CACHE STRING "Threading backend to use. Valid choices are 'serial' and 'tbb'. The default is 'serial'.")
+set(PSTL_HIDE_FROM_ABI_PER_TU OFF CACHE BOOL "Whether to constrain ABI-unstable symbols to each translation unit (basically, mark them with C's static keyword).")
+set(_PSTL_HIDE_FROM_ABI_PER_TU ${PSTL_HIDE_FROM_ABI_PER_TU}) # For __pstl_config_site
 
 if (NOT TBB_DIR)
     get_filename_component(PSTL_DIR_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
@@ -34,28 +35,28 @@ add_library(ParallelSTL INTERFACE)
 add_library(pstl::ParallelSTL ALIAS ParallelSTL)
 target_compile_features(ParallelSTL INTERFACE cxx_std_17)
 
-if (PARALLELSTL_USE_PARALLEL_POLICIES)
-    message(STATUS "Using Parallel Policies")
-    if (PARALLELSTL_BACKEND STREQUAL "tbb")
-        find_package(TBB 2018 REQUIRED tbb OPTIONAL_COMPONENTS tbbmalloc)
-        message(STATUS "Parallel STL uses TBB ${TBB_VERSION} (interface version: ${TBB_INTERFACE_VERSION})")
-        target_link_libraries(ParallelSTL INTERFACE TBB::tbb)
-      else()
-        message(STATUS "Using Parallel Policies, but not tbb")
-        if (TARGET ${PARALLELSTL_BACKEND})
-            target_link_libraries(ParallelSTL INTERFACE ${PARALLELSTL_BACKEND})
-        else()
-            find_package(${PARALLELSTL_BACKEND} REQUIRED)
-            target_link_libraries(ParallelSTL INTERFACE ${${PARALLELSTL_BACKEND}_IMPORTED_TARGETS})
-        endif()
-    endif()
+if (PSTL_PARALLEL_BACKEND STREQUAL "serial")
+    message(STATUS "Parallel STL uses the serial backend")
+    set(_PSTL_PAR_BACKEND_SERIAL ON)
+elseif (PSTL_PARALLEL_BACKEND STREQUAL "tbb")
+    find_package(TBB 2018 REQUIRED tbb OPTIONAL_COMPONENTS tbbmalloc)
+    message(STATUS "Parallel STL uses TBB ${TBB_VERSION} (interface version: ${TBB_INTERFACE_VERSION})")
+    target_link_libraries(ParallelSTL INTERFACE TBB::tbb)
+    set(_PSTL_PAR_BACKEND_TBB ON)
 else()
-    target_compile_definitions(ParallelSTL INTERFACE PSTL_USE_PARALLEL_POLICIES=0)
+    message(FATAL_ERROR "Requested unknown Parallel STL backend '${PSTL_PARALLEL_BACKEND}'.")
 endif()
+
+set(PSTL_GENERATED_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_headers")
+set(PSTL_CONFIG_SITE_PATH "${PSTL_GENERATED_HEADERS_DIR}/__pstl_config_site")
+configure_file("include/__pstl_config_site.in"
+               "${PSTL_CONFIG_SITE_PATH}"
+               @ONLY)
 
 target_include_directories(ParallelSTL
     INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PSTL_GENERATED_HEADERS_DIR}>
     $<INSTALL_INTERFACE:include>)
 
 ###############################################################################
@@ -84,7 +85,9 @@ install(EXPORT ParallelSTLTargets
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ParallelSTLConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/ParallelSTLConfigVersion.cmake"
         DESTINATION lib/cmake/ParallelSTL)
-install(DIRECTORY include/pstl
+install(DIRECTORY include/
+        DESTINATION include)
+install(FILES "${PSTL_CONFIG_SITE_PATH}"
         DESTINATION include)
 
 add_custom_target(install-pstl

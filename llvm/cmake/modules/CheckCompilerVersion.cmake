@@ -4,17 +4,20 @@
 
 include(CheckCXXSourceCompiles)
 
-set(GCC_MIN 4.8)
+set(GCC_MIN 5.1)
 set(GCC_SOFT_ERROR 5.1)
-set(CLANG_MIN 3.1)
+set(CLANG_MIN 3.5)
 set(CLANG_SOFT_ERROR 3.5)
-set(APPLECLANG_MIN 3.1)
+set(APPLECLANG_MIN 6.0)
 set(APPLECLANG_SOFT_ERROR 6.0)
-set(MSVC_MIN 19.00.24213.1)
+
+# https://en.wikipedia.org/wiki/Microsoft_Visual_C#Internal_version_numbering
+# _MSC_VER == 1910 MSVC++ 14.1 (Visual Studio 2017 version 15.0)
+set(MSVC_MIN 19.1)
 set(MSVC_SOFT_ERROR 19.1)
 
 # Map the above GCC versions to dates: https://gcc.gnu.org/develop.html#timeline
-set(GCC_MIN_DATE 20130322)
+set(GCC_MIN_DATE 20150422)
 set(GCC_SOFT_ERROR_DATE 20150422)
 
 
@@ -50,7 +53,7 @@ check_compiler_version("MSVC" "Visual Studio" ${MSVC_MIN} ${MSVC_SOFT_ERROR})
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if (CMAKE_CXX_SIMULATE_ID MATCHES "MSVC")
     if (CMAKE_CXX_SIMULATE_VERSION VERSION_LESS MSVC_MIN)
-      message(FATAL_ERROR "Host Clang must have at least -fms-compatibility-version=${MSVC_MIN}, your version is ${CMAKE_CXX_COMPILER_VERSION}.")
+      message(FATAL_ERROR "Host Clang must have at least -fms-compatibility-version=${MSVC_MIN}, your version is ${CMAKE_CXX_SIMULATE_VERSION}.")
     endif()
     set(CLANG_CL 1)
   elseif(NOT LLVM_ENABLE_LIBCXX)

@@ -95,7 +95,7 @@ static const RegisterSet g_reg_sets_s390x[k_num_register_sets] = {
 std::unique_ptr<NativeRegisterContextLinux>
 NativeRegisterContextLinux::CreateHostNativeRegisterContextLinux(
     const ArchSpec &target_arch, NativeThreadProtocol &native_thread) {
-  return llvm::make_unique<NativeRegisterContextLinux_s390x>(target_arch,
+  return std::make_unique<NativeRegisterContextLinux_s390x>(target_arch,
                                                              native_thread);
 }
 
@@ -336,21 +336,7 @@ Status NativeRegisterContextLinux_s390x::ReadAllRegisterValues(
   Status error;
 
   data_sp.reset(new DataBufferHeap(REG_CONTEXT_SIZE, 0));
-  if (!data_sp) {
-    error.SetErrorStringWithFormat(
-        "failed to allocate DataBufferHeap instance of size %" PRIu64,
-        REG_CONTEXT_SIZE);
-    return error;
-  }
-
   uint8_t *dst = data_sp->GetBytes();
-  if (dst == nullptr) {
-    error.SetErrorStringWithFormat("DataBufferHeap instance of size %" PRIu64
-                                   " returned a null pointer",
-                                   REG_CONTEXT_SIZE);
-    return error;
-  }
-
   error = DoReadGPR(dst, sizeof(s390_regs));
   dst += sizeof(s390_regs);
   if (error.Fail())

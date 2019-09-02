@@ -36,7 +36,8 @@ public:
         IgnoreCommandLineMacros(IgnoreCommandLine) {}
   void MacroDefined(const Token &MacroNameTok,
                     const MacroDirective *MD) override {
-    if (MD->getMacroInfo()->isUsedForHeaderGuard() ||
+    if (SM.isWrittenInBuiltinFile(MD->getLocation()) ||
+        MD->getMacroInfo()->isUsedForHeaderGuard() ||
         MD->getMacroInfo()->getNumTokens() == 0)
       return;
 
@@ -73,7 +74,7 @@ void MacroUsageCheck::registerPPCallbacks(const SourceManager &SM,
   if (!getLangOpts().CPlusPlus11)
     return;
 
-  PP->addPPCallbacks(llvm::make_unique<MacroUsageCallbacks>(
+  PP->addPPCallbacks(std::make_unique<MacroUsageCallbacks>(
       this, SM, AllowedRegexp, CheckCapsOnly, IgnoreCommandLineMacros));
 }
 

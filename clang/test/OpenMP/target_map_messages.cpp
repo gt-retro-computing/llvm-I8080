@@ -1,8 +1,8 @@
-// RUN: %clang_cc1 -verify -fopenmp -ferror-limit 200 %s -Wno-openmp-target
-// RUN: %clang_cc1 -DCCODE -verify -fopenmp -ferror-limit 200 -x c %s -Wno-openmp-target
+// RUN: %clang_cc1 -verify -fopenmp -ferror-limit 200 %s -Wno-openmp-target -Wuninitialized
+// RUN: %clang_cc1 -DCCODE -verify -fopenmp -ferror-limit 200 -x c %s -Wno-openmp-target -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd -ferror-limit 200 %s -Wno-openmp-target
-// RUN: %clang_cc1 -DCCODE -verify -fopenmp-simd -ferror-limit 200 -x c %s -Wno-openmp-target
+// RUN: %clang_cc1 -verify -fopenmp-simd -ferror-limit 200 %s -Wno-openmp-target -Wuninitialized
+// RUN: %clang_cc1 -DCCODE -verify -fopenmp-simd -ferror-limit 200 -x c %s -Wno-openmp-target -Wuninitialized
 #ifdef CCODE
 void foo(int arg) {
   const int n = 0;
@@ -19,6 +19,14 @@ void foo(int arg) {
   {}
 }
 #else
+
+void xxx(int argc) {
+  int map; // expected-note {{initialize the variable 'map' to silence this warning}}
+#pragma omp target map(tofrom: map) // expected-warning {{variable 'map' is uninitialized when used here}}
+  for (int i = 0; i < 10; ++i)
+    ;
+}
+
 
 struct SREF {
   int &a;
@@ -72,6 +80,8 @@ struct SA {
     #pragma omp target map(b[-1:]) // expected-error {{array section must be a subset of the original array}}
     {}
     #pragma omp target map(b[:-1]) // expected-error {{section length is evaluated to a negative value -1}}
+    {}
+    #pragma omp target map(b[true:true])
     {}
 
     #pragma omp target map(: c,f) // expected-error {{missing map type}}

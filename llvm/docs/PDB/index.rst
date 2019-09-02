@@ -44,7 +44,7 @@ File Layout
 
 .. toctree::
    :hidden:
-   
+
    MsfFile
    PdbStream
    TpiStream
@@ -60,13 +60,12 @@ File Layout
 
 The MSF Container
 -----------------
-A PDB file is really just a special case of an MSF (Multi-Stream Format) file.
-An MSF file is actually a miniature "file system within a file".  It contains
-multiple streams (aka files) which can represent arbitrary data, and these
-streams are divided into blocks which may not necessarily be contiguously
-laid out within the file (aka fragmented).  Additionally, the MSF contains a
-stream directory (aka MFT) which describes how the streams (files) are laid
-out within the MSF.
+A PDB file is an MSF (Multi-Stream Format) file.  An MSF file is a "file system
+within a file".  It contains multiple streams (aka files) which can represent
+arbitrary data, and these streams are divided into blocks which may not
+necessarily be contiguously laid out within the MSF container file.
+Additionally, the MSF contains a stream directory (aka MFT) which describes how
+the streams (files) are laid out within the MSF.
 
 For more information about the MSF container format, stream directory, and
 block layout, see :doc:`MsfFile`.
@@ -133,7 +132,7 @@ PDB file is as follows:
 
 More information about the structure of each of these can be found on the
 following pages:
-   
+
 :doc:`PdbStream`
    Information about the PDB Info Stream and how it is used to match PDBs to EXEs.
 
@@ -141,12 +140,13 @@ following pages:
    Information about the TPI stream and the CodeView records contained within.
 
 :doc:`DbiStream`
-   Information about the DBI stream and relevant substreams including the Module Substreams,
-   source file information, and CodeView symbol records contained within.
+   Information about the DBI stream and relevant substreams including the
+   Module Substreams, source file information, and CodeView symbol records
+   contained within.
 
 :doc:`ModiStream`
-   Information about the Module Information Stream, of which there is one for each compilation
-   unit and the format of symbols contained within.
+   Information about the Module Information Stream, of which there is one for
+   each compilation unit and the format of symbols contained within.
 
 :doc:`PublicStream`
    Information about the Public Symbol Stream.
@@ -155,8 +155,9 @@ following pages:
    Information about the Global Symbol Stream.
 
 :doc:`HashTable`
-   Information about the serialized hash table format used internally to represent things such
-   as the Named Stream Map and the Hash Adjusters in the :doc:`TPI/IPI Stream <TpiStream>`.
+   Information about the serialized hash table format used internally to
+   represent things such as the Named Stream Map and the Hash Adjusters in the
+   :doc:`TPI/IPI Stream <TpiStream>`.
 
 CodeView
 ========

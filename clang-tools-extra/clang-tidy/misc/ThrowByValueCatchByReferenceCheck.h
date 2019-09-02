@@ -15,7 +15,7 @@ namespace clang {
 namespace tidy {
 namespace misc {
 
-///\brief checks for locations that do not throw by value
+///checks for locations that do not throw by value
 // or catch by reference.
 // The check is C++ only. It checks that all throw locations
 // throw by value and not by pointer. Additionally it
@@ -41,6 +41,8 @@ private:
   bool isCatchVariable(const DeclRefExpr *declRefExpr);
   bool isFunctionOrCatchVar(const DeclRefExpr *declRefExpr);
   const bool CheckAnonymousTemporaries;
+  const bool WarnOnLargeObject;
+  uint64_t MaxSize; // No `const` because we have to set it in two steps.
 };
 
 } // namespace misc

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/BPFMCTargetDesc.h"
+#include "TargetInfo/BPFTargetInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCContext.h"
@@ -193,7 +194,7 @@ public:
   }
 
   static std::unique_ptr<BPFOperand> createToken(StringRef Str, SMLoc S) {
-    auto Op = make_unique<BPFOperand>(Token);
+    auto Op = std::make_unique<BPFOperand>(Token);
     Op->Tok = Str;
     Op->StartLoc = S;
     Op->EndLoc = S;
@@ -202,7 +203,7 @@ public:
 
   static std::unique_ptr<BPFOperand> createReg(unsigned RegNo, SMLoc S,
                                                SMLoc E) {
-    auto Op = make_unique<BPFOperand>(Register);
+    auto Op = std::make_unique<BPFOperand>(Register);
     Op->Reg.RegNum = RegNo;
     Op->StartLoc = S;
     Op->EndLoc = E;
@@ -211,7 +212,7 @@ public:
 
   static std::unique_ptr<BPFOperand> createImm(const MCExpr *Val, SMLoc S,
                                                SMLoc E) {
-    auto Op = make_unique<BPFOperand>(Immediate);
+    auto Op = std::make_unique<BPFOperand>(Immediate);
     Op->Imm.Val = Val;
     Op->StartLoc = S;
     Op->EndLoc = E;

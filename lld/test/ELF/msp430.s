@@ -1,7 +1,7 @@
 ; REQUIRES: msp430
 ; RUN: llvm-mc -filetype=obj -triple=msp430-elf -o %t1.o %s
 ; RUN: echo -e '.global _start\n _start: nop' | llvm-mc -filetype=obj -triple=msp430-elf -o %t2.o -
-; RUN: ld.lld -o %t.exe --Tdata=0x2000 --Ttext=0x8000 --defsym=_byte=0x21 %t2.o %t1.o
+; RUN: ld.lld -o %t.exe --Tdata=0x2000 --Ttext=0x8000 --defsym=_byte=0x21 -z separate-code %t2.o %t1.o
 ; RUN: llvm-objdump -s -d %t.exe | FileCheck %s
 
 ;; Check handling of basic msp430 relocation types.
@@ -13,6 +13,7 @@ foo:
   jmp _start
 
 ; CHECK:      Disassembly of section .text:
+; CHECK-EMPTY:
 ; CHECK-NEXT: _start:
 ; CHECK-NEXT: 8000: {{.*}} nop
 ; CHECK:      foo:

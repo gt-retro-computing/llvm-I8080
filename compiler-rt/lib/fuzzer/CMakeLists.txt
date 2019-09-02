@@ -84,6 +84,8 @@ endif()
 
 set(FUZZER_SUPPORTED_OS ${SANITIZER_COMMON_SUPPORTED_OS})
 
+add_compiler_rt_component(fuzzer)
+
 add_compiler_rt_object_libraries(RTfuzzer
   OS ${FUZZER_SUPPORTED_OS}
   ARCHS ${FUZZER_SUPPORTED_ARCH}
@@ -119,10 +121,15 @@ if(OS_NAME MATCHES "Linux|Fuchsia" AND
    COMPILER_RT_LIBCXX_PATH AND
    COMPILER_RT_LIBCXXABI_PATH)
   macro(partially_link_libcxx name dir arch)
+    if(${arch} MATCHES "i386")
+      set(EMULATION_ARGUMENT "-m" "elf_i386")
+    else()
+      set(EMULATION_ARGUMENT "")
+    endif()
     set(cxx_${arch}_merge_dir "${CMAKE_CURRENT_BINARY_DIR}/cxx_${arch}_merge.dir")
     file(MAKE_DIRECTORY ${cxx_${arch}_merge_dir})
     add_custom_command(TARGET clang_rt.${name}-${arch} POST_BUILD
-      COMMAND ${CMAKE_LINKER} --whole-archive "$<TARGET_LINKER_FILE:clang_rt.${name}-${arch}>" --no-whole-archive ${dir}/lib/libc++.a -r -o ${name}.o
+      COMMAND ${CMAKE_LINKER} ${EMULATION_ARGUMENT} --whole-archive "$<TARGET_LINKER_FILE:clang_rt.${name}-${arch}>" --no-whole-archive ${dir}/lib/libc++.a -r -o ${name}.o
       COMMAND ${CMAKE_OBJCOPY} --localize-hidden ${name}.o
       COMMAND ${CMAKE_COMMAND} -E remove "$<TARGET_LINKER_FILE:clang_rt.${name}-${arch}>"
       COMMAND ${CMAKE_AR} qcs "$<TARGET_LINKER_FILE:clang_rt.${name}-${arch}>" ${name}.o
@@ -136,6 +143,7 @@ if(OS_NAME MATCHES "Linux|Fuchsia" AND
     add_custom_libcxx(libcxx_fuzzer_${arch} ${LIBCXX_${arch}_PREFIX}
       CFLAGS ${TARGET_CFLAGS}
       CMAKE_ARGS -DCMAKE_CXX_COMPILER_WORKS=ON
+                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                  -DLIBCXX_ABI_NAMESPACE=Fuzzer)
     target_compile_options(RTfuzzer.${arch} PRIVATE -isystem ${LIBCXX_${arch}_PREFIX}/include/c++/v1)
     add_dependencies(RTfuzzer.${arch} libcxx_fuzzer_${arch}-build)

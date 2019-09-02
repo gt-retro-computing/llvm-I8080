@@ -16,6 +16,8 @@ static_library("llvm") {
     "HeaderGuardCheck.cpp",
     "IncludeOrderCheck.cpp",
     "LLVMTidyModule.cpp",
+    "PreferIsaOrDynCastInConditionalsCheck.cpp",
+    "PreferRegisterOverUnsignedCheck.cpp",
     "TwineLocalCheck.cpp",
   ]
 }

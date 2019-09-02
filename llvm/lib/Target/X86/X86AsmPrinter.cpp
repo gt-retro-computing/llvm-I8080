@@ -12,9 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86AsmPrinter.h"
-#include "InstPrinter/X86ATTInstPrinter.h"
+#include "MCTargetDesc/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86TargetStreamer.h"
+#include "TargetInfo/X86TargetInfo.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
 #include "llvm/BinaryFormat/COFF.h"
@@ -241,7 +242,7 @@ void X86AsmPrinter::PrintModifiedOperand(const MachineInstr *MI, unsigned OpNo,
     return PrintOperand(MI, OpNo, O);
   if (MI->getInlineAsmDialect() == InlineAsm::AD_ATT)
     O << '%';
-  unsigned Reg = MO.getReg();
+  Register Reg = MO.getReg();
   if (strncmp(Modifier, "subreg", strlen("subreg")) == 0) {
     unsigned Size = (strcmp(Modifier+6,"64") == 0) ? 64 :
         (strcmp(Modifier+6,"32") == 0) ? 32 :
@@ -299,6 +300,7 @@ void X86AsmPrinter::PrintLeaMemReference(const MachineInstr *MI, unsigned OpNo,
   case MachineOperand::MO_GlobalAddress:
   case MachineOperand::MO_ConstantPoolIndex:
     PrintSymbolOperand(DispSpec, O);
+    break;
   }
 
   if (Modifier && strcmp(Modifier, "H") == 0)
@@ -386,7 +388,7 @@ void X86AsmPrinter::PrintIntelMemReference(const MachineInstr *MI,
 
 static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
                               char Mode, raw_ostream &O) {
-  unsigned Reg = MO.getReg();
+  Register Reg = MO.getReg();
   bool EmitPercent = true;
 
   if (!X86::GR8RegClass.contains(Reg) &&

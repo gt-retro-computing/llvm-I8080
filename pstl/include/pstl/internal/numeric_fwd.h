@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===-- numeric_fwd.h --------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,6 +12,10 @@
 
 #include <type_traits>
 #include <utility>
+
+#include "pstl_config.h"
+
+_PSTL_HIDE_FROM_ABI_PUSH
 
 namespace __pstl
 {
@@ -39,14 +43,12 @@ __pattern_transform_reduce(_ExecutionPolicy&&, _ForwardIterator1, _ForwardIterat
                            _BinaryOperation1, _BinaryOperation2, _IsVector,
                            /*is_parallel=*/std::false_type) noexcept;
 
-#if _PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _Tp,
           class _BinaryOperation1, class _BinaryOperation2, class _IsVector>
 _Tp
 __pattern_transform_reduce(_ExecutionPolicy&&, _RandomAccessIterator1, _RandomAccessIterator1, _RandomAccessIterator2,
                            _Tp, _BinaryOperation1, _BinaryOperation2, _IsVector __is_vector,
                            /*is_parallel=*/std::true_type);
-#endif
 
 //------------------------------------------------------------------------
 // transform_reduce (version with unary and binary functions)
@@ -67,14 +69,12 @@ __pattern_transform_reduce(_ExecutionPolicy&&, _ForwardIterator, _ForwardIterato
                            _UnaryOperation, _IsVector,
                            /*is_parallel=*/std::false_type) noexcept;
 
-#if _PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Tp, class _BinaryOperation, class _UnaryOperation,
           class _IsVector>
 _Tp
 __pattern_transform_reduce(_ExecutionPolicy&&, _ForwardIterator, _ForwardIterator, _Tp, _BinaryOperation,
                            _UnaryOperation, _IsVector,
                            /*is_parallel=*/std::true_type);
-#endif
 
 //------------------------------------------------------------------------
 // transform_exclusive_scan
@@ -99,21 +99,17 @@ __pattern_transform_scan(_ExecutionPolicy&&, _ForwardIterator, _ForwardIterator,
                          _BinaryOperation, _Inclusive, _IsVector,
                          /*is_parallel=*/std::false_type) noexcept;
 
-#if _PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _OutputIterator, class _UnaryOperation, class _Tp,
           class _BinaryOperation, class _Inclusive, class _IsVector>
 typename std::enable_if<!std::is_floating_point<_Tp>::value, _OutputIterator>::type
 __pattern_transform_scan(_ExecutionPolicy&&, _RandomAccessIterator, _RandomAccessIterator, _OutputIterator,
                          _UnaryOperation, _Tp, _BinaryOperation, _Inclusive, _IsVector, /*is_parallel=*/std::true_type);
-#endif
 
-#if _PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _OutputIterator, class _UnaryOperation, class _Tp,
           class _BinaryOperation, class _Inclusive, class _IsVector>
 typename std::enable_if<std::is_floating_point<_Tp>::value, _OutputIterator>::type
 __pattern_transform_scan(_ExecutionPolicy&&, _RandomAccessIterator, _RandomAccessIterator, _OutputIterator,
                          _UnaryOperation, _Tp, _BinaryOperation, _Inclusive, _IsVector, /*is_parallel=*/std::true_type);
-#endif
 
 //------------------------------------------------------------------------
 // adjacent_difference
@@ -133,14 +129,15 @@ _OutputIterator
 __pattern_adjacent_difference(_ExecutionPolicy&&, _ForwardIterator, _ForwardIterator, _OutputIterator, _BinaryOperation,
                               _IsVector, /*is_parallel*/ std::false_type) noexcept;
 
-#if _PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _OutputIterator, class _BinaryOperation,
           class _IsVector>
 _OutputIterator
 __pattern_adjacent_difference(_ExecutionPolicy&&, _ForwardIterator, _ForwardIterator, _OutputIterator, _BinaryOperation,
                               _IsVector, /*is_parallel*/ std::true_type);
-#endif
 
 } // namespace __internal
 } // namespace __pstl
+
+_PSTL_HIDE_FROM_ABI_POP
+
 #endif /* _PSTL_NUMERIC_FWD_H */

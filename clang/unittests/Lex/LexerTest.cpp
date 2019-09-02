@@ -49,7 +49,7 @@ protected:
 
     HeaderSearch HeaderInfo(std::make_shared<HeaderSearchOptions>(), SourceMgr,
                             Diags, LangOpts, Target.get());
-    std::unique_ptr<Preprocessor> PP = llvm::make_unique<Preprocessor>(
+    std::unique_ptr<Preprocessor> PP = std::make_unique<Preprocessor>(
         std::make_shared<PreprocessorOptions>(), Diags, LangOpts, SourceMgr,
         HeaderInfo, ModLoader,
         /*IILookup =*/nullptr,
@@ -401,18 +401,21 @@ TEST_F(LexerTest, DontOverallocateStringifyArgs) {
   auto MacroArgsDeleter = [&PP](MacroArgs *M) { M->destroy(*PP); };
   std::unique_ptr<MacroArgs, decltype(MacroArgsDeleter)> MA(
       MacroArgs::create(MI, ArgTokens, false, *PP), MacroArgsDeleter);
-  Token Result = MA->getStringifiedArgument(0, *PP, {}, {});
+  auto StringifyArg = [&](int ArgNo) {
+    return MA->StringifyArgument(MA->getUnexpArgument(ArgNo), *PP,
+                                 /*Charify=*/false, {}, {});
+  };
+  Token Result = StringifyArg(0);
   EXPECT_EQ(tok::string_literal, Result.getKind());
   EXPECT_STREQ("\"\\\"StrArg\\\"\"", Result.getLiteralData());
-  Result = MA->getStringifiedArgument(1, *PP, {}, {});
+  Result = StringifyArg(1);
   EXPECT_EQ(tok::string_literal, Result.getKind());
   EXPECT_STREQ("\"5\"", Result.getLiteralData());
-  Result = MA->getStringifiedArgument(2, *PP, {}, {});
+  Result = StringifyArg(2);
   EXPECT_EQ(tok::string_literal, Result.getKind());
   EXPECT_STREQ("\"'C'\"", Result.getLiteralData());
 #if !defined(NDEBUG) && GTEST_HAS_DEATH_TEST
-  EXPECT_DEATH(MA->getStringifiedArgument(3, *PP, {}, {}),
-               "Invalid argument number!");
+  EXPECT_DEATH(StringifyArg(3), "Invalid arg #");
 #endif
 }
 
@@ -511,6 +514,25 @@ TEST_F(LexerTest, StringizingRasString) {
   EXPECT_EQ(String4, R"(\\\n    \\n\n    \\\\n\n    \\\\)");
   EXPECT_EQ(String5, R"(a\\\n\n\n    \\\\b)");
   EXPECT_EQ(String6, R"(a\\\n\n\n    \\\\b)");
+}
+
+TEST_F(LexerTest, CharRangeOffByOne) {
+  std::vector<Token> toks = Lex(R"(#define MOO 1
+    void foo() { MOO; })");
+  const Token &moo = toks[5];
+
+  EXPECT_EQ(getSourceText(moo, moo), "MOO");
+
+  SourceRange R{moo.getLocation(), moo.getLocation()};
+
+  EXPECT_TRUE(
+      Lexer::isAtStartOfMacroExpansion(R.getBegin(), SourceMgr, LangOpts));
+  EXPECT_TRUE(
+      Lexer::isAtEndOfMacroExpansion(R.getEnd(), SourceMgr, LangOpts));
+
+  CharSourceRange CR = Lexer::getAsCharRange(R, SourceMgr, LangOpts);
+
+  EXPECT_EQ(Lexer::getSourceText(CR, SourceMgr, LangOpts), "MOO"); // Was "MO".
 }
 
 } // anonymous namespace

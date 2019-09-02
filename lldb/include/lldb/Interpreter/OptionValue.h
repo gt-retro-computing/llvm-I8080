@@ -22,7 +22,7 @@ namespace lldb_private {
 // OptionValue
 class OptionValue {
 public:
-  typedef enum {
+  enum Type {
     eTypeInvalid = 0,
     eTypeArch,
     eTypeArgs,
@@ -43,7 +43,7 @@ public:
     eTypeUInt64,
     eTypeUUID,
     eTypeFormatEntity
-  } Type;
+  };
 
   enum {
     eDumpOptionName = (1u << 0),
@@ -93,8 +93,8 @@ public:
 
   virtual lldb::OptionValueSP DeepCopy() const = 0;
 
-  virtual size_t AutoComplete(CommandInterpreter &interpreter,
-                              CompletionRequest &request);
+  virtual void AutoComplete(CommandInterpreter &interpreter,
+                            CompletionRequest &request);
 
   // Subclasses can override these functions
   virtual lldb::OptionValueSP GetSubValue(const ExecutionContext *exe_ctx,

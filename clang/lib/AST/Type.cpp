@@ -50,6 +50,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 using namespace clang;
 
@@ -297,6 +298,18 @@ QualType QualType::getSingleStepDesugaredTypeImpl(QualType type,
 #define TYPE(CLASS, BASE) \
   static_assert(!std::is_polymorphic<CLASS##Type>::value, \
                 #CLASS "Type should not be polymorphic!");
+#include "clang/AST/TypeNodes.def"
+
+// Check that no type class has a non-trival destructor. Types are
+// allocated with the BumpPtrAllocator from ASTContext and therefore
+// their destructor is not executed.
+//
+// FIXME: ConstantArrayType is not trivially destructible because of its
+// APInt member. It should be replaced in favor of ASTContext allocation.
+#define TYPE(CLASS, BASE)                                                      \
+  static_assert(std::is_trivially_destructible<CLASS##Type>::value ||          \
+                    std::is_same<CLASS##Type, ConstantArrayType>::value,       \
+                #CLASS "Type should be trivially destructible!");
 #include "clang/AST/TypeNodes.def"
 
 QualType Type::getLocallyUnqualifiedSingleStepDesugaredType() const {
@@ -973,6 +986,7 @@ public:
 
   SUGARED_TYPE_CLASS(Typedef)
   SUGARED_TYPE_CLASS(ObjCTypeParam)
+  SUGARED_TYPE_CLASS(MacroQualified)
 
   QualType VisitAdjustedType(const AdjustedType *T) {
     QualType originalType = recurse(T->getOriginalType());
@@ -1735,8 +1749,16 @@ namespace {
       return Visit(T->getModifiedType());
     }
 
+    Type *VisitMacroQualifiedType(const MacroQualifiedType *T) {
+      return Visit(T->getUnderlyingType());
+    }
+
     Type *VisitAdjustedType(const AdjustedType *T) {
       return Visit(T->getOriginalType());
+    }
+
+    Type *VisitPackExpansionType(const PackExpansionType *T) {
+      return Visit(T->getPattern());
     }
   };
 
@@ -2876,6 +2898,10 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   case Id: \
     return #ExtType;
 #include "clang/Basic/OpenCLExtensionTypes.def"
+#define SVE_TYPE(Name, Id, SingletonId) \
+  case Id: \
+    return Name;
+#include "clang/Basic/AArch64SVEACLETypes.def"
   }
 
   llvm_unreachable("Invalid builtin type.");
@@ -3068,6 +3094,7 @@ CanThrowResult FunctionProtoType::canThrow() const {
   case EST_DynamicNone:
   case EST_BasicNoexcept:
   case EST_NoexceptTrue:
+  case EST_NoThrow:
     return CT_Cannot;
 
   case EST_None:
@@ -3158,6 +3185,20 @@ void FunctionProtoType::Profile(llvm::FoldingSetNodeID &ID,
 
 QualType TypedefType::desugar() const {
   return getDecl()->getUnderlyingType();
+}
+
+QualType MacroQualifiedType::desugar() const { return getUnderlyingType(); }
+
+QualType MacroQualifiedType::getModifiedType() const {
+  // Step over MacroQualifiedTypes from the same macro to find the type
+  // ultimately qualified by the macro qualifier.
+  QualType Inner = cast<AttributedType>(getUnderlyingType())->getModifiedType();
+  while (auto *InnerMQT = dyn_cast<MacroQualifiedType>(Inner)) {
+    if (InnerMQT->getMacroIdentifier() != getMacroIdentifier())
+      break;
+    Inner = InnerMQT->getModifiedType();
+  }
+  return Inner;
 }
 
 TypeOfExprType::TypeOfExprType(Expr *E, QualType can)
@@ -3862,6 +3903,9 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     case BuiltinType::OCLClkEvent:
     case BuiltinType::OCLQueue:
     case BuiltinType::OCLReserveID:
+#define SVE_TYPE(Name, Id, SingletonId) \
+    case BuiltinType::Id:
+#include "clang/Basic/AArch64SVEACLETypes.def"
     case BuiltinType::BuiltinFn:
     case BuiltinType::NullPtr:
     case BuiltinType::OMPArraySection:
@@ -3910,7 +3954,11 @@ AttributedType::getImmediateNullability() const {
 }
 
 Optional<NullabilityKind> AttributedType::stripOuterNullability(QualType &T) {
-  if (auto attributed = dyn_cast<AttributedType>(T.getTypePtr())) {
+  QualType AttrTy = T;
+  if (auto MacroTy = dyn_cast<MacroQualifiedType>(T))
+    AttrTy = MacroTy->getUnderlyingType();
+
+  if (auto attributed = dyn_cast<AttributedType>(AttrTy)) {
     if (auto nullability = attributed->getImmediateNullability()) {
       T = attributed->getModifiedType();
       return nullability;
@@ -4096,7 +4144,7 @@ CXXRecordDecl *MemberPointerType::getMostRecentCXXRecordDecl() const {
 void clang::FixedPointValueToString(SmallVectorImpl<char> &Str,
                                     llvm::APSInt Val, unsigned Scale) {
   FixedPointSemantics FXSema(Val.getBitWidth(), Scale, Val.isSigned(),
-                             /*isSaturated=*/false,
-                             /*hasUnsignedPadding=*/false);
+                             /*IsSaturated=*/false,
+                             /*HasUnsignedPadding=*/false);
   APFixedPoint(Val, FXSema).toString(Str);
 }

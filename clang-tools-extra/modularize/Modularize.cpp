@@ -233,6 +233,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Driver/Options.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendAction.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Tooling/CompilationDatabase.h"
@@ -369,7 +370,7 @@ getModularizeArgumentsAdjuster(DependencyMap &Dependencies) {
     // Ignore warnings.  (Insert after "clang_tool" at beginning.)
     NewArgs.insert(NewArgs.begin() + 1, "-w");
     // Since we are compiling .h files, assume C++ unless given a -x option.
-    if (std::find(NewArgs.begin(), NewArgs.end(), "-x") == NewArgs.end()) {
+    if (!llvm::is_contained(NewArgs, "-x")) {
       NewArgs.insert(NewArgs.begin() + 2, "-x");
       NewArgs.insert(NewArgs.begin() + 3, "c++");
     }
@@ -703,7 +704,7 @@ public:
 protected:
   std::unique_ptr<clang::ASTConsumer>
   CreateASTConsumer(CompilerInstance &CI, StringRef InFile) override {
-    return llvm::make_unique<CollectEntitiesConsumer>(
+    return std::make_unique<CollectEntitiesConsumer>(
         Entities, PPTracker, CI.getPreprocessor(), InFile, HadErrors);
   }
 
@@ -721,8 +722,9 @@ public:
       : Entities(Entities), PPTracker(preprocessorTracker),
         HadErrors(HadErrors) {}
 
-  CollectEntitiesAction *create() override {
-    return new CollectEntitiesAction(Entities, PPTracker, HadErrors);
+  std::unique_ptr<FrontendAction> create() override {
+    return std::make_unique<CollectEntitiesAction>(Entities, PPTracker,
+                                                   HadErrors);
   }
 
 private:
@@ -793,7 +795,7 @@ public:
 protected:
   std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(CompilerInstance &CI, StringRef InFile) override {
-    return llvm::make_unique<CompileCheckConsumer>();
+    return std::make_unique<CompileCheckConsumer>();
   }
 };
 
@@ -801,8 +803,8 @@ class CompileCheckFrontendActionFactory : public FrontendActionFactory {
 public:
   CompileCheckFrontendActionFactory() {}
 
-  CompileCheckAction *create() override {
-    return new CompileCheckAction();
+  std::unique_ptr<FrontendAction> create() override {
+    return std::make_unique<CompileCheckAction>();
   }
 };
 
@@ -886,6 +888,7 @@ int main(int Argc, const char **Argv) {
       CompileCheckTool.appendArgumentsAdjuster(
         getModularizeArgumentsAdjuster(ModUtil->Dependencies));
       int CompileCheckFileErrors = 0;
+      // FIXME: use newFrontendActionFactory.
       CompileCheckFrontendActionFactory CompileCheckFactory;
       CompileCheckFileErrors |= CompileCheckTool.run(&CompileCheckFactory);
       if (CompileCheckFileErrors != 0) {

@@ -1291,8 +1291,8 @@ std::string NVPTXTargetLowering::getPrototype(
       O << ".param .b" << size << " _";
     } else if (isa<PointerType>(retTy)) {
       O << ".param .b" << PtrVT.getSizeInBits() << " _";
-    } else if (retTy->isAggregateType() || retTy->isVectorTy() || retTy->isIntegerTy(128)) {
-      auto &DL = CS.getCalledFunction()->getParent()->getDataLayout();
+    } else if (retTy->isAggregateType() || retTy->isVectorTy() ||
+               retTy->isIntegerTy(128)) {
       O << ".param .align " << retAlignment << " .b8 _["
         << DL.getTypeAllocSize(retTy) << "]";
     } else {
@@ -2231,7 +2231,7 @@ SDValue NVPTXTargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
     LoadSDNode *Load = cast<LoadSDNode>(Op);
     EVT MemVT = Load->getMemoryVT();
     if (!allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), MemVT,
-                            Load->getAddressSpace(), Load->getAlignment())) {
+                            *Load->getMemOperand())) {
       SDValue Ops[2];
       std::tie(Ops[0], Ops[1]) = expandUnalignedLoad(Load, DAG);
       return DAG.getMergeValues(Ops, SDLoc(Op));
@@ -2274,7 +2274,7 @@ SDValue NVPTXTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   // stores and have to handle it here.
   if (VT == MVT::v2f16 &&
       !allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), VT,
-                          Store->getAddressSpace(), Store->getAlignment()))
+                          *Store->getMemOperand()))
     return expandUnalignedStore(Store, DAG);
 
   if (VT.isVector())
@@ -3497,7 +3497,95 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
+    return true;
+  }
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_s8_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_u8_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_s8_row:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_a_u8_row:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_s8_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_u8_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_s8_row:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_b_u8_row: {
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::v2i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOLoad;
+    Info.align = Align(8);
+    return true;
+  }
+
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_s8_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_u8_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_s8_row:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_a_u8_row:
+
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_s8_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_u8_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_s8_row:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_b_u8_row: {
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::v4i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOLoad;
+    Info.align = Align(16);
+    return true;
+  }
+
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_s8_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_u8_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_s8_row:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_b_u8_row:
+
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_s8_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_s8_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_u8_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_u8_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_s8_row:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_s8_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_u8_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_a_u8_row:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_a_b1_row:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_a_b1_row_stride:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_b_b1_col:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_b_b1_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_a_s4_row:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_a_s4_row_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_a_u4_row_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_a_u4_row:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_b_s4_col:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_b_s4_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_b_u4_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_b_u4_col: {
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOLoad;
+    Info.align = Align(4);
     return true;
   }
 
@@ -3518,7 +3606,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
   }
 
@@ -3539,7 +3627,45 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
+    return true;
+  }
+
+  case Intrinsic::nvvm_wmma_m16n16k16_load_c_s32_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_c_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_c_s32_row:
+  case Intrinsic::nvvm_wmma_m16n16k16_load_c_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_c_s32_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_c_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_c_s32_row:
+  case Intrinsic::nvvm_wmma_m32n8k16_load_c_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_c_s32_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_c_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_c_s32_row:
+  case Intrinsic::nvvm_wmma_m8n32k16_load_c_s32_row_stride: {
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::v8i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOLoad;
+    Info.align = Align(16);
+    return true;
+  }
+
+  case Intrinsic::nvvm_wmma_m8n8k128_load_c_s32_col:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_c_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_c_s32_row:
+  case Intrinsic::nvvm_wmma_m8n8k128_load_c_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_c_s32_col:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_c_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_c_s32_row:
+  case Intrinsic::nvvm_wmma_m8n8k32_load_c_s32_row_stride: {
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::v2i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOLoad;
+    Info.align = Align(8);
     return true;
   }
 
@@ -3560,7 +3686,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOStore;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
   }
 
@@ -3581,12 +3707,48 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOStore;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
   }
 
-  case Intrinsic::nvvm_atomic_load_add_f32:
-  case Intrinsic::nvvm_atomic_load_add_f64:
+  case Intrinsic::nvvm_wmma_m16n16k16_store_d_s32_col:
+  case Intrinsic::nvvm_wmma_m16n16k16_store_d_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m16n16k16_store_d_s32_row:
+  case Intrinsic::nvvm_wmma_m16n16k16_store_d_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_store_d_s32_col:
+  case Intrinsic::nvvm_wmma_m32n8k16_store_d_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m32n8k16_store_d_s32_row:
+  case Intrinsic::nvvm_wmma_m32n8k16_store_d_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_store_d_s32_col:
+  case Intrinsic::nvvm_wmma_m8n32k16_store_d_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n32k16_store_d_s32_row:
+  case Intrinsic::nvvm_wmma_m8n32k16_store_d_s32_row_stride: {
+    Info.opc = ISD::INTRINSIC_VOID;
+    Info.memVT = MVT::v8i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOStore;
+    Info.align = Align(16);
+    return true;
+  }
+
+  case Intrinsic::nvvm_wmma_m8n8k128_store_d_s32_col:
+  case Intrinsic::nvvm_wmma_m8n8k128_store_d_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k128_store_d_s32_row:
+  case Intrinsic::nvvm_wmma_m8n8k128_store_d_s32_row_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_store_d_s32_col:
+  case Intrinsic::nvvm_wmma_m8n8k32_store_d_s32_col_stride:
+  case Intrinsic::nvvm_wmma_m8n8k32_store_d_s32_row:
+  case Intrinsic::nvvm_wmma_m8n8k32_store_d_s32_row_stride: {
+    Info.opc = ISD::INTRINSIC_VOID;
+    Info.memVT = MVT::v2i32;
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.flags = MachineMemOperand::MOStore;
+    Info.align = Align(8);
+    return true;
+  }
+
   case Intrinsic::nvvm_atomic_load_inc_32:
   case Intrinsic::nvvm_atomic_load_dec_32:
 
@@ -3618,7 +3780,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOStore;
-    Info.align = 0;
+    Info.align.reset();
     return true;
   }
 
@@ -3636,7 +3798,8 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = cast<ConstantInt>(I.getArgOperand(1))->getZExtValue();
+    Info.align =
+        MaybeAlign(cast<ConstantInt>(I.getArgOperand(1))->getZExtValue());
 
     return true;
   }
@@ -3655,7 +3818,8 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = cast<ConstantInt>(I.getArgOperand(1))->getZExtValue();
+    Info.align =
+        MaybeAlign(cast<ConstantInt>(I.getArgOperand(1))->getZExtValue());
 
     return true;
   }
@@ -3721,7 +3885,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
 
   case Intrinsic::nvvm_tex_1d_v4s32_s32:
@@ -3841,7 +4005,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
 
   case Intrinsic::nvvm_suld_1d_i8_clamp:
@@ -3894,7 +4058,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
 
   case Intrinsic::nvvm_suld_1d_i16_clamp:
@@ -3947,7 +4111,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
 
   case Intrinsic::nvvm_suld_1d_i32_clamp:
@@ -4000,7 +4164,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
 
   case Intrinsic::nvvm_suld_1d_i64_clamp:
@@ -4038,7 +4202,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.flags = MachineMemOperand::MOLoad;
-    Info.align = 16;
+    Info.align = Align(16);
     return true;
   }
   return false;

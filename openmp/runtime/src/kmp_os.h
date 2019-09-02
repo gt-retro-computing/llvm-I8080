@@ -165,7 +165,8 @@ typedef unsigned long long kmp_uint64;
 
 #if KMP_ARCH_X86 || KMP_ARCH_ARM || KMP_ARCH_MIPS
 #define KMP_SIZE_T_SPEC KMP_UINT32_SPEC
-#elif KMP_ARCH_X86_64 || KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS64
+#elif KMP_ARCH_X86_64 || KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 ||                 \
+    KMP_ARCH_MIPS64 || KMP_ARCH_RISCV64
 #define KMP_SIZE_T_SPEC KMP_UINT64_SPEC
 #else
 #error "Can't determine size_t printf format specifier."
@@ -533,7 +534,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
   __sync_fetch_and_add((volatile kmp_int32 *)(p), 1)
 #define KMP_TEST_THEN_INC_ACQ32(p)                                             \
   __sync_fetch_and_add((volatile kmp_int32 *)(p), 1)
-#if defined(KMP_ARCH_MIPS)
+#if KMP_ARCH_MIPS
 #define KMP_TEST_THEN_INC64(p)                                                 \
   __atomic_fetch_add((volatile kmp_int64 *)(p), 1LL, __ATOMIC_SEQ_CST)
 #define KMP_TEST_THEN_INC_ACQ64(p)                                             \
@@ -548,7 +549,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
   __sync_fetch_and_add((volatile kmp_int32 *)(p), 4)
 #define KMP_TEST_THEN_ADD4_ACQ32(p)                                            \
   __sync_fetch_and_add((volatile kmp_int32 *)(p), 4)
-#if defined(KMP_ARCH_MIPS)
+#if KMP_ARCH_MIPS
 #define KMP_TEST_THEN_ADD4_64(p)                                               \
   __atomic_fetch_add((volatile kmp_int64 *)(p), 4LL, __ATOMIC_SEQ_CST)
 #define KMP_TEST_THEN_ADD4_ACQ64(p)                                            \
@@ -575,7 +576,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
   __sync_fetch_and_add((volatile kmp_int8 *)(p), (kmp_int8)(v))
 #define KMP_TEST_THEN_ADD32(p, v)                                              \
   __sync_fetch_and_add((volatile kmp_int32 *)(p), (kmp_int32)(v))
-#if defined(KMP_ARCH_MIPS)
+#if KMP_ARCH_MIPS
 #define KMP_TEST_THEN_ADD64(p, v)                                              \
   __atomic_fetch_add((volatile kmp_uint64 *)(p), (kmp_uint64)(v),              \
                      __ATOMIC_SEQ_CST)
@@ -592,7 +593,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
   __sync_fetch_and_or((volatile kmp_uint32 *)(p), (kmp_uint32)(v))
 #define KMP_TEST_THEN_AND32(p, v)                                              \
   __sync_fetch_and_and((volatile kmp_uint32 *)(p), (kmp_uint32)(v))
-#if defined(KMP_ARCH_MIPS)
+#if KMP_ARCH_MIPS
 #define KMP_TEST_THEN_OR64(p, v)                                               \
   __atomic_fetch_or((volatile kmp_uint64 *)(p), (kmp_uint64)(v),               \
                     __ATOMIC_SEQ_CST)
@@ -637,7 +638,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
 #define KMP_COMPARE_AND_STORE_RET32(p, cv, sv)                                 \
   __sync_val_compare_and_swap((volatile kmp_uint32 *)(p), (kmp_uint32)(cv),    \
                               (kmp_uint32)(sv))
-#if defined(KMP_ARCH_MIPS)
+#if KMP_ARCH_MIPS
 static inline bool mips_sync_bool_compare_and_swap(
   volatile kmp_uint64 *p, kmp_uint64 cv, kmp_uint64 sv) {
   return __atomic_compare_exchange(p, &cv, &sv, false, __ATOMIC_SEQ_CST,
@@ -840,7 +841,7 @@ extern kmp_real64 __kmp_xchg_real64(volatile kmp_real64 *p, kmp_real64 v);
 #endif /* KMP_OS_WINDOWS */
 
 #if KMP_ARCH_PPC64 || KMP_ARCH_ARM || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS ||     \
-    KMP_ARCH_MIPS64
+    KMP_ARCH_MIPS64 || KMP_ARCH_RISCV64
 #define KMP_MB() __sync_synchronize()
 #endif
 
@@ -965,9 +966,7 @@ typedef void (*microtask_t)(int *gtid, int *npr, ...);
 #endif
 
 // Enable dynamic user lock
-#if OMP_45_ENABLED
 #define KMP_USE_DYNAMIC_LOCK 1
-#endif
 
 // Enable Intel(R) Transactional Synchronization Extensions (Intel(R) TSX) if
 // dynamic user lock is turned on

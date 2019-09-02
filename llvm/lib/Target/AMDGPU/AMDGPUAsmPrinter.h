@@ -32,6 +32,7 @@ namespace llvm {
 
 class AMDGPUMachineFunction;
 class AMDGPUTargetStreamer;
+class MCCodeEmitter;
 class MCOperand;
 class GCNSubtarget;
 
@@ -56,6 +57,8 @@ private:
   DenseMap<const Function *, SIFunctionResourceInfo> CallGraphResourceInfo;
 
   std::unique_ptr<AMDGPU::HSAMD::MetadataStreamer> HSAMetadataStream;
+
+  MCCodeEmitter *DumpCodeInstEmitter = nullptr;
 
   uint64_t getFunctionCodeSize(const MachineFunction &MF) const;
   SIFunctionResourceInfo analyzeResourceUsage(const MachineFunction &MF) const;
@@ -122,7 +125,7 @@ public:
 
   void EmitFunctionEntryLabel() override;
 
-  void EmitBasicBlockStart(const MachineBasicBlock &MBB) const override;
+  void EmitBasicBlockStart(const MachineBasicBlock &MBB) override;
 
   void EmitGlobalVariable(const GlobalVariable *GV) override;
 
@@ -137,8 +140,8 @@ public:
                        const char *ExtraCode, raw_ostream &O) override;
 
 protected:
-  mutable std::vector<std::string> DisasmLines, HexLines;
-  mutable size_t DisasmLineMaxLen;
+  std::vector<std::string> DisasmLines, HexLines;
+  size_t DisasmLineMaxLen;
 };
 
 } // end namespace llvm

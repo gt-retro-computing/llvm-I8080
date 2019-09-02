@@ -17,11 +17,12 @@
 #include "AArch64RegisterInfo.h"
 #include "AArch64Subtarget.h"
 #include "AArch64TargetObjectFile.h"
-#include "InstPrinter/AArch64InstPrinter.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
+#include "MCTargetDesc/AArch64InstPrinter.h"
 #include "MCTargetDesc/AArch64MCExpr.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "MCTargetDesc/AArch64TargetStreamer.h"
+#include "TargetInfo/AArch64TargetInfo.h"
 #include "Utils/AArch64BaseInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -235,7 +236,7 @@ void AArch64AsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind)
 }
 
 void AArch64AsmPrinter::LowerHWASAN_CHECK_MEMACCESS(const MachineInstr &MI) {
-  unsigned Reg = MI.getOperand(0).getReg();
+  Register Reg = MI.getOperand(0).getReg();
   uint32_t AccessInfo = MI.getOperand(1).getImm();
   MCSymbol *&Sym = HwasanMemaccessSymbols[{Reg, AccessInfo}];
   if (!Sym) {
@@ -296,29 +297,89 @@ void AArch64AsmPrinter::EmitHwasanMemaccessSymbols(Module &M) {
                                      .addImm(0)
                                      .addImm(0),
                                  *STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(AArch64::UBFMXri)
-                                     .addReg(AArch64::X17)
-                                     .addReg(Reg)
-                                     .addImm(56)
-                                     .addImm(63),
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::SUBSXrs)
+            .addReg(AArch64::XZR)
+            .addReg(AArch64::X16)
+            .addReg(Reg)
+            .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSR, 56)),
+        *STI);
+    MCSymbol *HandlePartialSym = OutContext.createTempSymbol();
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::Bcc)
+            .addImm(AArch64CC::NE)
+            .addExpr(MCSymbolRefExpr::create(HandlePartialSym, OutContext)),
+        *STI);
+    MCSymbol *ReturnSym = OutContext.createTempSymbol();
+    OutStreamer->EmitLabel(ReturnSym);
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::RET).addReg(AArch64::LR), *STI);
+
+    OutStreamer->EmitLabel(HandlePartialSym);
+    OutStreamer->EmitInstruction(MCInstBuilder(AArch64::SUBSWri)
+                                     .addReg(AArch64::WZR)
+                                     .addReg(AArch64::W16)
+                                     .addImm(15)
+                                     .addImm(0),
                                  *STI);
+    MCSymbol *HandleMismatchSym = OutContext.createTempSymbol();
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::Bcc)
+            .addImm(AArch64CC::HI)
+            .addExpr(MCSymbolRefExpr::create(HandleMismatchSym, OutContext)),
+        *STI);
+
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::ANDXri)
+            .addReg(AArch64::X17)
+            .addReg(Reg)
+            .addImm(AArch64_AM::encodeLogicalImmediate(0xf, 64)),
+        *STI);
+    unsigned Size = 1 << (AccessInfo & 0xf);
+    if (Size != 1)
+      OutStreamer->EmitInstruction(MCInstBuilder(AArch64::ADDXri)
+                                       .addReg(AArch64::X17)
+                                       .addReg(AArch64::X17)
+                                       .addImm(Size - 1)
+                                       .addImm(0),
+                                   *STI);
     OutStreamer->EmitInstruction(MCInstBuilder(AArch64::SUBSWrs)
                                      .addReg(AArch64::WZR)
                                      .addReg(AArch64::W16)
                                      .addReg(AArch64::W17)
                                      .addImm(0),
                                  *STI);
-    MCSymbol *HandleMismatchSym = OutContext.createTempSymbol();
     OutStreamer->EmitInstruction(
         MCInstBuilder(AArch64::Bcc)
-            .addImm(AArch64CC::NE)
+            .addImm(AArch64CC::LS)
             .addExpr(MCSymbolRefExpr::create(HandleMismatchSym, OutContext)),
         *STI);
+
     OutStreamer->EmitInstruction(
-        MCInstBuilder(AArch64::RET).addReg(AArch64::LR), *STI);
+        MCInstBuilder(AArch64::ORRXri)
+            .addReg(AArch64::X16)
+            .addReg(Reg)
+            .addImm(AArch64_AM::encodeLogicalImmediate(0xf, 64)),
+        *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(AArch64::LDRBBui)
+                                     .addReg(AArch64::W16)
+                                     .addReg(AArch64::X16)
+                                     .addImm(0),
+                                 *STI);
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::SUBSXrs)
+            .addReg(AArch64::XZR)
+            .addReg(AArch64::X16)
+            .addReg(Reg)
+            .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSR, 56)),
+        *STI);
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(AArch64::Bcc)
+            .addImm(AArch64CC::EQ)
+            .addExpr(MCSymbolRefExpr::create(ReturnSym, OutContext)),
+        *STI);
 
     OutStreamer->EmitLabel(HandleMismatchSym);
-
     OutStreamer->EmitInstruction(MCInstBuilder(AArch64::STPXpre)
                                      .addReg(AArch64::SP)
                                      .addReg(AArch64::X0)
@@ -424,26 +485,18 @@ void AArch64AsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNum,
   default:
     llvm_unreachable("<unknown operand type>");
   case MachineOperand::MO_Register: {
-    unsigned Reg = MO.getReg();
-    assert(TargetRegisterInfo::isPhysicalRegister(Reg));
+    Register Reg = MO.getReg();
+    assert(Register::isPhysicalRegister(Reg));
     assert(!MO.getSubReg() && "Subregs should be eliminated!");
     O << AArch64InstPrinter::getRegisterName(Reg);
     break;
   }
   case MachineOperand::MO_Immediate: {
-    int64_t Imm = MO.getImm();
-    O << '#' << Imm;
+    O << MO.getImm();
     break;
   }
   case MachineOperand::MO_GlobalAddress: {
-    const GlobalValue *GV = MO.getGlobal();
-    MCSymbol *Sym = getSymbol(GV);
-
-    // FIXME: Can we get anything other than a plain symbol here?
-    assert(!MO.getTargetFlags() && "Unknown operand target flag!");
-
-    Sym->print(O, MAI);
-    printOffset(MO.getOffset(), O);
+    PrintSymbolOperand(MO, O);
     break;
   }
   case MachineOperand::MO_BlockAddress: {
@@ -456,7 +509,7 @@ void AArch64AsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNum,
 
 bool AArch64AsmPrinter::printAsmMRegister(const MachineOperand &MO, char Mode,
                                           raw_ostream &O) {
-  unsigned Reg = MO.getReg();
+  Register Reg = MO.getReg();
   switch (Mode) {
   default:
     return true; // Unknown mode.
@@ -480,7 +533,7 @@ bool AArch64AsmPrinter::printAsmRegInClass(const MachineOperand &MO,
                                            bool isVector, raw_ostream &O) {
   assert(MO.isReg() && "Should only get here with a register!");
   const TargetRegisterInfo *RI = STI->getRegisterInfo();
-  unsigned Reg = MO.getReg();
+  Register Reg = MO.getReg();
   unsigned RegToPrint = RC->getRegister(RI->getEncodingValue(Reg));
   assert(RI->regsOverlap(RegToPrint, Reg));
   O << AArch64InstPrinter::getRegisterName(
@@ -504,9 +557,6 @@ bool AArch64AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
     switch (ExtraCode[0]) {
     default:
       return true; // Unknown modifier.
-    case 'a':      // Print 'a' modifier
-      PrintAsmMemoryOperand(MI, OpNum, ExtraCode, O);
-      return false;
     case 'w':      // Print W register
     case 'x':      // Print X register
       if (MO.isReg())
@@ -554,7 +604,7 @@ bool AArch64AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
   // According to ARM, we should emit x and v registers unless we have a
   // modifier.
   if (MO.isReg()) {
-    unsigned Reg = MO.getReg();
+    Register Reg = MO.getReg();
 
     // If this is a w or x register, print an x register.
     if (AArch64::GPR32allRegClass.contains(Reg) ||
@@ -674,12 +724,12 @@ void AArch64AsmPrinter::emitJumpTableEntry(const MachineJumpTableInfo *MJTI,
 ///             add xDest, xDest, xScratch, lsl #2
 void AArch64AsmPrinter::LowerJumpTableDestSmall(llvm::MCStreamer &OutStreamer,
                                                 const llvm::MachineInstr &MI) {
-  unsigned DestReg = MI.getOperand(0).getReg();
-  unsigned ScratchReg = MI.getOperand(1).getReg();
-  unsigned ScratchRegW =
+  Register DestReg = MI.getOperand(0).getReg();
+  Register ScratchReg = MI.getOperand(1).getReg();
+  Register ScratchRegW =
       STI->getRegisterInfo()->getSubReg(ScratchReg, AArch64::sub_32);
-  unsigned TableReg = MI.getOperand(2).getReg();
-  unsigned EntryReg = MI.getOperand(3).getReg();
+  Register TableReg = MI.getOperand(2).getReg();
+  Register EntryReg = MI.getOperand(3).getReg();
   int JTIdx = MI.getOperand(4).getIndex();
   bool IsByteEntry = MI.getOpcode() == AArch64::JumpTableDest8;
 
@@ -749,7 +799,7 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
   if (CallTarget) {
     assert((CallTarget & 0xFFFFFFFFFFFF) == CallTarget &&
            "High 16 bits of call target should be zero.");
-    unsigned ScratchReg = MI.getOperand(Opers.getNextScratchIdx()).getReg();
+    Register ScratchReg = MI.getOperand(Opers.getNextScratchIdx()).getReg();
     EncodedBytes = 16;
     // Materialize the jump address:
     EmitToStreamer(OutStreamer, MCInstBuilder(AArch64::MOVZXi)
@@ -779,7 +829,7 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
 }
 
 void AArch64AsmPrinter::EmitFMov0(const MachineInstr &MI) {
-  unsigned DestReg = MI.getOperand(0).getReg();
+  Register DestReg = MI.getOperand(0).getReg();
   if (STI->hasZeroCycleZeroingFP() && !STI->hasZeroCycleZeroingFPWorkaround()) {
     // Convert H/S/D register to corresponding Q register
     if (AArch64::H0 <= DestReg && DestReg <= AArch64::H31)
@@ -843,32 +893,32 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   default:
     break;
     case AArch64::MOVMCSym: {
-    unsigned DestReg = MI->getOperand(0).getReg();
-    const MachineOperand &MO_Sym = MI->getOperand(1);
-    MachineOperand Hi_MOSym(MO_Sym), Lo_MOSym(MO_Sym);
-    MCOperand Hi_MCSym, Lo_MCSym;
+      Register DestReg = MI->getOperand(0).getReg();
+      const MachineOperand &MO_Sym = MI->getOperand(1);
+      MachineOperand Hi_MOSym(MO_Sym), Lo_MOSym(MO_Sym);
+      MCOperand Hi_MCSym, Lo_MCSym;
 
-    Hi_MOSym.setTargetFlags(AArch64II::MO_G1 | AArch64II::MO_S);
-    Lo_MOSym.setTargetFlags(AArch64II::MO_G0 | AArch64II::MO_NC);
+      Hi_MOSym.setTargetFlags(AArch64II::MO_G1 | AArch64II::MO_S);
+      Lo_MOSym.setTargetFlags(AArch64II::MO_G0 | AArch64II::MO_NC);
 
-    MCInstLowering.lowerOperand(Hi_MOSym, Hi_MCSym);
-    MCInstLowering.lowerOperand(Lo_MOSym, Lo_MCSym);
+      MCInstLowering.lowerOperand(Hi_MOSym, Hi_MCSym);
+      MCInstLowering.lowerOperand(Lo_MOSym, Lo_MCSym);
 
-    MCInst MovZ;
-    MovZ.setOpcode(AArch64::MOVZXi);
-    MovZ.addOperand(MCOperand::createReg(DestReg));
-    MovZ.addOperand(Hi_MCSym);
-    MovZ.addOperand(MCOperand::createImm(16));
-    EmitToStreamer(*OutStreamer, MovZ);
+      MCInst MovZ;
+      MovZ.setOpcode(AArch64::MOVZXi);
+      MovZ.addOperand(MCOperand::createReg(DestReg));
+      MovZ.addOperand(Hi_MCSym);
+      MovZ.addOperand(MCOperand::createImm(16));
+      EmitToStreamer(*OutStreamer, MovZ);
 
-    MCInst MovK;
-    MovK.setOpcode(AArch64::MOVKXi);
-    MovK.addOperand(MCOperand::createReg(DestReg));
-    MovK.addOperand(MCOperand::createReg(DestReg));
-    MovK.addOperand(Lo_MCSym);
-    MovK.addOperand(MCOperand::createImm(0));
-    EmitToStreamer(*OutStreamer, MovK);
-    return;
+      MCInst MovK;
+      MovK.setOpcode(AArch64::MOVKXi);
+      MovK.addOperand(MCOperand::createReg(DestReg));
+      MovK.addOperand(MCOperand::createReg(DestReg));
+      MovK.addOperand(Lo_MCSym);
+      MovK.addOperand(MCOperand::createImm(0));
+      EmitToStreamer(*OutStreamer, MovK);
+      return;
   }
   case AArch64::MOVIv2d_ns:
     // If the target has <rdar://problem/16473581>, lower this

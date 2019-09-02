@@ -275,8 +275,16 @@ namespace llvm {
 
     /// Clear the current insertion point. This is useful if the instruction
     /// that had been serving as the insertion point may have been deleted.
-    void clearInsertPoint() {
-      Builder.ClearInsertionPoint();
+    void clearInsertPoint() { Builder.ClearInsertionPoint(); }
+
+    /// Set location information used by debugging information.
+    void SetCurrentDebugLocation(DebugLoc L) {
+      Builder.SetCurrentDebugLocation(std::move(L));
+    }
+
+    /// Get location information used by debugging information.
+    const DebugLoc &getCurrentDebugLocation() const {
+      return Builder.getCurrentDebugLocation();
     }
 
     /// Return true if the specified instruction was inserted by the code
@@ -315,8 +323,10 @@ namespace llvm {
                                    SmallPtrSetImpl<const SCEV *> &Processed);
 
     /// Insert the specified binary operator, doing a small amount of work to
-    /// avoid inserting an obviously redundant operation.
-    Value *InsertBinop(Instruction::BinaryOps Opcode, Value *LHS, Value *RHS);
+    /// avoid inserting an obviously redundant operation, and hoisting to an
+    /// outer loop when the opportunity is there and it is safe.
+    Value *InsertBinop(Instruction::BinaryOps Opcode, Value *LHS, Value *RHS,
+                       SCEV::NoWrapFlags Flags, bool IsSafeToHoist);
 
     /// Arrange for there to be a cast of V to Ty at IP, reusing an existing
     /// cast if a suitable one exists, moving an existing cast if a suitable one
@@ -366,6 +376,10 @@ namespace llvm {
     Value *visitSMaxExpr(const SCEVSMaxExpr *S);
 
     Value *visitUMaxExpr(const SCEVUMaxExpr *S);
+
+    Value *visitSMinExpr(const SCEVSMinExpr *S);
+
+    Value *visitUMinExpr(const SCEVUMinExpr *S);
 
     Value *visitUnknown(const SCEVUnknown *S) {
       return S->getValue();

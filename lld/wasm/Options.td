@@ -31,6 +31,8 @@ defm demangle: B<"demangle",
     "Demangle symbol names",
     "Do not demangle symbol names">;
 
+def emit_relocs: F<"emit-relocs">, HelpText<"Generate relocations in output">;
+
 defm export_dynamic: B<"export-dynamic",
     "Put symbols in the dynamic symbol table",
     "Do not put symbols in the dynamic symbol table (default)">;
@@ -85,6 +87,8 @@ defm print_gc_sections: B<"print-gc-sections",
 
 def relocatable: F<"relocatable">, HelpText<"Create relocatable object file">;
 
+defm reproduce: Eq<"reproduce", "Dump linker invocation and input files for debugging">;
+
 def shared: F<"shared">, HelpText<"Build a shared object">;
 
 def strip_all: F<"strip-all">, HelpText<"Strip all symbols">;
@@ -108,6 +112,9 @@ def version: F<"version">, HelpText<"Display the version number and exit">;
 def z: JoinedOrSeparate<["-"], "z">, MetaVarName<"<option>">,
   HelpText<"Linker option extensions">;
 
+defm wrap: Eq<"wrap", "Use wrapper functions for symbol">,
+  MetaVarName<"<symbol>=<symbol>">;
+
 // The follow flags are unique to wasm
 
 def allow_undefined: F<"allow-undefined">,
@@ -127,6 +134,9 @@ def export_all: F<"export-all">,
 def export_table: F<"export-table">,
   HelpText<"Export function table to the environment">;
 
+def growable_table: F<"growable-table">,
+  HelpText<"Remove maximum size from function table, allowing table to grow">;
+
 def global_base: J<"global-base=">,
   HelpText<"Where to start to place global data">;
 
@@ -135,6 +145,12 @@ def import_memory: F<"import-memory">,
 
 def shared_memory: F<"shared-memory">,
   HelpText<"Use shared linear memory">;
+
+def active_segments: F<"active-segments">,
+  HelpText<"Force segments to be active (default with unshared memory)">;
+
+def passive_segments: F<"passive-segments">,
+  HelpText<"Force segments to be passive (default with shared memory)">;
 
 def import_table: F<"import-table">,
   HelpText<"Import function table from the environment">;

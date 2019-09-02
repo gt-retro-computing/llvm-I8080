@@ -9,7 +9,6 @@
 #ifndef liblldb_Type_h_
 #define liblldb_Type_h_
 
-#include "lldb/Core/ClangForward.h"
 #include "lldb/Symbol/CompilerDecl.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/Declaration.h"
@@ -22,21 +21,27 @@
 #include <set>
 
 namespace lldb_private {
-// CompilerContext allows an array of these items to be passed to perform
-// detailed lookups in SymbolVendor and SymbolFile functions.
+
+/// CompilerContext allows an array of these items to be passed to perform
+/// detailed lookups in SymbolVendor and SymbolFile functions.
 struct CompilerContext {
-  CompilerContext(CompilerContextKind t, ConstString n)
-      : type(t), name(n) {}
+  CompilerContext(CompilerContextKind t, ConstString n) : kind(t), name(n) {}
 
   bool operator==(const CompilerContext &rhs) const {
-    return type == rhs.type && name == rhs.name;
+    return kind == rhs.kind && name == rhs.name;
   }
+  bool operator!=(const CompilerContext &rhs) const { return !(*this == rhs); }
 
   void Dump() const;
 
-  CompilerContextKind type;
+  CompilerContextKind kind;
   ConstString name;
 };
+
+/// Match \p context_chain against \p pattern, which may contain "Any"
+/// kinds. The \p context_chain should *not* contain any "Any" kinds.
+bool contextMatches(llvm::ArrayRef<CompilerContext> context_chain,
+                    llvm::ArrayRef<CompilerContext> pattern);
 
 class SymbolFileType : public std::enable_shared_from_this<SymbolFileType>,
                        public UserID {
@@ -59,25 +64,25 @@ protected:
 
 class Type : public std::enable_shared_from_this<Type>, public UserID {
 public:
-  typedef enum EncodingDataTypeTag {
+  enum EncodingDataType {
     eEncodingInvalid,
     eEncodingIsUID,      ///< This type is the type whose UID is m_encoding_uid
     eEncodingIsConstUID, ///< This type is the type whose UID is m_encoding_uid
-                         ///with the const qualifier added
+                         /// with the const qualifier added
     eEncodingIsRestrictUID, ///< This type is the type whose UID is
-                            ///m_encoding_uid with the restrict qualifier added
+                            /// m_encoding_uid with the restrict qualifier added
     eEncodingIsVolatileUID, ///< This type is the type whose UID is
-                            ///m_encoding_uid with the volatile qualifier added
+                            /// m_encoding_uid with the volatile qualifier added
     eEncodingIsTypedefUID,  ///< This type is pointer to a type whose UID is
-                            ///m_encoding_uid
+                            /// m_encoding_uid
     eEncodingIsPointerUID,  ///< This type is pointer to a type whose UID is
-                            ///m_encoding_uid
+                            /// m_encoding_uid
     eEncodingIsLValueReferenceUID, ///< This type is L value reference to a type
-                                   ///whose UID is m_encoding_uid
+                                   /// whose UID is m_encoding_uid
     eEncodingIsRValueReferenceUID, ///< This type is R value reference to a type
-                                   ///whose UID is m_encoding_uid
+                                   /// whose UID is m_encoding_uid
     eEncodingIsSyntheticUID
-  } EncodingDataType;
+  };
 
   // We must force the underlying type of the enum to be unsigned here.  Not
   // all compilers behave the same with regards to the default underlying type
@@ -102,10 +107,6 @@ public:
   // they get an error.
   Type();
 
-  Type(const Type &rhs);
-
-  const Type &operator=(const Type &rhs);
-
   void Dump(Stream *s, bool show_context);
 
   void DumpTypeName(Stream *s);
@@ -120,8 +121,6 @@ public:
 
   SymbolFile *GetSymbolFile() { return m_symbol_file; }
   const SymbolFile *GetSymbolFile() const { return m_symbol_file; }
-
-  TypeList *GetTypeList();
 
   ConstString GetName();
 
@@ -240,11 +239,9 @@ protected:
 
 class TypeImpl {
 public:
-  TypeImpl();
+  TypeImpl() = default;
 
   ~TypeImpl() {}
-
-  TypeImpl(const TypeImpl &rhs);
 
   TypeImpl(const lldb::TypeSP &type_sp);
 
@@ -261,8 +258,6 @@ public:
   void SetType(const lldb::TypeSP &type_sp, const CompilerType &dynamic);
 
   void SetType(const CompilerType &compiler_type, const CompilerType &dynamic);
-
-  TypeImpl &operator=(const TypeImpl &rhs);
 
   bool operator==(const TypeImpl &rhs) const;
 
@@ -481,9 +476,7 @@ public:
   TypeEnumMemberImpl(const lldb::TypeImplSP &integer_type_sp,
                      ConstString name, const llvm::APSInt &value);
 
-  TypeEnumMemberImpl(const TypeEnumMemberImpl &rhs)
-      : m_integer_type_sp(rhs.m_integer_type_sp), m_name(rhs.m_name),
-        m_value(rhs.m_value), m_valid(rhs.m_valid) {}
+  TypeEnumMemberImpl(const TypeEnumMemberImpl &rhs) = default;
 
   TypeEnumMemberImpl &operator=(const TypeEnumMemberImpl &rhs);
 

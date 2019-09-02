@@ -46,17 +46,17 @@ namespace llvm {
   /// so that it can update all calls to the old function.
   void UpgradeCallsToIntrinsic(Function* F);
 
-  /// This checks for global variables which should be upgraded. It returns true
-  /// if it requires upgrading.
-  bool UpgradeGlobalVariable(GlobalVariable *GV);
+  /// This checks for global variables which should be upgraded. It it requires
+  /// upgrading, returns a pointer to the upgraded variable.
+  GlobalVariable *UpgradeGlobalVariable(GlobalVariable *GV);
 
   /// This checks for module flags which should be upgraded. It returns true if
   /// module is modified.
   bool UpgradeModuleFlags(Module &M);
 
-  /// This checks for objc retain release marker which should be upgraded. It
-  /// returns true if module is modified.
-  bool UpgradeRetainReleaseMarker(Module &M);
+  /// Convert calls to ARC runtime functions to intrinsic calls and upgrade the
+  /// old retain release marker to new module flag format.
+  void UpgradeARCRuntime(Module &M);
 
   void UpgradeSectionAttributes(Module &M);
 

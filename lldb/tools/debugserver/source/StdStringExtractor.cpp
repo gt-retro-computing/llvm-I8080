@@ -30,20 +30,6 @@ StdStringExtractor::StdStringExtractor(const char *packet_cstr)
     m_packet.assign(packet_cstr);
 }
 
-// StdStringExtractor copy constructor
-StdStringExtractor::StdStringExtractor(const StdStringExtractor &rhs)
-    : m_packet(rhs.m_packet), m_index(rhs.m_index) {}
-
-// StdStringExtractor assignment operator
-const StdStringExtractor &StdStringExtractor::
-operator=(const StdStringExtractor &rhs) {
-  if (this != &rhs) {
-    m_packet = rhs.m_packet;
-    m_index = rhs.m_index;
-  }
-  return *this;
-}
-
 // Destructor
 StdStringExtractor::~StdStringExtractor() {}
 
@@ -293,34 +279,6 @@ size_t StdStringExtractor::GetHexBytesAvail(void *dst_void, size_t dst_len) {
     dst[bytes_extracted++] = (uint8_t)decode;
   }
   return bytes_extracted;
-}
-
-// Consume ASCII hex nibble character pairs until we have decoded byte_size
-// bytes of data.
-
-uint64_t StdStringExtractor::GetHexWithFixedSize(uint32_t byte_size,
-                                                 bool little_endian,
-                                                 uint64_t fail_value) {
-  if (byte_size <= 8 && GetBytesLeft() >= byte_size * 2) {
-    uint64_t result = 0;
-    uint32_t i;
-    if (little_endian) {
-      // Little Endian
-      uint32_t shift_amount;
-      for (i = 0, shift_amount = 0; i < byte_size && IsGood();
-           ++i, shift_amount += 8) {
-        result |= ((uint64_t)GetHexU8() << shift_amount);
-      }
-    } else {
-      // Big Endian
-      for (i = 0; i < byte_size && IsGood(); ++i) {
-        result <<= 8;
-        result |= GetHexU8();
-      }
-    }
-  }
-  m_index = UINT64_MAX;
-  return fail_value;
 }
 
 size_t StdStringExtractor::GetHexByteString(std::string &str) {

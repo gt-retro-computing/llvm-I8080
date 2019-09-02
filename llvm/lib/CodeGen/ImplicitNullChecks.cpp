@@ -180,7 +180,8 @@ class ImplicitNullChecks : public MachineFunctionPass {
   /// Returns AR_NoAlias if \p MI memory operation does not alias with
   /// \p PrevMI, AR_MayAlias if they may alias and AR_WillAliasEverything if
   /// they may alias and any further memory operation may alias with \p PrevMI.
-  AliasResult areMemoryOpsAliased(MachineInstr &MI, MachineInstr *PrevMI);
+  AliasResult areMemoryOpsAliased(const MachineInstr &MI,
+                                  const MachineInstr *PrevMI) const;
 
   enum SuitabilityResult {
     SR_Suitable,
@@ -194,7 +195,8 @@ class ImplicitNullChecks : public MachineFunctionPass {
   /// no sense to continue lookup due to any other instruction will not be able
   /// to be used. \p PrevInsts is the set of instruction seen since
   /// the explicit null check on \p PointerReg.
-  SuitabilityResult isSuitableMemoryOp(MachineInstr &MI, unsigned PointerReg,
+  SuitabilityResult isSuitableMemoryOp(const MachineInstr &MI,
+                                       unsigned PointerReg,
                                        ArrayRef<MachineInstr *> PrevInsts);
 
   /// Return true if \p FaultingMI can be hoisted from after the
@@ -227,7 +229,8 @@ public:
 } // end anonymous namespace
 
 bool ImplicitNullChecks::canHandle(const MachineInstr *MI) {
-  if (MI->isCall() || MI->hasUnmodeledSideEffects())
+  if (MI->isCall() || MI->mayRaiseFPException() ||
+      MI->hasUnmodeledSideEffects())
     return false;
   auto IsRegMask = [](const MachineOperand &MO) { return MO.isRegMask(); };
   (void)IsRegMask;
@@ -275,12 +278,12 @@ bool ImplicitNullChecks::canReorder(const MachineInstr *A,
     if (!(MOA.isReg() && MOA.getReg()))
       continue;
 
-    unsigned RegA = MOA.getReg();
+    Register RegA = MOA.getReg();
     for (auto MOB : B->operands()) {
       if (!(MOB.isReg() && MOB.getReg()))
         continue;
 
-      unsigned RegB = MOB.getReg();
+      Register RegB = MOB.getReg();
 
       if (TRI->regsOverlap(RegA, RegB) && (MOA.isDef() || MOB.isDef()))
         return false;
@@ -318,8 +321,8 @@ static bool AnyAliasLiveIn(const TargetRegisterInfo *TRI,
 }
 
 ImplicitNullChecks::AliasResult
-ImplicitNullChecks::areMemoryOpsAliased(MachineInstr &MI,
-                                        MachineInstr *PrevMI) {
+ImplicitNullChecks::areMemoryOpsAliased(const MachineInstr &MI,
+                                        const MachineInstr *PrevMI) const {
   // If it is not memory access, skip the check.
   if (!(PrevMI->mayStore() || PrevMI->mayLoad()))
     return AR_NoAlias;
@@ -356,10 +359,11 @@ ImplicitNullChecks::areMemoryOpsAliased(MachineInstr &MI,
 }
 
 ImplicitNullChecks::SuitabilityResult
-ImplicitNullChecks::isSuitableMemoryOp(MachineInstr &MI, unsigned PointerReg,
+ImplicitNullChecks::isSuitableMemoryOp(const MachineInstr &MI,
+                                       unsigned PointerReg,
                                        ArrayRef<MachineInstr *> PrevInsts) {
   int64_t Offset;
-  MachineOperand *BaseOp;
+  const MachineOperand *BaseOp;
 
   if (!TII->getMemOperandWithOffset(MI, BaseOp, Offset, TRI) ||
       !BaseOp->isReg() || BaseOp->getReg() != PointerReg)
@@ -513,7 +517,7 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //
   // we must ensure that there are no instructions between the 'test' and
   // conditional jump that modify %rax.
-  const unsigned PointerReg = MBP.LHS.getReg();
+  const Register PointerReg = MBP.LHS.getReg();
 
   assert(MBP.ConditionDef->getParent() ==  &MBB && "Should be in basic block");
 
@@ -685,7 +689,7 @@ void ImplicitNullChecks::rewriteNullChecks(
     for (const MachineOperand &MO : FaultingInstr->operands()) {
       if (!MO.isReg() || !MO.isDef())
         continue;
-      unsigned Reg = MO.getReg();
+      Register Reg = MO.getReg();
       if (!Reg || MBB->isLiveIn(Reg))
         continue;
       MBB->addLiveIn(Reg);

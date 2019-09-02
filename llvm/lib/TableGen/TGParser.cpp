@@ -378,7 +378,7 @@ bool TGParser::resolve(const ForeachLoop &Loop, SubstStack &Substs,
   auto LI = dyn_cast<ListInit>(List);
   if (!LI) {
     if (!Final) {
-      Dest->emplace_back(make_unique<ForeachLoop>(Loop.Loc, Loop.IterVar,
+      Dest->emplace_back(std::make_unique<ForeachLoop>(Loop.Loc, Loop.IterVar,
                                                   List));
       return resolve(Loop.Entries, Substs, Final, &Dest->back().Loop->Entries,
                      Loc);
@@ -413,7 +413,7 @@ bool TGParser::resolve(const std::vector<RecordsEntry> &Source,
     if (E.Loop) {
       Error = resolve(*E.Loop, Substs, Final, Dest);
     } else {
-      auto Rec = make_unique<Record>(*E.Rec);
+      auto Rec = std::make_unique<Record>(*E.Rec);
       if (Loc)
         Rec->appendLoc(*Loc);
 
@@ -666,35 +666,47 @@ ParseSubMultiClassReference(MultiClass *CurMC) {
 ///   RangePiece ::= INTVAL
 ///   RangePiece ::= INTVAL '-' INTVAL
 ///   RangePiece ::= INTVAL INTVAL
-bool TGParser::ParseRangePiece(SmallVectorImpl<unsigned> &Ranges) {
-  if (Lex.getCode() != tgtok::IntVal) {
-    TokError("expected integer or bitrange");
-    return true;
-  }
-  int64_t Start = Lex.getCurIntVal();
+bool TGParser::ParseRangePiece(SmallVectorImpl<unsigned> &Ranges,
+                               TypedInit *FirstItem) {
+  Init *CurVal = FirstItem;
+  if (!CurVal)
+    CurVal = ParseValue(nullptr);
+
+  IntInit *II = dyn_cast_or_null<IntInit>(CurVal);
+  if (!II)
+    return TokError("expected integer or bitrange");
+
+  int64_t Start = II->getValue();
   int64_t End;
 
   if (Start < 0)
     return TokError("invalid range, cannot be negative");
 
-  switch (Lex.Lex()) {  // eat first character.
+  switch (Lex.getCode()) {
   default:
     Ranges.push_back(Start);
     return false;
-  case tgtok::minus:
-    if (Lex.Lex() != tgtok::IntVal) {
+  case tgtok::minus: {
+    Lex.Lex(); // eat
+
+    Init *I_End = ParseValue(nullptr);
+    IntInit *II_End = dyn_cast_or_null<IntInit>(I_End);
+    if (!II_End) {
       TokError("expected integer value as end of range");
       return true;
     }
-    End = Lex.getCurIntVal();
+
+    End = II_End->getValue();
     break;
-  case tgtok::IntVal:
+  }
+  case tgtok::IntVal: {
     End = -Lex.getCurIntVal();
+    Lex.Lex();
     break;
+  }
   }
   if (End < 0)
     return TokError("invalid range, cannot be negative");
-  Lex.Lex();
 
   // Add to the range.
   if (Start < End)
@@ -1318,7 +1330,7 @@ Init *TGParser::ParseOperation(Record *CurRec, RecTy *ItemType) {
     std::unique_ptr<Record> ParseRecTmp;
     Record *ParseRec = CurRec;
     if (!ParseRec) {
-      ParseRecTmp = make_unique<Record>(".parse", ArrayRef<SMLoc>{}, Records);
+      ParseRecTmp = std::make_unique<Record>(".parse", ArrayRef<SMLoc>{}, Records);
       ParseRec = ParseRecTmp.get();
     }
 
@@ -1585,7 +1597,7 @@ Init *TGParser::ParseOperation(Record *CurRec, RecTy *ItemType) {
     std::unique_ptr<Record> ParseRecTmp;
     Record *ParseRec = CurRec;
     if (!ParseRec) {
-      ParseRecTmp = make_unique<Record>(".parse", ArrayRef<SMLoc>{}, Records);
+      ParseRecTmp = std::make_unique<Record>(".parse", ArrayRef<SMLoc>{}, Records);
       ParseRec = ParseRecTmp.get();
     }
 
@@ -2189,14 +2201,15 @@ Init *TGParser::ParseValue(Record *CurRec, RecTy *ItemType, IDParseMode Mode) {
       // Create a !strconcat() operation, first casting each operand to
       // a string if necessary.
       if (LHS->getType() != StringRecTy::get()) {
-        LHS = dyn_cast<TypedInit>(
+        auto CastLHS = dyn_cast<TypedInit>(
             UnOpInit::get(UnOpInit::CAST, LHS, StringRecTy::get())
                 ->Fold(CurRec));
-        if (!LHS) {
-          Error(PasteLoc, Twine("can't cast '") + LHS->getAsString() +
-                              "' to string");
+        if (!CastLHS) {
+          Error(PasteLoc,
+                Twine("can't cast '") + LHS->getAsString() + "' to string");
           return nullptr;
         }
+        LHS = CastLHS;
       }
 
       TypedInit *RHS = nullptr;
@@ -2223,14 +2236,15 @@ Init *TGParser::ParseValue(Record *CurRec, RecTy *ItemType, IDParseMode Mode) {
         }
 
         if (RHS->getType() != StringRecTy::get()) {
-          RHS = dyn_cast<TypedInit>(
+          auto CastRHS = dyn_cast<TypedInit>(
               UnOpInit::get(UnOpInit::CAST, RHS, StringRecTy::get())
                   ->Fold(CurRec));
-          if (!RHS) {
-            Error(PasteLoc, Twine("can't cast '") + RHS->getAsString() +
-                                "' to string");
+          if (!CastRHS) {
+            Error(PasteLoc,
+                  Twine("can't cast '") + RHS->getAsString() + "' to string");
             return nullptr;
           }
+          RHS = CastRHS;
         }
 
         break;
@@ -2437,12 +2451,6 @@ VarInit *TGParser::ParseForeachDeclaration(Init *&ForeachListValue) {
   SmallVector<unsigned, 16> Ranges;
 
   switch (Lex.getCode()) {
-  case tgtok::IntVal: { // RangePiece.
-    if (ParseRangePiece(Ranges))
-      return nullptr;
-    break;
-  }
-
   case tgtok::l_brace: { // '{' RangeList '}'
     Lex.Lex(); // eat the '{'
     ParseRangeList(Ranges);
@@ -2457,22 +2465,34 @@ VarInit *TGParser::ParseForeachDeclaration(Init *&ForeachListValue) {
   default: {
     SMLoc ValueLoc = Lex.getLoc();
     Init *I = ParseValue(nullptr);
-    TypedInit *TI = dyn_cast<TypedInit>(I);
-    if (!TI || !isa<ListRecTy>(TI->getType())) {
-      std::string Type;
-      if (TI)
-        Type = (Twine("' of type '") + TI->getType()->getAsString()).str();
-      Error(ValueLoc, "expected a list, got '" + I->getAsString() + Type + "'");
-      if (CurMultiClass)
-        PrintNote({}, "references to multiclass template arguments cannot be "
-                      "resolved at this time");
+    if (!I)
       return nullptr;
+
+    TypedInit *TI = dyn_cast<TypedInit>(I);
+    if (TI && isa<ListRecTy>(TI->getType())) {
+      ForeachListValue = I;
+      IterType = cast<ListRecTy>(TI->getType())->getElementType();
+      break;
     }
-    ForeachListValue = I;
-    IterType = cast<ListRecTy>(TI->getType())->getElementType();
-    break;
+
+    if (TI) {
+      if (ParseRangePiece(Ranges, TI))
+        return nullptr;
+      break;
+    }
+
+    std::string Type;
+    if (TI)
+      Type = (Twine("' of type '") + TI->getType()->getAsString()).str();
+    Error(ValueLoc, "expected a list, got '" + I->getAsString() + Type + "'");
+    if (CurMultiClass) {
+      PrintNote({}, "references to multiclass template arguments cannot be "
+                "resolved at this time");
+    }
+    return nullptr;
   }
   }
+
 
   if (!Ranges.empty()) {
     assert(!IterType && "Type already initialized?");
@@ -2682,10 +2702,10 @@ bool TGParser::ParseDef(MultiClass *CurMultiClass) {
     return true;
 
   if (isa<UnsetInit>(Name))
-    CurRec = make_unique<Record>(Records.getNewAnonymousName(), DefLoc, Records,
+    CurRec = std::make_unique<Record>(Records.getNewAnonymousName(), DefLoc, Records,
                                  /*Anonymous=*/true);
   else
-    CurRec = make_unique<Record>(Name, DefLoc, Records);
+    CurRec = std::make_unique<Record>(Name, DefLoc, Records);
 
   if (ParseObjectBody(CurRec.get()))
     return true;
@@ -2763,7 +2783,7 @@ bool TGParser::ParseForeach(MultiClass *CurMultiClass) {
   Lex.Lex();  // Eat the in
 
   // Create a loop object and remember it.
-  Loops.push_back(llvm::make_unique<ForeachLoop>(Loc, IterName, ListValue));
+  Loops.push_back(std::make_unique<ForeachLoop>(Loc, IterName, ListValue));
 
   if (Lex.getCode() != tgtok::l_brace) {
     // FOREACH Declaration IN Object
@@ -2814,7 +2834,7 @@ bool TGParser::ParseClass() {
   } else {
     // If this is the first reference to this class, create and add it.
     auto NewRec =
-        llvm::make_unique<Record>(Lex.getCurStrVal(), Lex.getLoc(), Records,
+        std::make_unique<Record>(Lex.getCurStrVal(), Lex.getLoc(), Records,
                                   /*Class=*/true);
     CurRec = NewRec.get();
     Records.addClass(std::move(NewRec));
@@ -2943,7 +2963,7 @@ bool TGParser::ParseMultiClass() {
 
   auto Result =
     MultiClasses.insert(std::make_pair(Name,
-                    llvm::make_unique<MultiClass>(Name, Lex.getLoc(),Records)));
+                    std::make_unique<MultiClass>(Name, Lex.getLoc(),Records)));
 
   if (!Result.second)
     return TokError("multiclass '" + Name + "' already defined");

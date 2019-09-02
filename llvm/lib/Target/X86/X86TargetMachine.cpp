@@ -12,6 +12,7 @@
 
 #include "X86TargetMachine.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
+#include "TargetInfo/X86TargetInfo.h"
 #include "X86.h"
 #include "X86CallLowering.h"
 #include "X86LegalizerInfo.h"
@@ -37,6 +38,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
@@ -69,6 +71,7 @@ extern "C" void LLVMInitializeX86Target() {
   initializeFixupBWInstPassPass(PR);
   initializeEvexToVexInstPassPass(PR);
   initializeFixupLEAPassPass(PR);
+  initializeFPSPass(PR);
   initializeX86CallFrameOptimizationPass(PR);
   initializeX86CmovConverterPassPass(PR);
   initializeX86ExpandPseudoPass(PR);
@@ -78,27 +81,28 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
   initializeX86CondBrFoldingPassPass(PR);
+  initializeX86OptimizeLEAPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   if (TT.isOSBinFormatMachO()) {
     if (TT.getArch() == Triple::x86_64)
-      return llvm::make_unique<X86_64MachoTargetObjectFile>();
-    return llvm::make_unique<TargetLoweringObjectFileMachO>();
+      return std::make_unique<X86_64MachoTargetObjectFile>();
+    return std::make_unique<TargetLoweringObjectFileMachO>();
   }
 
   if (TT.isOSFreeBSD())
-    return llvm::make_unique<X86FreeBSDTargetObjectFile>();
+    return std::make_unique<X86FreeBSDTargetObjectFile>();
   if (TT.isOSLinux() || TT.isOSNaCl() || TT.isOSIAMCU())
-    return llvm::make_unique<X86LinuxNaClTargetObjectFile>();
+    return std::make_unique<X86LinuxNaClTargetObjectFile>();
   if (TT.isOSSolaris())
-    return llvm::make_unique<X86SolarisTargetObjectFile>();
+    return std::make_unique<X86SolarisTargetObjectFile>();
   if (TT.isOSFuchsia())
-    return llvm::make_unique<X86FuchsiaTargetObjectFile>();
+    return std::make_unique<X86FuchsiaTargetObjectFile>();
   if (TT.isOSBinFormatELF())
-    return llvm::make_unique<X86ELFTargetObjectFile>();
+    return std::make_unique<X86ELFTargetObjectFile>();
   if (TT.isOSBinFormatCOFF())
-    return llvm::make_unique<TargetLoweringObjectFileCOFF>();
+    return std::make_unique<TargetLoweringObjectFileCOFF>();
   llvm_unreachable("unknown subtarget type");
 }
 
@@ -193,7 +197,7 @@ static CodeModel::Model getEffectiveX86CodeModel(Optional<CodeModel::Model> CM,
                                                  bool JIT, bool Is64Bit) {
   if (CM) {
     if (*CM == CodeModel::Tiny)
-      report_fatal_error("Target does not support the tiny CodeModel");
+      report_fatal_error("Target does not support the tiny CodeModel", false);
     return *CM;
   }
   if (JIT)
@@ -215,17 +219,9 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
           getEffectiveX86CodeModel(CM, JIT, TT.getArch() == Triple::x86_64),
           OL),
       TLOF(createTLOF(getTargetTriple())) {
-  // Windows stack unwinder gets confused when execution flow "falls through"
-  // after a call to 'noreturn' function.
-  // To prevent that, we emit a trap for 'unreachable' IR instructions.
-  // (which on X86, happens to be the 'ud2' instruction)
   // On PS4, the "return address" of a 'noreturn' call must still be within
   // the calling function, and TrapUnreachable is an easy way to get that.
-  // The check here for 64-bit windows is a bit icky, but as we're unlikely
-  // to ever want to mix 32 and 64-bit windows code in a single module
-  // this should be fine.
-  if ((TT.isOSWindows() && TT.getArch() == Triple::x86_64) || TT.isPS4() ||
-      TT.isOSBinFormatMachO()) {
+  if (TT.isPS4() || TT.isOSBinFormatMachO()) {
     this->Options.TrapUnreachable = true;
     this->Options.NoTrapAfterNoreturn = TT.isOSBinFormatMachO();
   }
@@ -308,7 +304,7 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<X86Subtarget>(TargetTriple, CPU, FS, *this,
+    I = std::make_unique<X86Subtarget>(TargetTriple, CPU, FS, *this,
                                         Options.StackAlignmentOverride,
                                         PreferVectorWidthOverride,
                                         RequiredVectorWidth);
@@ -519,7 +515,10 @@ void X86PassConfig::addPreEmitPass2() {
   // correct CFA calculation rule where needed by inserting appropriate CFI
   // instructions.
   const Triple &TT = TM->getTargetTriple();
-  if (!TT.isOSDarwin() && !TT.isOSWindows())
+  const MCAsmInfo *MAI = TM->getMCAsmInfo();
+  if (!TT.isOSDarwin() &&
+      (!TT.isOSWindows() ||
+       MAI->getExceptionHandlingType() == ExceptionHandling::DwarfCFI))
     addPass(createCFIInstrInserter());
 }
 

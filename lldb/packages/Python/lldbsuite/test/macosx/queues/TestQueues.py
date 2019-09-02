@@ -5,7 +5,6 @@ from __future__ import print_function
 
 import unittest2
 import os
-import time
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -268,6 +267,7 @@ class TestQueues(TestBase):
             stream.GetData() == "Background",
             "background QoS thread name is valid")
 
+    @skipIfDarwin # rdar://50379398
     def queues_with_libBacktraceRecording(self):
         """Test queues inspection SB APIs with libBacktraceRecording present."""
         exe = self.getBuildArtifact("a.out")

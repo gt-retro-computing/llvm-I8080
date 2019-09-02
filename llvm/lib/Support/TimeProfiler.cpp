@@ -24,12 +24,6 @@ using namespace std::chrono;
 
 namespace llvm {
 
-static cl::opt<unsigned> TimeTraceGranularity(
-    "time-trace-granularity",
-    cl::desc(
-        "Minimum time granularity (in microseconds) traced by time profiler"),
-    cl::init(500));
-
 TimeTraceProfiler *TimeTraceProfilerInstance = nullptr;
 
 typedef duration<steady_clock::rep, steady_clock::period> DurationType;
@@ -64,8 +58,8 @@ struct TimeTraceProfiler {
     auto &E = Stack.back();
     E.Duration = steady_clock::now() - E.Start;
 
-    // Only include sections longer than TimeTraceGranularity msec.
-    if (duration_cast<microseconds>(E.Duration).count() > TimeTraceGranularity)
+    // Only include sections longer or equal to TimeTraceGranularity msec.
+    if (duration_cast<microseconds>(E.Duration).count() >= TimeTraceGranularity)
       Entries.emplace_back(E);
 
     // Track total time taken by each "name", but only the topmost levels of
@@ -87,25 +81,24 @@ struct TimeTraceProfiler {
   void Write(raw_pwrite_stream &OS) {
     assert(Stack.empty() &&
            "All profiler sections should be ended when calling Write");
-
-    json::Array Events;
-    const size_t ExpectedEntryCount =
-        Entries.size() + CountAndTotalPerName.size() + 1;
-    Events.reserve(ExpectedEntryCount);
+    json::OStream J(OS);
+    J.objectBegin();
+    J.attributeBegin("traceEvents");
+    J.arrayBegin();
 
     // Emit all events for the main flame graph.
     for (const auto &E : Entries) {
       auto StartUs = duration_cast<microseconds>(E.Start - StartTime).count();
       auto DurUs = duration_cast<microseconds>(E.Duration).count();
 
-      Events.emplace_back(json::Object{
-          {"pid", 1},
-          {"tid", 0},
-          {"ph", "X"},
-          {"ts", StartUs},
-          {"dur", DurUs},
-          {"name", E.Name},
-          {"args", json::Object{{"detail", E.Detail}}},
+      J.object([&]{
+        J.attribute("pid", 1);
+        J.attribute("tid", 0);
+        J.attribute("ph", "X");
+        J.attribute("ts", StartUs);
+        J.attribute("dur", DurUs);
+        J.attribute("name", E.Name);
+        J.attributeObject("args", [&] { J.attribute("detail", E.Detail); });
       });
     }
 
@@ -126,48 +119,52 @@ struct TimeTraceProfiler {
       auto DurUs = duration_cast<microseconds>(E.second.second).count();
       auto Count = CountAndTotalPerName[E.first].first;
 
-      Events.emplace_back(json::Object{
-          {"pid", 1},
-          {"tid", Tid},
-          {"ph", "X"},
-          {"ts", 0},
-          {"dur", DurUs},
-          {"name", "Total " + E.first},
-          {"args", json::Object{{"count", static_cast<int64_t>(Count)},
-                                {"avg ms",
-                                 static_cast<int64_t>(DurUs / Count / 1000)}}},
+      J.object([&]{
+        J.attribute("pid", 1);
+        J.attribute("tid", Tid);
+        J.attribute("ph", "X");
+        J.attribute("ts", 0);
+        J.attribute("dur", DurUs);
+        J.attribute("name", "Total " + E.first);
+        J.attributeObject("args", [&] {
+          J.attribute("count", int64_t(Count));
+          J.attribute("avg ms", int64_t(DurUs / Count / 1000));
+        });
       });
 
       ++Tid;
     }
 
     // Emit metadata event with process name.
-    Events.emplace_back(json::Object{
-        {"cat", ""},
-        {"pid", 1},
-        {"tid", 0},
-        {"ts", 0},
-        {"ph", "M"},
-        {"name", "process_name"},
-        {"args", json::Object{{"name", "clang"}}},
+    J.object([&] {
+      J.attribute("cat", "");
+      J.attribute("pid", 1);
+      J.attribute("tid", 0);
+      J.attribute("ts", 0);
+      J.attribute("ph", "M");
+      J.attribute("name", "process_name");
+      J.attributeObject("args", [&] { J.attribute("name", "clang"); });
     });
 
-    assert(Events.size() == ExpectedEntryCount && "Size prediction failed!");
-
-    OS << formatv("{0:2}", json::Value(json::Object(
-                               {{"traceEvents", std::move(Events)}})));
+    J.arrayEnd();
+    J.attributeEnd();
+    J.objectEnd();
   }
 
   SmallVector<Entry, 16> Stack;
   SmallVector<Entry, 128> Entries;
   StringMap<CountAndDurationType> CountAndTotalPerName;
   time_point<steady_clock> StartTime;
+
+  // Minimum time granularity (in microseconds)
+  unsigned TimeTraceGranularity;
 };
 
-void timeTraceProfilerInitialize() {
+void timeTraceProfilerInitialize(unsigned TimeTraceGranularity) {
   assert(TimeTraceProfilerInstance == nullptr &&
          "Profiler should not be initialized");
   TimeTraceProfilerInstance = new TimeTraceProfiler();
+  TimeTraceProfilerInstance->TimeTraceGranularity = TimeTraceGranularity;
 }
 
 void timeTraceProfilerCleanup() {

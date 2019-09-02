@@ -64,12 +64,21 @@ enum class LoopUnrollResult {
   FullyUnrolled
 };
 
-LoopUnrollResult UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
-                            bool Force, bool AllowRuntime,
-                            bool AllowExpensiveTripCount, bool PreserveCondBr,
-                            bool PreserveOnlyFirst, unsigned TripMultiple,
-                            unsigned PeelCount, bool UnrollRemainder,
-                            bool ForgetAllSCEV, LoopInfo *LI,
+struct UnrollLoopOptions {
+  unsigned Count;
+  unsigned TripCount;
+  bool Force;
+  bool AllowRuntime;
+  bool AllowExpensiveTripCount;
+  bool PreserveCondBr;
+  bool PreserveOnlyFirst;
+  unsigned TripMultiple;
+  unsigned PeelCount;
+  bool UnrollRemainder;
+  bool ForgetAllSCEV;
+};
+
+LoopUnrollResult UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
                             ScalarEvolution *SE, DominatorTree *DT,
                             AssumptionCache *AC, OptimizationRemarkEmitter *ORE,
                             bool PreserveLCSSA, Loop **RemainderLoop = nullptr);
@@ -110,9 +119,6 @@ bool computeUnrollCount(Loop *L, const TargetTransformInfo &TTI,
                         TargetTransformInfo::UnrollingPreferences &UP,
                         bool &UseUpperBound);
 
-BasicBlock *foldBlockIntoPredecessor(BasicBlock *BB, LoopInfo *LI,
-                                     ScalarEvolution *SE, DominatorTree *DT);
-
 void remapInstruction(Instruction *I, ValueToValueMapTy &VMap);
 
 void simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
@@ -126,7 +132,8 @@ TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
     BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI, int OptLevel,
     Optional<unsigned> UserThreshold, Optional<unsigned> UserCount,
     Optional<bool> UserAllowPartial, Optional<bool> UserRuntime,
-    Optional<bool> UserUpperBound, Optional<bool> UserAllowPeeling);
+    Optional<bool> UserUpperBound, Optional<bool> UserAllowPeeling,
+    Optional<bool> UserAllowProfileBasedPeeling);
 
 unsigned ApproximateLoopSize(const Loop *L, unsigned &NumCalls,
                              bool &NotDuplicatable, bool &Convergent,

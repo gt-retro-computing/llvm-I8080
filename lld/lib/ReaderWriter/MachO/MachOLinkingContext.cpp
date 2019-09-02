@@ -802,9 +802,9 @@ void MachOLinkingContext::addSectCreateSection(
                                         std::unique_ptr<MemoryBuffer> content) {
 
   if (!_sectCreateFile) {
-    auto sectCreateFile = llvm::make_unique<mach_o::SectCreateFile>();
+    auto sectCreateFile = std::make_unique<mach_o::SectCreateFile>();
     _sectCreateFile = sectCreateFile.get();
-    getNodes().push_back(llvm::make_unique<FileNode>(std::move(sectCreateFile)));
+    getNodes().push_back(std::make_unique<FileNode>(std::move(sectCreateFile)));
   }
 
   assert(_sectCreateFile && "sectcreate file does not exist.");
@@ -897,8 +897,8 @@ static void addDependencyInfoHelper(llvm::raw_fd_ostream *DepInfo,
 
 std::error_code MachOLinkingContext::createDependencyFile(StringRef path) {
   std::error_code ec;
-  _dependencyInfo = std::unique_ptr<llvm::raw_fd_ostream>(new
-                         llvm::raw_fd_ostream(path, ec, llvm::sys::fs::F_None));
+  _dependencyInfo = std::unique_ptr<llvm::raw_fd_ostream>(
+      new llvm::raw_fd_ostream(path, ec, llvm::sys::fs::OF_None));
   if (ec) {
     _dependencyInfo.reset();
     return ec;
@@ -1014,13 +1014,12 @@ static bool isLibrary(const std::unique_ptr<Node> &elem) {
 // new undefines from libraries.
 void MachOLinkingContext::finalizeInputFiles() {
   std::vector<std::unique_ptr<Node>> &elements = getNodes();
-  std::stable_sort(elements.begin(), elements.end(),
-                   [](const std::unique_ptr<Node> &a,
-                      const std::unique_ptr<Node> &b) {
-                     return !isLibrary(a) && isLibrary(b);
-                   });
+  llvm::stable_sort(elements, [](const std::unique_ptr<Node> &a,
+                                 const std::unique_ptr<Node> &b) {
+    return !isLibrary(a) && isLibrary(b);
+  });
   size_t numLibs = std::count_if(elements.begin(), elements.end(), isLibrary);
-  elements.push_back(llvm::make_unique<GroupEnd>(numLibs));
+  elements.push_back(std::make_unique<GroupEnd>(numLibs));
 }
 
 llvm::Error MachOLinkingContext::handleLoadedFile(File &file) {

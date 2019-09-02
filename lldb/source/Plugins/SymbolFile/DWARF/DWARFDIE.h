@@ -34,10 +34,15 @@ public:
 
   const char *GetQualifiedName(std::string &storage) const;
 
+  using DWARFBaseDIE::GetName;
+  void GetName(lldb_private::Stream &s) const;
+
+  void AppendTypeName(lldb_private::Stream &s) const;
+
   lldb_private::Type *ResolveType() const;
 
   // Resolve a type by UID using this DIE's DWARF file
-  lldb_private::Type *ResolveTypeUID(const DIERef &die_ref) const;
+  lldb_private::Type *ResolveTypeUID(const DWARFDIE &die) const;
 
   // Functions for obtaining DIE relations and references
 
@@ -73,8 +78,8 @@ public:
 
   /// Return this DIE's decl context as it is needed to look up types
   /// in Clang's -gmodules debug info format.
-  void
-  GetDeclContext(std::vector<lldb_private::CompilerContext> &context) const;
+  void GetDeclContext(
+      llvm::SmallVectorImpl<lldb_private::CompilerContext> &context) const;
 
   // Getting attribute values from the DIE.
   //

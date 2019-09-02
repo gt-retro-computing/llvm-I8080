@@ -46,6 +46,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -69,6 +70,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
@@ -491,6 +493,7 @@ uint32_t GVN::ValueTable::lookupOrAdd(Value *V) {
   switch (I->getOpcode()) {
     case Instruction::Call:
       return lookupOrAddCall(cast<CallInst>(I));
+    case Instruction::FNeg:
     case Instruction::Add:
     case Instruction::FAdd:
     case Instruction::Sub:
@@ -522,6 +525,7 @@ uint32_t GVN::ValueTable::lookupOrAdd(Value *V) {
     case Instruction::FPExt:
     case Instruction::PtrToInt:
     case Instruction::IntToPtr:
+    case Instruction::AddrSpaceCast:
     case Instruction::BitCast:
     case Instruction::Select:
     case Instruction::ExtractElement:
@@ -623,6 +627,8 @@ PreservedAnalyses GVN::run(Function &F, FunctionAnalysisManager &AM) {
   PA.preserve<DominatorTreeAnalysis>();
   PA.preserve<GlobalsAA>();
   PA.preserve<TargetLibraryAnalysis>();
+  if (LI)
+    PA.preserve<LoopAnalysis>();
   return PA;
 }
 
@@ -857,11 +863,12 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
 
   const DataLayout &DL = LI->getModule()->getDataLayout();
 
+  Instruction *DepInst = DepInfo.getInst();
   if (DepInfo.isClobber()) {
     // If the dependence is to a store that writes to a superset of the bits
     // read by the load, we can extract the bits we need for the load from the
     // stored value.
-    if (StoreInst *DepSI = dyn_cast<StoreInst>(DepInfo.getInst())) {
+    if (StoreInst *DepSI = dyn_cast<StoreInst>(DepInst)) {
       // Can't forward from non-atomic to atomic without violating memory model.
       if (Address && LI->isAtomic() <= DepSI->isAtomic()) {
         int Offset =
@@ -877,7 +884,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     //    load i32* P
     //    load i8* (P+1)
     // if we have this, replace the later with an extraction from the former.
-    if (LoadInst *DepLI = dyn_cast<LoadInst>(DepInfo.getInst())) {
+    if (LoadInst *DepLI = dyn_cast<LoadInst>(DepInst)) {
       // If this is a clobber and L is the first instruction in its block, then
       // we have the first instruction in the entry block.
       // Can't forward from non-atomic to atomic without violating memory model.
@@ -894,7 +901,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
 
     // If the clobbering value is a memset/memcpy/memmove, see if we can
     // forward a value on from it.
-    if (MemIntrinsic *DepMI = dyn_cast<MemIntrinsic>(DepInfo.getInst())) {
+    if (MemIntrinsic *DepMI = dyn_cast<MemIntrinsic>(DepInst)) {
       if (Address && !LI->isAtomic()) {
         int Offset = analyzeLoadFromClobberingMemInst(LI->getType(), Address,
                                                       DepMI, DL);
@@ -908,16 +915,13 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     LLVM_DEBUG(
         // fast print dep, using operator<< on instruction is too slow.
         dbgs() << "GVN: load "; LI->printAsOperand(dbgs());
-        Instruction *I = DepInfo.getInst();
-        dbgs() << " is clobbered by " << *I << '\n';);
+        dbgs() << " is clobbered by " << *DepInst << '\n';);
     if (ORE->allowExtraAnalysis(DEBUG_TYPE))
       reportMayClobberedLoad(LI, DepInfo, DT, ORE);
 
     return false;
   }
   assert(DepInfo.isDef() && "follows from above");
-
-  Instruction *DepInst = DepInfo.getInst();
 
   // Loading the allocation -> undef.
   if (isa<AllocaInst>(DepInst) || isMallocLikeFn(DepInst, TLI) ||
@@ -937,9 +941,8 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     // Reject loads and stores that are to the same address but are of
     // different types if we have to. If the stored value is larger or equal to
     // the loaded value, we can reuse it.
-    if (S->getValueOperand()->getType() != LI->getType() &&
-        !canCoerceMustAliasedValueToLoad(S->getValueOperand(),
-                                         LI->getType(), DL))
+    if (!canCoerceMustAliasedValueToLoad(S->getValueOperand(), LI->getType(),
+                                         DL))
       return false;
 
     // Can't forward from non-atomic to atomic without violating memory model.
@@ -954,8 +957,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
     // If the types mismatch and we can't handle it, reject reuse of the load.
     // If the stored value is larger or equal to the loaded value, we can reuse
     // it.
-    if (LD->getType() != LI->getType() &&
-        !canCoerceMustAliasedValueToLoad(LD, LI->getType(), DL))
+    if (!canCoerceMustAliasedValueToLoad(LD, LI->getType(), DL))
       return false;
 
     // Can't forward from non-atomic to atomic without violating memory model.
@@ -1162,15 +1164,30 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
     // Do PHI translation to get its value in the predecessor if necessary.  The
     // returned pointer (if non-null) is guaranteed to dominate UnavailablePred.
+    // We do the translation for each edge we skipped by going from LI's block
+    // to LoadBB, otherwise we might miss pieces needing translation.
 
     // If all preds have a single successor, then we know it is safe to insert
     // the load on the pred (?!?), so we can insert code to materialize the
     // pointer if it is not available.
-    PHITransAddr Address(LI->getPointerOperand(), DL, AC);
-    Value *LoadPtr = nullptr;
-    LoadPtr = Address.PHITranslateWithInsertion(LoadBB, UnavailablePred,
-                                                *DT, NewInsts);
+    Value *LoadPtr = LI->getPointerOperand();
+    BasicBlock *Cur = LI->getParent();
+    while (Cur != LoadBB) {
+      PHITransAddr Address(LoadPtr, DL, AC);
+      LoadPtr = Address.PHITranslateWithInsertion(
+          Cur, Cur->getSinglePredecessor(), *DT, NewInsts);
+      if (!LoadPtr) {
+        CanDoPRE = false;
+        break;
+      }
+      Cur = Cur->getSinglePredecessor();
+    }
 
+    if (LoadPtr) {
+      PHITransAddr Address(LoadPtr, DL, AC);
+      LoadPtr = Address.PHITranslateWithInsertion(LoadBB, UnavailablePred, *DT,
+                                                  NewInsts);
+    }
     // If we couldn't find or insert a computation of this phi translated value,
     // we fail PRE.
     if (!LoadPtr) {
@@ -1185,8 +1202,12 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
   if (!CanDoPRE) {
     while (!NewInsts.empty()) {
-      Instruction *I = NewInsts.pop_back_val();
-      markInstructionForDeletion(I);
+      // Erase instructions generated by the failed PHI translation before
+      // trying to number them. PHI translation might insert instructions
+      // in basic blocks other than the current one, and we delete them
+      // directly, as markInstructionForDeletion only allows removing from the
+      // current basic block.
+      NewInsts.pop_back_val()->eraseFromParent();
     }
     // HINT: Don't revert the edge-splitting as following transformation may
     // also need to split these critical edges.
@@ -1206,9 +1227,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     // Instructions that have been inserted in predecessor(s) to materialize
     // the load address do not retain their original debug locations. Doing
     // so could lead to confusing (but correct) source attributions.
-    // FIXME: How do we retain source locations without causing poor debugging
-    // behavior?
-    I->setDebugLoc(DebugLoc());
+    if (const DebugLoc &DL = I->getDebugLoc())
+      I->setDebugLoc(DebugLoc::get(0, 0, DL.getScope(), DL.getInlinedAt()));
 
     // FIXME: We really _ought_ to insert these value numbers into their
     // parent's availability map.  However, in doing so, we risk getting into
@@ -1524,6 +1544,41 @@ uint32_t GVN::ValueTable::phiTranslate(const BasicBlock *Pred,
   return NewNum;
 }
 
+// Return true if the value number \p Num and NewNum have equal value.
+// Return false if the result is unknown.
+bool GVN::ValueTable::areCallValsEqual(uint32_t Num, uint32_t NewNum,
+                                       const BasicBlock *Pred,
+                                       const BasicBlock *PhiBlock, GVN &Gvn) {
+  CallInst *Call = nullptr;
+  LeaderTableEntry *Vals = &Gvn.LeaderTable[Num];
+  while (Vals) {
+    Call = dyn_cast<CallInst>(Vals->Val);
+    if (Call && Call->getParent() == PhiBlock)
+      break;
+    Vals = Vals->Next;
+  }
+
+  if (AA->doesNotAccessMemory(Call))
+    return true;
+
+  if (!MD || !AA->onlyReadsMemory(Call))
+    return false;
+
+  MemDepResult local_dep = MD->getDependency(Call);
+  if (!local_dep.isNonLocal())
+    return false;
+
+  const MemoryDependenceResults::NonLocalDepInfo &deps =
+      MD->getNonLocalCallDependency(Call);
+
+  // Check to see if the Call has no function local clobber.
+  for (unsigned i = 0; i < deps.size(); i++) {
+    if (deps[i].getResult().isNonFuncLocal())
+      return true;
+  }
+  return false;
+}
+
 /// Translate value number \p Num using phis, so that it has the values of
 /// the phis in BB.
 uint32_t GVN::ValueTable::phiTranslateImpl(const BasicBlock *Pred,
@@ -1570,8 +1625,11 @@ uint32_t GVN::ValueTable::phiTranslateImpl(const BasicBlock *Pred,
     }
   }
 
-  if (uint32_t NewNum = expressionNumbering[Exp])
+  if (uint32_t NewNum = expressionNumbering[Exp]) {
+    if (Exp.opcode == Instruction::Call && NewNum != Num)
+      return areCallValsEqual(Num, NewNum, Pred, PhiBlock, Gvn) ? NewNum : Num;
     return NewNum;
+  }
   return Num;
 }
 
@@ -1978,6 +2036,7 @@ bool GVN::runImpl(Function &F, AssumptionCache &RunAC, DominatorTree &RunDT,
   MD = RunMD;
   ImplicitControlFlowTracking ImplicitCFT(DT);
   ICF = &ImplicitCFT;
+  this->LI = LI;
   VN.setMemDep(MD);
   ORE = RunORE;
   InvalidBlockRPONumbers = true;
@@ -2337,7 +2396,7 @@ bool GVN::performPRE(Function &F) {
 /// the block inserted to the critical edge.
 BasicBlock *GVN::splitCriticalEdges(BasicBlock *Pred, BasicBlock *Succ) {
   BasicBlock *BB =
-      SplitCriticalEdge(Pred, Succ, CriticalEdgeSplittingOptions(DT));
+      SplitCriticalEdge(Pred, Succ, CriticalEdgeSplittingOptions(DT, LI));
   if (MD)
     MD->invalidateCachedPredecessors();
   InvalidBlockRPONumbers = true;
@@ -2352,7 +2411,7 @@ bool GVN::splitCriticalEdges() {
   do {
     std::pair<Instruction *, unsigned> Edge = toSplit.pop_back_val();
     SplitCriticalEdge(Edge.first, Edge.second,
-                      CriticalEdgeSplittingOptions(DT));
+                      CriticalEdgeSplittingOptions(DT, LI));
   } while (!toSplit.empty());
   if (MD) MD->invalidateCachedPredecessors();
   InvalidBlockRPONumbers = true;
@@ -2458,20 +2517,27 @@ void GVN::addDeadBlock(BasicBlock *BB) {
     if (DeadBlocks.count(B))
       continue;
 
+    // First, split the critical edges. This might also create additional blocks
+    // to preserve LoopSimplify form and adjust edges accordingly.
     SmallVector<BasicBlock *, 4> Preds(pred_begin(B), pred_end(B));
     for (BasicBlock *P : Preds) {
       if (!DeadBlocks.count(P))
         continue;
 
-      if (isCriticalEdge(P->getTerminator(), GetSuccessorNumber(P, B))) {
+      if (llvm::any_of(successors(P),
+                       [B](BasicBlock *Succ) { return Succ == B; }) &&
+          isCriticalEdge(P->getTerminator(), B)) {
         if (BasicBlock *S = splitCriticalEdges(P, B))
           DeadBlocks.insert(P = S);
       }
+    }
 
-      for (BasicBlock::iterator II = B->begin(); isa<PHINode>(II); ++II) {
-        PHINode &Phi = cast<PHINode>(*II);
-        Phi.setIncomingValue(Phi.getBasicBlockIndex(P),
-                             UndefValue::get(Phi.getType()));
+    // Now undef the incoming values from the dead predecessors.
+    for (BasicBlock *P : predecessors(B)) {
+      if (!DeadBlocks.count(P))
+        continue;
+      for (PHINode &Phi : B->phis()) {
+        Phi.setIncomingValueForBlock(P, UndefValue::get(Phi.getType()));
         if (MD)
           MD->invalidateCachedPointerInfo(&Phi);
       }
@@ -2559,6 +2625,7 @@ public:
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<TargetLibraryInfoWrapperPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
     if (!NoMemDepAnalysis)
       AU.addRequired<MemoryDependenceWrapperPass>();
     AU.addRequired<AAResultsWrapperPass>();
@@ -2566,6 +2633,8 @@ public:
     AU.addPreserved<DominatorTreeWrapperPass>();
     AU.addPreserved<GlobalsAAWrapperPass>();
     AU.addPreserved<TargetLibraryInfoWrapperPass>();
+    AU.addPreserved<LoopInfoWrapperPass>();
+    AU.addPreservedID(LoopSimplifyID);
     AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
   }
 

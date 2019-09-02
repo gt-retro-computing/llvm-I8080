@@ -949,7 +949,7 @@ template <typename DerivedT> class AAResultBase {
 
   /// A pointer to the AAResults object that this AAResult is
   /// aggregated within. May be null if not aggregated.
-  AAResults *AAR;
+  AAResults *AAR = nullptr;
 
   /// Helper to dispatch calls back through the derived type.
   DerivedT &derived() { return static_cast<DerivedT &>(*this); }
@@ -1096,6 +1096,11 @@ bool isIdentifiedFunctionLocal(const Value *V);
 /// This manager effectively wraps the AnalysisManager for registering alias
 /// analyses. When you register your alias analysis with this manager, it will
 /// ensure the analysis itself is registered with its AnalysisManager.
+///
+/// The result of this analysis is only invalidated if one of the particular
+/// aggregated AA results end up being invalidated. This removes the need to
+/// explicitly preserve the results of `AAManager`. Note that analyses should no
+/// longer be registered once the `AAManager` is run.
 class AAManager : public AnalysisInfoMixin<AAManager> {
 public:
   using Result = AAResults;

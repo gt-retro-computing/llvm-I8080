@@ -45,15 +45,15 @@ public:
   ~ClangASTSource() override;
 
   /// Interface stubs.
-  clang::Decl *GetExternalDecl(uint32_t) override { return NULL; }
-  clang::Stmt *GetExternalDeclStmt(uint64_t) override { return NULL; }
+  clang::Decl *GetExternalDecl(uint32_t) override { return nullptr; }
+  clang::Stmt *GetExternalDeclStmt(uint64_t) override { return nullptr; }
   clang::Selector GetExternalSelector(uint32_t) override {
     return clang::Selector();
   }
   uint32_t GetNumExternalSelectors() override { return 0; }
   clang::CXXBaseSpecifier *
   GetExternalCXXBaseSpecifiers(uint64_t Offset) override {
-    return NULL;
+    return nullptr;
   }
   void MaterializeVisibleDecls(const clang::DeclContext *DC) { return; }
 
@@ -192,6 +192,8 @@ public:
   /// \param[in] context
   ///     The NameSearchContext to use when filing results.
   virtual void FindExternalVisibleDecls(NameSearchContext &context);
+
+  clang::Sema *getSema();
 
   void SetImportInProgress(bool import_in_progress) {
     m_import_in_progress = import_in_progress;

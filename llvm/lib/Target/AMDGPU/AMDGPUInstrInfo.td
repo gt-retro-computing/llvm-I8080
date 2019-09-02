@@ -50,23 +50,19 @@ def AMDGPUFmasOp : SDTypeProfile<1, 4,
 def AMDGPUKillSDT : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
 
 def AMDGPUIfOp : SDTypeProfile<1, 2,
-  [SDTCisVT<0, i64>, SDTCisVT<1, i1>, SDTCisVT<2, OtherVT>]
+  [SDTCisVT<0, i1>, SDTCisVT<1, i1>, SDTCisVT<2, OtherVT>]
 >;
 
 def AMDGPUElseOp : SDTypeProfile<1, 2,
-  [SDTCisVT<0, i64>, SDTCisVT<1, i64>, SDTCisVT<2, OtherVT>]
+  [SDTCisVT<0, i1>, SDTCisVT<1, i1>, SDTCisVT<2, OtherVT>]
 >;
 
 def AMDGPULoopOp : SDTypeProfile<0, 2,
-  [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]
+  [SDTCisVT<0, i1>, SDTCisVT<1, OtherVT>]
 >;
 
 def AMDGPUIfBreakOp : SDTypeProfile<1, 2,
-  [SDTCisVT<0, i64>, SDTCisVT<1, i1>, SDTCisVT<2, i64>]
->;
-
-def AMDGPUAddeSubeOp : SDTypeProfile<2, 3,
-  [SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>, SDTCisVT<0, i32>, SDTCisVT<1, i1>, SDTCisVT<4, i1>]
+  [SDTCisVT<0, i1>, SDTCisVT<1, i1>, SDTCisVT<2, i1>]
 >;
 
 //===----------------------------------------------------------------------===//
@@ -203,14 +199,8 @@ def AMDGPUcarry : SDNode<"AMDGPUISD::CARRY", SDTIntBinOp, []>;
 // out = (src1 > src0) ? 1 : 0
 def AMDGPUborrow : SDNode<"AMDGPUISD::BORROW", SDTIntBinOp, []>;
 
-// TODO: remove AMDGPUadde/AMDGPUsube when ADDCARRY/SUBCARRY get their own
-// nodes in TargetSelectionDAG.td.
-def AMDGPUadde : SDNode<"ISD::ADDCARRY", AMDGPUAddeSubeOp, []>;
-
-def AMDGPUsube : SDNode<"ISD::SUBCARRY", AMDGPUAddeSubeOp, []>;
-
 def AMDGPUSetCCOp : SDTypeProfile<1, 3, [        // setcc
-  SDTCisVT<0, i64>, SDTCisSameAs<1, 2>, SDTCisVT<3, OtherVT>
+  SDTCisInt<0>, SDTCisSameAs<1, 2>, SDTCisVT<3, OtherVT>
 ]>;
 
 def AMDGPUsetcc : SDNode<"AMDGPUISD::SETCC", AMDGPUSetCCOp>;
@@ -249,7 +239,8 @@ def AMDGPUdiv_scale : SDNode<"AMDGPUISD::DIV_SCALE", AMDGPUDivScaleOp>;
 
 //  Special case divide FMA with scale and flags (src0 = Quotient,
 //  src1 = Denominator, src2 = Numerator).
-def AMDGPUdiv_fmas : SDNode<"AMDGPUISD::DIV_FMAS", AMDGPUFmasOp>;
+def AMDGPUdiv_fmas : SDNode<"AMDGPUISD::DIV_FMAS", AMDGPUFmasOp,
+                            [SDNPOptInGlue]>;
 
 // Single or double precision division fixup.
 // Special case divide fixup and flags(src0 = Quotient, src1 =
@@ -347,14 +338,6 @@ def AMDGPUinit_exec_from_input : SDNode<"AMDGPUISD::INIT_EXEC_FROM_INPUT",
                                  SDTypeProfile<0, 2,
                                  [SDTCisInt<0>, SDTCisInt<1>]>,
                                  [SDNPHasChain, SDNPInGlue]>;
-
-def AMDGPUsendmsg : SDNode<"AMDGPUISD::SENDMSG",
-                    SDTypeProfile<0, 1, [SDTCisInt<0>]>,
-                    [SDNPHasChain, SDNPInGlue]>;
-
-def AMDGPUsendmsghalt : SDNode<"AMDGPUISD::SENDMSGHALT",
-                    SDTypeProfile<0, 1, [SDTCisInt<0>]>,
-                    [SDNPHasChain, SDNPInGlue]>;
 
 def AMDGPUinterp_mov : SDNode<"AMDGPUISD::INTERP_MOV",
                         SDTypeProfile<1, 3, [SDTCisFP<0>]>,

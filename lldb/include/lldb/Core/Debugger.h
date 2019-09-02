@@ -45,34 +45,21 @@
 #include <stddef.h>
 #include <stdio.h>
 
-namespace lldb_private {
-class Address;
-}
-namespace lldb_private {
-class CommandInterpreter;
-}
-namespace lldb_private {
-class Process;
-}
-namespace lldb_private {
-class Stream;
-}
-namespace lldb_private {
-class SymbolContext;
-}
-namespace lldb_private {
-class Target;
-}
-namespace lldb_private {
-namespace repro {
-class DataRecorder;
-}
-} // namespace lldb_private
 namespace llvm {
 class raw_ostream;
 }
 
 namespace lldb_private {
+class Address;
+class CommandInterpreter;
+class Process;
+class Stream;
+class SymbolContext;
+class Target;
+
+namespace repro {
+class DataRecorder;
+}
 
 /// \class Debugger Debugger.h "lldb/Core/Debugger.h"
 /// A class to manage flag bits.
@@ -153,6 +140,8 @@ public:
     assert(m_command_interpreter_up.get());
     return *m_command_interpreter_up;
   }
+
+  ScriptInterpreter *GetScriptInterpreter(bool can_create = true);
 
   lldb::ListenerSP GetListener() { return m_listener_sp; }
 
@@ -322,7 +311,7 @@ public:
   // selected target, or if no target is present you want to prime the dummy
   // target with entities that will be copied over to new targets.
   Target *GetSelectedOrDummyTarget(bool prefer_dummy = false);
-  Target *GetDummyTarget();
+  Target *GetDummyTarget() { return m_dummy_target_sp.get(); }
 
   lldb::BroadcasterManagerSP GetBroadcasterManager() {
     return m_broadcaster_manager_sp;
@@ -356,9 +345,10 @@ protected:
 
   void HandleThreadEvent(const lldb::EventSP &event_sp);
 
-  size_t GetProcessSTDOUT(Process *process, Stream *stream);
-
-  size_t GetProcessSTDERR(Process *process, Stream *stream);
+  // Ensures two threads don't attempt to flush process output in parallel.
+  std::mutex m_output_flush_mutex;
+  void FlushProcessOutput(Process &process, bool flush_stdout,
+                          bool flush_stderr);
 
   SourceManager::SourceFileCache &GetSourceFileCache() {
     return m_source_file_cache;
@@ -395,6 +385,9 @@ protected:
                                                       // source file cache.
   std::unique_ptr<CommandInterpreter> m_command_interpreter_up;
 
+  lldb::ScriptInterpreterSP m_script_interpreter_sp;
+  std::recursive_mutex m_script_interpreter_mutex;
+
   IOHandlerStack m_input_reader_stack;
   llvm::StringMap<std::weak_ptr<llvm::raw_ostream>> m_log_streams;
   std::shared_ptr<llvm::raw_ostream> m_log_callback_stream_sp;
@@ -407,6 +400,7 @@ protected:
   Broadcaster m_sync_broadcaster;
   lldb::ListenerSP m_forward_listener_sp;
   llvm::once_flag m_clear_once;
+  lldb::TargetSP m_dummy_target_sp;
 
   // Events for m_sync_broadcaster
   enum {

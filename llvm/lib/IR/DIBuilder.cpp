@@ -25,7 +25,7 @@
 using namespace llvm;
 using namespace llvm::dwarf;
 
-cl::opt<bool>
+static cl::opt<bool>
     UseDbgAddr("use-dbg-addr",
                llvm::cl::desc("Use llvm.dbg.addr for all local variables"),
                cl::init(false), cl::Hidden);
@@ -166,8 +166,8 @@ createImportedModule(LLVMContext &C, dwarf::Tag Tag, DIScope *Context,
   if (Line)
     assert(File && "Source location has line number but no file");
   unsigned EntitiesCount = C.pImpl->DIImportedEntitys.size();
-  auto *M =
-      DIImportedEntity::get(C, Tag, Context, DINodeRef(NS), File, Line, Name);
+  auto *M = DIImportedEntity::get(C, Tag, Context, cast_or_null<DINode>(NS),
+                                  File, Line, Name);
   if (EntitiesCount < C.pImpl->DIImportedEntitys.size())
     // A new Imported Entity was just added to the context.
     // Add it to the Imported Modules list.

@@ -50,9 +50,7 @@ INITIALIZE_PASS_END(Legalizer, DEBUG_TYPE,
                     "Legalize the Machine IR a function's Machine IR", false,
                     false)
 
-Legalizer::Legalizer() : MachineFunctionPass(ID) {
-  initializeLegalizerPass(*PassRegistry::getPassRegistry());
-}
+Legalizer::Legalizer() : MachineFunctionPass(ID) { }
 
 void Legalizer::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetPassConfig>();
@@ -88,12 +86,15 @@ namespace {
 class LegalizerWorkListManager : public GISelChangeObserver {
   InstListTy &InstList;
   ArtifactListTy &ArtifactList;
+#ifndef NDEBUG
+  SmallVector<MachineInstr *, 4> NewMIs;
+#endif
 
 public:
   LegalizerWorkListManager(InstListTy &Insts, ArtifactListTy &Arts)
       : InstList(Insts), ArtifactList(Arts) {}
 
-  void createdInstr(MachineInstr &MI) override {
+  void createdOrChangedInstr(MachineInstr &MI) {
     // Only legalize pre-isel generic instructions.
     // Legalization process could generate Target specific pseudo
     // instructions with generic types. Don't record them
@@ -103,7 +104,20 @@ public:
       else
         InstList.insert(&MI);
     }
+  }
+
+  void createdInstr(MachineInstr &MI) override {
     LLVM_DEBUG(dbgs() << ".. .. New MI: " << MI);
+    LLVM_DEBUG(NewMIs.push_back(&MI));
+    createdOrChangedInstr(MI);
+  }
+
+  void printNewInstrs() {
+    LLVM_DEBUG({
+      for (const auto *MI : NewMIs)
+        dbgs() << ".. .. New MI: " << *MI;
+      NewMIs.clear();
+    });
   }
 
   void erasingInstr(MachineInstr &MI) override {
@@ -120,7 +134,7 @@ public:
     // When insts change, we want to revisit them to legalize them again.
     // We'll consider them the same as created.
     LLVM_DEBUG(dbgs() << ".. .. Changed MI: " << MI);
-    createdInstr(MI);
+    createdOrChangedInstr(MI);
   }
 };
 } // namespace
@@ -170,11 +184,11 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
                        : TPC.isGISelCSEEnabled();
 
   if (EnableCSE) {
-    MIRBuilder = make_unique<CSEMIRBuilder>();
+    MIRBuilder = std::make_unique<CSEMIRBuilder>();
     CSEInfo = &Wrapper.get(TPC.getCSEConfig());
     MIRBuilder->setCSEInfo(CSEInfo);
   } else
-    MIRBuilder = make_unique<MachineIRBuilder>();
+    MIRBuilder = std::make_unique<MachineIRBuilder>();
   // This observer keeps the worklist updated.
   LegalizerWorkListManager WorkListObserver(InstList, ArtifactList);
   // We want both WorkListObserver as well as CSEInfo to observe all changes.
@@ -192,8 +206,16 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
   auto RemoveDeadInstFromLists = [&WrapperObserver](MachineInstr *DeadMI) {
     WrapperObserver.erasingInstr(*DeadMI);
   };
+  auto stopLegalizing = [&](MachineInstr &MI) {
+    Helper.MIRBuilder.stopObservingChanges();
+    reportGISelFailure(MF, TPC, MORE, "gisel-legalize",
+                       "unable to legalize instruction", MI);
+  };
   bool Changed = false;
+  SmallVector<MachineInstr *, 128> RetryList;
   do {
+    assert(RetryList.empty() && "Expected no instructions in RetryList");
+    unsigned NumArtifacts = ArtifactList.size();
     while (!InstList.empty()) {
       MachineInstr &MI = *InstList.pop_back_val();
       assert(isPreISelGenericOpcode(MI.getOpcode()) && "Expecting generic opcode");
@@ -208,12 +230,30 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
       // Error out if we couldn't legalize this instruction. We may want to
       // fall back to DAG ISel instead in the future.
       if (Res == LegalizerHelper::UnableToLegalize) {
-        Helper.MIRBuilder.stopObservingChanges();
-        reportGISelFailure(MF, TPC, MORE, "gisel-legalize",
-                           "unable to legalize instruction", MI);
+        // Move illegal artifacts to RetryList instead of aborting because
+        // legalizing InstList may generate artifacts that allow
+        // ArtifactCombiner to combine away them.
+        if (isArtifact(MI)) {
+          RetryList.push_back(&MI);
+          continue;
+        }
+        stopLegalizing(MI);
         return false;
       }
+      WorkListObserver.printNewInstrs();
       Changed |= Res == LegalizerHelper::Legalized;
+    }
+    // Try to combine the instructions in RetryList again if there
+    // are new artifacts. If not, stop legalizing.
+    if (!RetryList.empty()) {
+      if (ArtifactList.size() > NumArtifacts) {
+        while (!RetryList.empty())
+          ArtifactList.insert(RetryList.pop_back_val());
+      } else {
+        MachineInstr *MI = *RetryList.begin();
+        stopLegalizing(*MI);
+        return false;
+      }
     }
     while (!ArtifactList.empty()) {
       MachineInstr &MI = *ArtifactList.pop_back_val();
@@ -227,6 +267,7 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
       SmallVector<MachineInstr *, 4> DeadInstructions;
       if (ArtCombiner.tryCombineInstruction(MI, DeadInstructions,
                                             WrapperObserver)) {
+        WorkListObserver.printNewInstrs();
         for (auto *DeadMI : DeadInstructions) {
           LLVM_DEBUG(dbgs() << *DeadMI << "Is dead\n");
           RemoveDeadInstFromLists(DeadMI);

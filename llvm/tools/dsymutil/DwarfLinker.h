@@ -56,8 +56,8 @@ using UnitListTy = std::vector<std::unique_ptr<CompileUnit>>;
 class DwarfLinker {
 public:
   DwarfLinker(raw_fd_ostream &OutFile, BinaryHolder &BinHolder,
-              const LinkOptions &Options)
-      : OutFile(OutFile), BinHolder(BinHolder), Options(Options) {}
+              LinkOptions Options)
+      : OutFile(OutFile), BinHolder(BinHolder), Options(std::move(Options)) {}
 
   /// Link the contents of the DebugMap.
   bool link(const DebugMap &);
@@ -82,12 +82,12 @@ private:
   /// Keeps track of relocations.
   class RelocationManager {
     struct ValidReloc {
-      uint32_t Offset;
+      uint64_t Offset;
       uint32_t Size;
       uint64_t Addend;
       const DebugMapObject::DebugMapEntry *Mapping;
 
-      ValidReloc(uint32_t Offset, uint32_t Size, uint64_t Addend,
+      ValidReloc(uint64_t Offset, uint32_t Size, uint64_t Addend,
                  const DebugMapObject::DebugMapEntry *Mapping)
           : Offset(Offset), Size(Size), Addend(Addend), Mapping(Mapping) {}
 
@@ -132,10 +132,10 @@ private:
                               const DebugMapObject &DMO);
     /// @}
 
-    bool hasValidRelocation(uint32_t StartOffset, uint32_t EndOffset,
+    bool hasValidRelocation(uint64_t StartOffset, uint64_t EndOffset,
                             CompileUnit::DIEInfo &Info);
 
-    bool applyValidRelocs(MutableArrayRef<char> Data, uint32_t BaseOffset,
+    bool applyValidRelocs(MutableArrayRef<char> Data, uint64_t BaseOffset,
                           bool IsLittleEndian);
   };
 
@@ -193,7 +193,7 @@ private:
   /// A skeleton CU is a CU without children, a DW_AT_gnu_dwo_name
   /// pointing to the module, and a DW_AT_gnu_dwo_id with the module
   /// hash.
-  bool registerModuleReference(const DWARFDie &CUDie, const DWARFUnit &Unit,
+  bool registerModuleReference(DWARFDie CUDie, const DWARFUnit &Unit,
                                DebugMap &ModuleMap, const DebugMapObject &DMO,
                                RangesTy &Ranges,
                                OffsetsStringPool &OffsetsStringPool,
@@ -206,7 +206,7 @@ private:
   /// Recursively add the debug info in this clang module .pcm
   /// file (and all the modules imported by it in a bottom-up fashion)
   /// to Units.
-  Error loadClangModule(StringRef Filename, StringRef ModulePath,
+  Error loadClangModule(DWARFDie CUDie, StringRef FilePath,
                         StringRef ModuleName, uint64_t DwoId,
                         DebugMap &ModuleMap, const DebugMapObject &DMO,
                         RangesTy &Ranges, OffsetsStringPool &OffsetsStringPool,
@@ -493,6 +493,12 @@ private:
 
   /// Mapping the PCM filename to the DwoId.
   StringMap<uint64_t> ClangModules;
+
+  /// A list of all .swiftinterface files referenced by the debug
+  /// info, mapping Module name to path on disk. The entries need to
+  /// be uniqued and sorted and there are only few entries expected
+  /// per compile unit, which is why this is a std::map.
+  std::map<std::string, std::string> ParseableSwiftInterfaces;
 
   bool ModuleCacheHintDisplayed = false;
   bool ArchiveHintDisplayed = false;

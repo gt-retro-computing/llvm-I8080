@@ -1039,10 +1039,7 @@ bool Decoder::dumpPackedEntry(const object::COFFObjectFile &COFF,
     }
     FunctionAddress = *FunctionAddressOrErr;
   } else {
-    const pe32_header *PEHeader;
-    if (COFF.getPE32Header(PEHeader))
-      return false;
-    FunctionAddress = PEHeader->ImageBase + RF.BeginAddress;
+    FunctionAddress = COFF.getPE32Header()->ImageBase + RF.BeginAddress;
   }
 
   SW.printString("Function", formatSymbol(FunctionName, FunctionAddress));
@@ -1094,17 +1091,17 @@ void Decoder::dumpProcedureData(const COFFObjectFile &COFF,
       break;
 }
 
-std::error_code Decoder::dumpProcedureData(const COFFObjectFile &COFF) {
+Error Decoder::dumpProcedureData(const COFFObjectFile &COFF) {
   for (const auto &Section : COFF.sections()) {
-    StringRef SectionName;
-    if (std::error_code EC =
-            COFF.getSectionName(COFF.getCOFFSection(Section), SectionName))
-      return EC;
+    Expected<StringRef> NameOrErr =
+        COFF.getSectionName(COFF.getCOFFSection(Section));
+    if (!NameOrErr)
+      return NameOrErr.takeError();
 
-    if (SectionName.startswith(".pdata"))
+    if (NameOrErr->startswith(".pdata"))
       dumpProcedureData(COFF, Section);
   }
-  return std::error_code();
+  return Error::success();
 }
 }
 }

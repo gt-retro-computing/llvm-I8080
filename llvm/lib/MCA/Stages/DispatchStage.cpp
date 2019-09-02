@@ -44,7 +44,7 @@ void DispatchStage::notifyInstructionDispatched(const InstRef &IR,
 }
 
 bool DispatchStage::checkPRF(const InstRef &IR) const {
-  SmallVector<unsigned, 4> RegDefs;
+  SmallVector<MCPhysReg, 4> RegDefs;
   for (const WriteState &RegDef : IR.getInstruction()->getDefs())
     RegDefs.emplace_back(RegDef.getRegisterID());
 
@@ -60,7 +60,7 @@ bool DispatchStage::checkPRF(const InstRef &IR) const {
 }
 
 bool DispatchStage::checkRCU(const InstRef &IR) const {
-  const unsigned NumMicroOps = IR.getInstruction()->getDesc().NumMicroOps;
+  const unsigned NumMicroOps = IR.getInstruction()->getNumMicroOps();
   if (RCU.isAvailable(NumMicroOps))
     return true;
   notifyEvent<HWStallEvent>(
@@ -79,7 +79,7 @@ Error DispatchStage::dispatch(InstRef IR) {
   assert(!CarryOver && "Cannot dispatch another instruction!");
   Instruction &IS = *IR.getInstruction();
   const InstrDesc &Desc = IS.getDesc();
-  const unsigned NumMicroOps = Desc.NumMicroOps;
+  const unsigned NumMicroOps = IS.getNumMicroOps();
   if (NumMicroOps > DispatchWidth) {
     assert(AvailableEntries == DispatchWidth);
     AvailableEntries = 0;
@@ -95,15 +95,12 @@ Error DispatchStage::dispatch(InstRef IR) {
     AvailableEntries = 0;
 
   // Check if this is an optimizable reg-reg move.
-  bool IsEliminated = false;
   if (IS.isOptimizableMove()) {
     assert(IS.getDefs().size() == 1 && "Expected a single input!");
     assert(IS.getUses().size() == 1 && "Expected a single output!");
-    IsEliminated = PRF.tryEliminateMove(IS.getDefs()[0], IS.getUses()[0]);
+    if (PRF.tryEliminateMove(IS.getDefs()[0], IS.getUses()[0]))
+      IS.setEliminated();
   }
-
-  if (IS.isMemOp())
-    IS.setCriticalMemDep(IR.getSourceIndex());
 
   // A dependency-breaking instruction doesn't have to wait on the register
   // input operands, and it is often optimized at register renaming stage.
@@ -114,7 +111,7 @@ Error DispatchStage::dispatch(InstRef IR) {
   //
   // We also don't update data dependencies for instructions that have been
   // eliminated at register renaming stage.
-  if (!IsEliminated) {
+  if (!IS.isEliminated()) {
     for (ReadState &RS : IS.getUses())
       PRF.addRegisterRead(RS, STI);
   }
@@ -126,9 +123,10 @@ Error DispatchStage::dispatch(InstRef IR) {
   for (WriteState &WS : IS.getDefs())
     PRF.addRegisterWrite(WriteRef(IR.getSourceIndex(), &WS), RegisterFiles);
 
-  // Reserve slots in the RCU, and notify the instruction that it has been
-  // dispatched to the schedulers for execution.
-  IS.dispatch(RCU.reserveSlot(IR, NumMicroOps));
+  // Reserve entries in the reorder buffer.
+  unsigned RCUTokenID = RCU.dispatch(IR);
+  // Notify the instruction that it has been dispatched.
+  IS.dispatch(RCUTokenID);
 
   // Notify listeners of the "instruction dispatched" event,
   // and move IR to the next stage.
@@ -158,8 +156,10 @@ Error DispatchStage::cycleStart() {
 }
 
 bool DispatchStage::isAvailable(const InstRef &IR) const {
-  const InstrDesc &Desc = IR.getInstruction()->getDesc();
-  unsigned Required = std::min(Desc.NumMicroOps, DispatchWidth);
+  const Instruction &Inst = *IR.getInstruction();
+  unsigned NumMicroOps = Inst.getNumMicroOps();
+  const InstrDesc &Desc = Inst.getDesc();
+  unsigned Required = std::min(NumMicroOps, DispatchWidth);
   if (Required > AvailableEntries)
     return false;
 

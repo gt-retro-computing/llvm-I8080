@@ -230,12 +230,9 @@ static bool sinkInstruction(Loop &L, Instruction &I,
     IC->setName(I.getName());
     IC->insertBefore(&*N->getFirstInsertionPt());
     // Replaces uses of I with IC in N
-    for (Value::use_iterator UI = I.use_begin(), UE = I.use_end(); UI != UE;) {
-      Use &U = *UI++;
-      auto *I = cast<Instruction>(U.getUser());
-      if (I->getParent() == N)
-        U.set(IC);
-    }
+    I.replaceUsesWithIf(IC, [N](Use &U) {
+      return cast<Instruction>(U.getUser())->getParent() == N;
+    });
     // Replaces uses of I with IC in blocks dominated by N
     replaceDominatedUsesWith(&I, IC, DT, N);
     LLVM_DEBUG(dbgs() << "Sinking a clone of " << I << " To: " << N->getName()
@@ -290,10 +287,9 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
       ColdLoopBBs.push_back(B);
       LoopBlockNumber[B] = ++i;
     }
-  std::stable_sort(ColdLoopBBs.begin(), ColdLoopBBs.end(),
-                   [&](BasicBlock *A, BasicBlock *B) {
-                     return BFI.getBlockFreq(A) < BFI.getBlockFreq(B);
-                   });
+  llvm::stable_sort(ColdLoopBBs, [&](BasicBlock *A, BasicBlock *B) {
+    return BFI.getBlockFreq(A) < BFI.getBlockFreq(B);
+  });
 
   // Traverse preheader's instructions in reverse order becaue if A depends
   // on B (A appears after B), A needs to be sinked first before B can be
@@ -303,7 +299,7 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
     // No need to check for instruction's operands are loop invariant.
     assert(L.hasLoopInvariantOperands(I) &&
            "Insts in a loop's preheader should have loop invariant operands!");
-    if (!canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, nullptr, false, false))
+    if (!canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, nullptr, false))
       continue;
     if (sinkInstruction(L, *I, ColdLoopBBs, LoopBlockNumber, LI, DT, BFI))
       Changed = true;

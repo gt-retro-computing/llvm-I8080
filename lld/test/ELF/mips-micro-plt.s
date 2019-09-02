@@ -3,11 +3,11 @@
 
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux \
 # RUN:         -mattr=micromips %S/Inputs/mips-dynamic.s -o %t-dso.o
-# RUN: ld.lld %t-dso.o -shared -o %t.so
+# RUN: ld.lld %t-dso.o -shared -soname=t.so -o %t.so
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux \
 # RUN:         -mattr=micromips %s -o %t-exe.o
 # RUN: ld.lld %t-exe.o %t.so -o %t.exe
-# RUN: llvm-readobj -t -dt -mips-plt-got %t.exe | FileCheck %s
+# RUN: llvm-readobj --symbols --dyn-syms --mips-plt-got %t.exe | FileCheck %s
 # RUN: llvm-objdump -d -mattr=micromips %t.exe | FileCheck --check-prefix=ASM %s
 
 # CHECK:      Symbols [

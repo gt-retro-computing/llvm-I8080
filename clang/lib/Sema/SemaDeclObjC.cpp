@@ -359,6 +359,7 @@ HasExplicitOwnershipAttr(Sema &S, ParmVarDecl *Param) {
 /// ActOnStartOfObjCMethodDef - This routine sets up parameters; invisible
 /// and user declared, in the method definition's AST.
 void Sema::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
+  ImplicitlyRetainedSelfLocs.clear();
   assert((getCurMethodDecl() == nullptr) && "Methodparsing confused");
   ObjCMethodDecl *MDecl = dyn_cast_or_null<ObjCMethodDecl>(D);
 
@@ -511,7 +512,7 @@ class ObjCInterfaceValidatorCCC final : public CorrectionCandidateCallback {
   }
 
   std::unique_ptr<CorrectionCandidateCallback> clone() override {
-    return llvm::make_unique<ObjCInterfaceValidatorCCC>(*this);
+    return std::make_unique<ObjCInterfaceValidatorCCC>(*this);
   }
 
  private:
@@ -1386,7 +1387,7 @@ class ObjCTypeArgOrProtocolValidatorCCC final
   }
 
   std::unique_ptr<CorrectionCandidateCallback> clone() override {
-    return llvm::make_unique<ObjCTypeArgOrProtocolValidatorCCC>(*this);
+    return std::make_unique<ObjCTypeArgOrProtocolValidatorCCC>(*this);
   }
 };
 } // end anonymous namespace
@@ -1586,7 +1587,7 @@ void Sema::actOnObjCTypeArgsOrProtocolQualifiers(
     // add the '*'.
     if (type->getAs<ObjCInterfaceType>()) {
       SourceLocation starLoc = getLocForEndOfToken(loc);
-      D.AddTypeInfo(DeclaratorChunk::getPointer(/*typeQuals=*/0, starLoc,
+      D.AddTypeInfo(DeclaratorChunk::getPointer(/*TypeQuals=*/0, starLoc,
                                                 SourceLocation(),
                                                 SourceLocation(),
                                                 SourceLocation(),
@@ -4060,6 +4061,9 @@ Decl *Sema::ActOnAtEnd(Scope *S, SourceRange AtEnd, ArrayRef<Decl *> allMethods,
         }
       }
 
+      if (IDecl->hasAttr<ObjCClassStubAttr>())
+        Diag(IC->getLocation(), diag::err_implementation_of_class_stub);
+
       if (LangOpts.ObjCRuntime.isNonFragile()) {
         while (IDecl->getSuperClass()) {
           DiagnoseDuplicateIvars(IDecl, IDecl->getSuperClass());
@@ -4088,6 +4092,10 @@ Decl *Sema::ActOnAtEnd(Scope *S, SourceRange AtEnd, ArrayRef<Decl *> allMethods,
         Diag(Super->getLocation(), diag::note_class_declared);
       }
     }
+
+    if (IntfDecl->hasAttr<ObjCClassStubAttr>() &&
+        !IntfDecl->hasAttr<ObjCSubclassingRestrictedAttr>())
+      Diag(IntfDecl->getLocation(), diag::err_class_stub_subclassing_mismatch);
   }
   DiagnoseVariableSizedIvars(*this, OCD);
   if (isInterfaceDeclKind) {
@@ -4165,13 +4173,12 @@ namespace {
 /// overrides.
 class OverrideSearch {
 public:
-  Sema &S;
-  ObjCMethodDecl *Method;
+  const ObjCMethodDecl *Method;
   llvm::SmallSetVector<ObjCMethodDecl*, 4> Overridden;
   bool Recursive;
 
 public:
-  OverrideSearch(Sema &S, ObjCMethodDecl *method) : S(S), Method(method) {
+  OverrideSearch(Sema &S, const ObjCMethodDecl *method) : Method(method) {
     Selector selector = method->getSelector();
 
     // Bypass this search if we've never seen an instance/class method
@@ -4185,19 +4192,20 @@ public:
       if (it == S.MethodPool.end())
         return;
     }
-    ObjCMethodList &list =
+    const ObjCMethodList &list =
       method->isInstanceMethod() ? it->second.first : it->second.second;
     if (!list.getMethod()) return;
 
-    ObjCContainerDecl *container
+    const ObjCContainerDecl *container
       = cast<ObjCContainerDecl>(method->getDeclContext());
 
     // Prevent the search from reaching this container again.  This is
     // important with categories, which override methods from the
     // interface and each other.
-    if (ObjCCategoryDecl *Category = dyn_cast<ObjCCategoryDecl>(container)) {
+    if (const ObjCCategoryDecl *Category =
+            dyn_cast<ObjCCategoryDecl>(container)) {
       searchFromContainer(container);
-      if (ObjCInterfaceDecl *Interface = Category->getClassInterface())
+      if (const ObjCInterfaceDecl *Interface = Category->getClassInterface())
         searchFromContainer(Interface);
     } else {
       searchFromContainer(container);
@@ -4209,7 +4217,7 @@ public:
   iterator end() const { return Overridden.end(); }
 
 private:
-  void searchFromContainer(ObjCContainerDecl *container) {
+  void searchFromContainer(const ObjCContainerDecl *container) {
     if (container->isInvalidDecl()) return;
 
     switch (container->getDeclKind()) {
@@ -4225,7 +4233,7 @@ private:
     }
   }
 
-  void searchFrom(ObjCProtocolDecl *protocol) {
+  void searchFrom(const ObjCProtocolDecl *protocol) {
     if (!protocol->hasDefinition())
       return;
 
@@ -4234,14 +4242,14 @@ private:
     search(protocol->getReferencedProtocols());
   }
 
-  void searchFrom(ObjCCategoryDecl *category) {
+  void searchFrom(const ObjCCategoryDecl *category) {
     // A method in a category declaration overrides declarations from
     // the main class and from protocols the category references.
     // The main class is handled in the constructor.
     search(category->getReferencedProtocols());
   }
 
-  void searchFrom(ObjCCategoryImplDecl *impl) {
+  void searchFrom(const ObjCCategoryImplDecl *impl) {
     // A method in a category definition that has a category
     // declaration overrides declarations from the category
     // declaration.
@@ -4251,12 +4259,12 @@ private:
         search(Interface);
 
     // Otherwise it overrides declarations from the class.
-    } else if (ObjCInterfaceDecl *Interface = impl->getClassInterface()) {
+    } else if (const auto *Interface = impl->getClassInterface()) {
       search(Interface);
     }
   }
 
-  void searchFrom(ObjCInterfaceDecl *iface) {
+  void searchFrom(const ObjCInterfaceDecl *iface) {
     // A method in a class declaration overrides declarations from
     if (!iface->hasDefinition())
       return;
@@ -4273,20 +4281,19 @@ private:
     search(iface->getReferencedProtocols());
   }
 
-  void searchFrom(ObjCImplementationDecl *impl) {
+  void searchFrom(const ObjCImplementationDecl *impl) {
     // A method in a class implementation overrides declarations from
     // the class interface.
-    if (ObjCInterfaceDecl *Interface = impl->getClassInterface())
+    if (const auto *Interface = impl->getClassInterface())
       search(Interface);
   }
 
   void search(const ObjCProtocolList &protocols) {
-    for (ObjCProtocolList::iterator i = protocols.begin(), e = protocols.end();
-         i != e; ++i)
-      search(*i);
+    for (const auto *Proto : protocols)
+      search(Proto);
   }
 
-  void search(ObjCContainerDecl *container) {
+  void search(const ObjCContainerDecl *container) {
     // Check for a method in this container which matches this selector.
     ObjCMethodDecl *meth = container->getMethod(Method->getSelector(),
                                                 Method->isInstanceMethod(),
@@ -4312,6 +4319,8 @@ private:
 void Sema::CheckObjCMethodOverrides(ObjCMethodDecl *ObjCMethod,
                                     ObjCInterfaceDecl *CurrentClass,
                                     ResultTypeCompatibilityKind RTC) {
+  if (!ObjCMethod)
+    return;
   // Search for overridden methods and merge information down from them.
   OverrideSearch overrides(*this, ObjCMethod);
   // Keep track if the method overrides any method in the class's base classes,
@@ -4320,10 +4329,7 @@ void Sema::CheckObjCMethodOverrides(ObjCMethodDecl *ObjCMethod,
   // For this info, a method in an implementation is not considered as
   // overriding the same method in the interface or its categories.
   bool hasOverriddenMethodsInBaseOrProtocol = false;
-  for (OverrideSearch::iterator
-         i = overrides.begin(), e = overrides.end(); i != e; ++i) {
-    ObjCMethodDecl *overridden = *i;
-
+  for (ObjCMethodDecl *overridden : overrides) {
     if (!hasOverriddenMethodsInBaseOrProtocol) {
       if (isa<ObjCProtocolDecl>(overridden->getDeclContext()) ||
           CurrentClass != overridden->getClassInterface() ||
@@ -4350,9 +4356,7 @@ void Sema::CheckObjCMethodOverrides(ObjCMethodDecl *ObjCMethod,
             if (CategCount > 1 ||
                 !isa<ObjCCategoryImplDecl>(overridden->getDeclContext())) {
               OverrideSearch overrides(*this, overridden);
-              for (OverrideSearch::iterator
-                     OI= overrides.begin(), OE= overrides.end(); OI!=OE; ++OI) {
-                ObjCMethodDecl *SuperOverridden = *OI;
+              for (ObjCMethodDecl *SuperOverridden : overrides) {
                 if (isa<ObjCProtocolDecl>(SuperOverridden->getDeclContext()) ||
                     CurrentClass != SuperOverridden->getClassInterface()) {
                   hasOverriddenMethodsInBaseOrProtocol = true;

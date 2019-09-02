@@ -1,7 +1,7 @@
 // REQUIRES: x86
 // RUN: llvm-mc -filetype=obj -triple=i386-pc-linux %s -o %t.o
 // RUN: ld.lld %t.o -o %t -shared
-// RUN: llvm-readobj -s -section-data %t | FileCheck %s
+// RUN: llvm-readobj -S --section-data %t | FileCheck %s
 
 // CHECK:      Name: .mysec
 // CHECK-NEXT: Type:
@@ -27,8 +27,8 @@
 // CHECK-NEXT:   SHF_ALLOC
 // CHECK-NEXT:   SHF_WRITE
 // CHECK-NEXT: ]
-// CHECK-NEXT: Address: 0x2000
-// CHECK-NEXT: Offset: 0x2000
+// CHECK-NEXT: Address: 0x31D4
+// CHECK-NEXT: Offset: 0x1D4
 // CHECK-NEXT: Size: 4
 // CHECK-NEXT: Link: 0
 // CHECK-NEXT: Info: 0

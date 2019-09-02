@@ -441,18 +441,16 @@ ScriptInterpreterPythonImpl::Locker::~Locker() {
   DoFreeLock();
 }
 
-ScriptInterpreterPythonImpl::ScriptInterpreterPythonImpl(
-    CommandInterpreter &interpreter)
-    : ScriptInterpreterPython(interpreter), m_saved_stdin(), m_saved_stdout(),
+ScriptInterpreterPythonImpl::ScriptInterpreterPythonImpl(Debugger &debugger)
+    : ScriptInterpreterPython(debugger), m_saved_stdin(), m_saved_stdout(),
       m_saved_stderr(), m_main_module(),
       m_session_dict(PyInitialValue::Invalid),
       m_sys_module_dict(PyInitialValue::Invalid), m_run_one_line_function(),
       m_run_one_line_str_global(),
-      m_dictionary_name(
-          interpreter.GetDebugger().GetInstanceName().AsCString()),
-      m_terminal_state(), m_active_io_handler(eIOHandlerNone),
-      m_session_is_active(false), m_pty_slave_is_open(false),
-      m_valid_session(true), m_lock_count(0), m_command_thread_state(nullptr) {
+      m_dictionary_name(m_debugger.GetInstanceName().AsCString()),
+      m_active_io_handler(eIOHandlerNone), m_session_is_active(false),
+      m_pty_slave_is_open(false), m_valid_session(true), m_lock_count(0),
+      m_command_thread_state(nullptr) {
   InitializePrivate();
 
   m_dictionary_name.append("_dict");
@@ -495,8 +493,7 @@ ScriptInterpreterPythonImpl::ScriptInterpreterPythonImpl(
 
   run_string.Printf("run_one_line (%s, 'lldb.debugger_unique_id = %" PRIu64
                     "; pydoc.pager = pydoc.plainpager')",
-                    m_dictionary_name.c_str(),
-                    interpreter.GetDebugger().GetID());
+                    m_dictionary_name.c_str(), m_debugger.GetID());
   PyRun_SimpleString(run_string.GetData());
 }
 
@@ -549,7 +546,7 @@ def function (frame, bp_loc, internal_dict):
 void ScriptInterpreterPythonImpl::IOHandlerInputComplete(IOHandler &io_handler,
                                                          std::string &data) {
   io_handler.SetIsDone(true);
-  bool batch_mode = m_interpreter.GetBatchCommandMode();
+  bool batch_mode = m_debugger.GetCommandInterpreter().GetBatchCommandMode();
 
   switch (m_active_io_handler) {
   case eIOHandlerNone:
@@ -561,7 +558,7 @@ void ScriptInterpreterPythonImpl::IOHandlerInputComplete(IOHandler &io_handler,
       if (!bp_options)
         continue;
 
-      auto data_up = llvm::make_unique<CommandDataPython>();
+      auto data_up = std::make_unique<CommandDataPython>();
       if (!data_up)
         break;
       data_up->user_source.SplitIntoLines(data);
@@ -586,7 +583,7 @@ void ScriptInterpreterPythonImpl::IOHandlerInputComplete(IOHandler &io_handler,
   case eIOHandlerWatchpoint: {
     WatchpointOptions *wp_options =
         (WatchpointOptions *)io_handler.GetUserData();
-    auto data_up = llvm::make_unique<WatchpointOptions::CommandData>();
+    auto data_up = std::make_unique<WatchpointOptions::CommandData>();
     data_up->user_source.SplitIntoLines(data);
 
     if (GenerateWatchpointCommandCallbackData(data_up->user_source,
@@ -608,27 +605,11 @@ void ScriptInterpreterPythonImpl::IOHandlerInputComplete(IOHandler &io_handler,
 }
 
 lldb::ScriptInterpreterSP
-ScriptInterpreterPythonImpl::CreateInstance(CommandInterpreter &interpreter) {
-  return std::make_shared<ScriptInterpreterPythonImpl>(interpreter);
+ScriptInterpreterPythonImpl::CreateInstance(Debugger &debugger) {
+  return std::make_shared<ScriptInterpreterPythonImpl>(debugger);
 }
 
 void ScriptInterpreterPythonImpl::ResetOutputFileHandle(FILE *fh) {}
-
-void ScriptInterpreterPythonImpl::SaveTerminalState(int fd) {
-  // Python mucks with the terminal state of STDIN. If we can possibly avoid
-  // this by setting the file handles up correctly prior to entering the
-  // interpreter we should. For now we save and restore the terminal state on
-  // the input file handle.
-  m_terminal_state.Save(fd, false);
-}
-
-void ScriptInterpreterPythonImpl::RestoreTerminalState() {
-  // Python mucks with the terminal state of STDIN. If we can possibly avoid
-  // this by setting the file handles up correctly prior to entering the
-  // interpreter we should. For now we save and restore the terminal state on
-  // the input file handle.
-  m_terminal_state.Restore();
-}
 
 void ScriptInterpreterPythonImpl::LeaveSession() {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SCRIPT));
@@ -691,19 +672,18 @@ bool ScriptInterpreterPythonImpl::EnterSession(uint16_t on_entry_flags,
   // it, then there is no need to 'enter' it again.
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SCRIPT));
   if (m_session_is_active) {
-    if (log)
-      log->Printf(
-          "ScriptInterpreterPythonImpl::EnterSession(on_entry_flags=0x%" PRIx16
-          ") session is already active, returning without doing anything",
-          on_entry_flags);
+    LLDB_LOGF(
+        log,
+        "ScriptInterpreterPythonImpl::EnterSession(on_entry_flags=0x%" PRIx16
+        ") session is already active, returning without doing anything",
+        on_entry_flags);
     return false;
   }
 
-  if (log)
-    log->Printf(
-        "ScriptInterpreterPythonImpl::EnterSession(on_entry_flags=0x%" PRIx16
-        ")",
-        on_entry_flags);
+  LLDB_LOGF(
+      log,
+      "ScriptInterpreterPythonImpl::EnterSession(on_entry_flags=0x%" PRIx16 ")",
+      on_entry_flags);
 
   m_session_is_active = true;
 
@@ -711,11 +691,10 @@ bool ScriptInterpreterPythonImpl::EnterSession(uint16_t on_entry_flags,
 
   if (on_entry_flags & Locker::InitGlobals) {
     run_string.Printf("run_one_line (%s, 'lldb.debugger_unique_id = %" PRIu64,
-                      m_dictionary_name.c_str(),
-                      GetCommandInterpreter().GetDebugger().GetID());
+                      m_dictionary_name.c_str(), m_debugger.GetID());
     run_string.Printf(
         "; lldb.debugger = lldb.SBDebugger.FindDebuggerWithID (%" PRIu64 ")",
-        GetCommandInterpreter().GetDebugger().GetID());
+        m_debugger.GetID());
     run_string.PutCString("; lldb.target = lldb.debugger.GetSelectedTarget()");
     run_string.PutCString("; lldb.process = lldb.target.GetProcess()");
     run_string.PutCString("; lldb.thread = lldb.process.GetSelectedThread ()");
@@ -725,11 +704,10 @@ bool ScriptInterpreterPythonImpl::EnterSession(uint16_t on_entry_flags,
     // If we aren't initing the globals, we should still always set the
     // debugger (since that is always unique.)
     run_string.Printf("run_one_line (%s, 'lldb.debugger_unique_id = %" PRIu64,
-                      m_dictionary_name.c_str(),
-                      GetCommandInterpreter().GetDebugger().GetID());
+                      m_dictionary_name.c_str(), m_debugger.GetID());
     run_string.Printf(
         "; lldb.debugger = lldb.SBDebugger.FindDebuggerWithID (%" PRIu64 ")",
-        GetCommandInterpreter().GetDebugger().GetID());
+        m_debugger.GetID());
     run_string.PutCString("')");
   }
 
@@ -746,8 +724,7 @@ bool ScriptInterpreterPythonImpl::EnterSession(uint16_t on_entry_flags,
     lldb::StreamFileSP out_sp;
     lldb::StreamFileSP err_sp;
     if (!in_file.IsValid() || !out_file.IsValid() || !err_file.IsValid())
-      m_interpreter.GetDebugger().AdoptTopIOHandlerFilesIfInvalid(in_sp, out_sp,
-                                                                  err_sp);
+      m_debugger.AdoptTopIOHandlerFilesIfInvalid(in_sp, out_sp, err_sp);
 
     if (on_entry_flags & Locker::NoSTDIN) {
       m_saved_stdin.Reset();
@@ -871,7 +848,7 @@ bool ScriptInterpreterPythonImpl::ExecuteOneLine(
     // another string to pass to PyRun_SimpleString messes up the escaping.  So
     // we use the following more complicated method to pass the command string
     // directly down to Python.
-    Debugger &debugger = m_interpreter.GetDebugger();
+    Debugger &debugger = m_debugger;
 
     StreamFileSP input_file_sp;
     StreamFileSP output_file_sp;
@@ -1018,7 +995,7 @@ void ScriptInterpreterPythonImpl::ExecuteInterpreterLoop() {
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
   Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
 
-  Debugger &debugger = GetCommandInterpreter().GetDebugger();
+  Debugger &debugger = m_debugger;
 
   // At the moment, the only time the debugger does not have an input file
   // handle is when this is called directly from Python, in which case it is
@@ -1046,17 +1023,16 @@ bool ScriptInterpreterPythonImpl::Interrupt() {
       long tid = state->thread_id;
       PyThreadState_Swap(state);
       int num_threads = PyThreadState_SetAsyncExc(tid, PyExc_KeyboardInterrupt);
-      if (log)
-        log->Printf("ScriptInterpreterPythonImpl::Interrupt() sending "
-                    "PyExc_KeyboardInterrupt (tid = %li, num_threads = %i)...",
-                    tid, num_threads);
+      LLDB_LOGF(log,
+                "ScriptInterpreterPythonImpl::Interrupt() sending "
+                "PyExc_KeyboardInterrupt (tid = %li, num_threads = %i)...",
+                tid, num_threads);
       return true;
     }
   }
-  if (log)
-    log->Printf(
-        "ScriptInterpreterPythonImpl::Interrupt() python code not running, "
-        "can't interrupt");
+  LLDB_LOGF(log,
+            "ScriptInterpreterPythonImpl::Interrupt() python code not running, "
+            "can't interrupt");
   return false;
 }
 bool ScriptInterpreterPythonImpl::ExecuteOneLineWithReturn(
@@ -1274,14 +1250,15 @@ void ScriptInterpreterPythonImpl::CollectDataForBreakpointCommandCallback(
     std::vector<BreakpointOptions *> &bp_options_vec,
     CommandReturnObject &result) {
   m_active_io_handler = eIOHandlerBreakpoint;
-  m_interpreter.GetPythonCommandsFromIOHandler("    ", *this, true,
-                                               &bp_options_vec);
+  m_debugger.GetCommandInterpreter().GetPythonCommandsFromIOHandler(
+      "    ", *this, true, &bp_options_vec);
 }
 
 void ScriptInterpreterPythonImpl::CollectDataForWatchpointCommandCallback(
     WatchpointOptions *wp_options, CommandReturnObject &result) {
   m_active_io_handler = eIOHandlerWatchpoint;
-  m_interpreter.GetPythonCommandsFromIOHandler("    ", *this, true, wp_options);
+  m_debugger.GetCommandInterpreter().GetPythonCommandsFromIOHandler(
+      "    ", *this, true, wp_options);
 }
 
 void ScriptInterpreterPythonImpl::SetBreakpointCommandCallbackFunction(
@@ -1290,7 +1267,7 @@ void ScriptInterpreterPythonImpl::SetBreakpointCommandCallbackFunction(
   std::string oneliner("return ");
   oneliner += function_name;
   oneliner += "(frame, bp_loc, internal_dict)";
-  m_interpreter.GetScriptInterpreter()->SetBreakpointCommandCallback(
+  m_debugger.GetScriptInterpreter()->SetBreakpointCommandCallback(
       bp_options, oneliner.c_str());
 }
 
@@ -1313,7 +1290,7 @@ Status ScriptInterpreterPythonImpl::SetBreakpointCommandCallback(
 // Set a Python one-liner as the callback for the breakpoint.
 Status ScriptInterpreterPythonImpl::SetBreakpointCommandCallback(
     BreakpointOptions *bp_options, const char *command_body_text) {
-  auto data_up = llvm::make_unique<CommandDataPython>();
+  auto data_up = std::make_unique<CommandDataPython>();
 
   // Split the command_body_text into lines, and pass that to
   // GenerateBreakpointCommandCallbackData.  That will wrap the body in an
@@ -1336,7 +1313,7 @@ Status ScriptInterpreterPythonImpl::SetBreakpointCommandCallback(
 // Set a Python one-liner as the callback for the watchpoint.
 void ScriptInterpreterPythonImpl::SetWatchpointCommandCallback(
     WatchpointOptions *wp_options, const char *oneliner) {
-  auto data_up = llvm::make_unique<WatchpointOptions::CommandData>();
+  auto data_up = std::make_unique<WatchpointOptions::CommandData>();
 
   // It's necessary to set both user_source and script_source to the oneliner.
   // The former is used to generate callback description (as in watchpoint
@@ -1866,8 +1843,7 @@ StructuredData::ObjectSP ScriptInterpreterPythonImpl::CreateScriptedThreadPlan(
     return StructuredData::ObjectSP();
 
   Debugger &debugger = thread_plan_sp->GetTarget().GetDebugger();
-  ScriptInterpreter *script_interpreter =
-      debugger.GetCommandInterpreter().GetScriptInterpreter();
+  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
       static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
 
@@ -1949,7 +1925,7 @@ lldb::StateType ScriptInterpreterPythonImpl::ScriptedThreadPlanGetRunState(
     Locker py_lock(this,
                    Locker::AcquireLock | Locker::InitSession | Locker::NoSTDIN);
     should_step = LLDBSWIGPythonCallThreadPlan(
-        generic->GetValue(), "should_step", NULL, script_error);
+        generic->GetValue(), "should_step", nullptr, script_error);
     if (script_error)
       should_step = true;
   }
@@ -1971,8 +1947,7 @@ ScriptInterpreterPythonImpl::CreateScriptedBreakpointResolver(
     return StructuredData::GenericSP();
 
   Debugger &debugger = bkpt_sp->GetTarget().GetDebugger();
-  ScriptInterpreter *script_interpreter =
-      debugger.GetCommandInterpreter().GetScriptInterpreter();
+  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
       static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
 
@@ -2087,8 +2062,7 @@ ScriptInterpreterPythonImpl::CreateSyntheticScriptedProvider(
     return StructuredData::ObjectSP();
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter =
-      debugger.GetCommandInterpreter().GetScriptInterpreter();
+  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
       (ScriptInterpreterPythonImpl *)script_interpreter;
 
@@ -2109,8 +2083,7 @@ ScriptInterpreterPythonImpl::CreateSyntheticScriptedProvider(
 
 StructuredData::GenericSP
 ScriptInterpreterPythonImpl::CreateScriptCommandObject(const char *class_name) {
-  DebuggerSP debugger_sp(
-      GetCommandInterpreter().GetDebugger().shared_from_this());
+  DebuggerSP debugger_sp(m_debugger.shared_from_this());
 
   if (class_name == nullptr || class_name[0] == '\0')
     return StructuredData::GenericSP();
@@ -2267,8 +2240,7 @@ bool ScriptInterpreterPythonImpl::BreakpointCallbackFunction(
     return true;
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter =
-      debugger.GetCommandInterpreter().GetScriptInterpreter();
+  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
       (ScriptInterpreterPythonImpl *)script_interpreter;
 
@@ -2318,8 +2290,7 @@ bool ScriptInterpreterPythonImpl::WatchpointCallbackFunction(
     return true;
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter =
-      debugger.GetCommandInterpreter().GetScriptInterpreter();
+  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
       (ScriptInterpreterPythonImpl *)script_interpreter;
 
@@ -2718,7 +2689,7 @@ bool ScriptInterpreterPythonImpl::LoadScriptingModule(
     return false;
   }
 
-  lldb::DebuggerSP debugger_sp = m_interpreter.GetDebugger().shared_from_this();
+  lldb::DebuggerSP debugger_sp = m_debugger.shared_from_this();
 
   {
     FileSpec target_file(pathname);
@@ -2869,7 +2840,8 @@ bool ScriptInterpreterPythonImpl::IsReservedWord(const char *word) {
 
   // filter out a few characters that would just confuse us and that are
   // clearly not keyword material anyway
-  if (word_sr.find_first_of("'\"") != llvm::StringRef::npos)
+  if (word_sr.find('"') != llvm::StringRef::npos ||
+      word_sr.find('\'') != llvm::StringRef::npos)
     return false;
 
   StreamString command_stream;
@@ -2911,7 +2883,7 @@ bool ScriptInterpreterPythonImpl::RunScriptBasedCommand(
     return false;
   }
 
-  lldb::DebuggerSP debugger_sp = m_interpreter.GetDebugger().shared_from_this();
+  lldb::DebuggerSP debugger_sp = m_debugger.shared_from_this();
   lldb::ExecutionContextRefSP exe_ctx_ref_sp(new ExecutionContextRef(exe_ctx));
 
   if (!debugger_sp.get()) {
@@ -2955,7 +2927,7 @@ bool ScriptInterpreterPythonImpl::RunScriptBasedCommand(
     return false;
   }
 
-  lldb::DebuggerSP debugger_sp = m_interpreter.GetDebugger().shared_from_this();
+  lldb::DebuggerSP debugger_sp = m_debugger.shared_from_this();
   lldb::ExecutionContextRefSP exe_ctx_ref_sp(new ExecutionContextRef(exe_ctx));
 
   if (!debugger_sp.get()) {

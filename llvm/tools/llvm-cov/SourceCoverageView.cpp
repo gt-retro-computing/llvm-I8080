@@ -76,9 +76,9 @@ std::unique_ptr<CoveragePrinter>
 CoveragePrinter::create(const CoverageViewOptions &Opts) {
   switch (Opts.Format) {
   case CoverageViewOptions::OutputFormat::Text:
-    return llvm::make_unique<CoveragePrinterText>(Opts);
+    return std::make_unique<CoveragePrinterText>(Opts);
   case CoverageViewOptions::OutputFormat::HTML:
-    return llvm::make_unique<CoveragePrinterHTML>(Opts);
+    return std::make_unique<CoveragePrinterHTML>(Opts);
   case CoverageViewOptions::OutputFormat::Lcov:
     // Unreachable because CodeCoverage.cpp should terminate with an error
     // before we get here.
@@ -141,10 +141,10 @@ SourceCoverageView::create(StringRef SourceName, const MemoryBuffer &File,
                            CoverageData &&CoverageInfo) {
   switch (Options.Format) {
   case CoverageViewOptions::OutputFormat::Text:
-    return llvm::make_unique<SourceCoverageViewText>(
+    return std::make_unique<SourceCoverageViewText>(
         SourceName, File, Options, std::move(CoverageInfo));
   case CoverageViewOptions::OutputFormat::HTML:
-    return llvm::make_unique<SourceCoverageViewHTML>(
+    return std::make_unique<SourceCoverageViewHTML>(
         SourceName, File, Options, std::move(CoverageInfo));
   case CoverageViewOptions::OutputFormat::Lcov:
     // Unreachable because CodeCoverage.cpp should terminate with an error
@@ -189,8 +189,8 @@ void SourceCoverageView::print(raw_ostream &OS, bool WholeFile,
 
   // We need the expansions and instantiations sorted so we can go through them
   // while we iterate lines.
-  std::stable_sort(ExpansionSubViews.begin(), ExpansionSubViews.end());
-  std::stable_sort(InstantiationSubViews.begin(), InstantiationSubViews.end());
+  llvm::stable_sort(ExpansionSubViews);
+  llvm::stable_sort(InstantiationSubViews);
   auto NextESV = ExpansionSubViews.begin();
   auto EndESV = ExpansionSubViews.end();
   auto NextISV = InstantiationSubViews.begin();

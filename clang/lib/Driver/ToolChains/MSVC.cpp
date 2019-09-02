@@ -488,15 +488,25 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     // their own link.exe which may come first.
     linkPath = FindVisualStudioExecutable(TC, "link.exe");
 
-    if (!TC.FoundMSVCInstall() && !llvm::sys::fs::can_execute(linkPath))
-      C.getDriver().Diag(clang::diag::warn_drv_msvc_not_found);
+    if (!TC.FoundMSVCInstall() && !llvm::sys::fs::can_execute(linkPath)) {
+      llvm::SmallString<128> ClPath;
+      ClPath = TC.GetProgramPath("cl.exe");
+      if (llvm::sys::fs::can_execute(ClPath)) {
+        linkPath = llvm::sys::path::parent_path(ClPath);
+        llvm::sys::path::append(linkPath, "link.exe");
+        if (!llvm::sys::fs::can_execute(linkPath))
+          C.getDriver().Diag(clang::diag::warn_drv_msvc_not_found);
+      } else {
+        C.getDriver().Diag(clang::diag::warn_drv_msvc_not_found);
+      }
+    }
 
 #ifdef _WIN32
     // When cross-compiling with VS2017 or newer, link.exe expects to have
     // its containing bin directory at the top of PATH, followed by the
     // native target bin directory.
     // e.g. when compiling for x86 on an x64 host, PATH should start with:
-    // /bin/HostX64/x86;/bin/HostX64/x64
+    // /bin/Hostx64/x86;/bin/Hostx64/x64
     // This doesn't attempt to handle ToolsetLayout::DevDivInternal.
     if (TC.getIsVS2017OrNewer() &&
         llvm::Triple(llvm::sys::getProcessTriple()).getArch() != TC.getArch()) {
@@ -555,7 +565,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     linkPath = TC.GetProgramPath(Linker.str().c_str());
   }
 
-  auto LinkCmd = llvm::make_unique<Command>(
+  auto LinkCmd = std::make_unique<Command>(
       JA, *this, Args.MakeArgString(linkPath), CmdArgs, Inputs);
   if (!Environment.empty())
     LinkCmd->setEnvironment(Environment);
@@ -616,11 +626,11 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   // FIXME: How can we ensure this stays in sync with relevant clang-cl options?
 
   if (Args.hasFlag(options::OPT__SLASH_GR_, options::OPT__SLASH_GR,
-                   /*default=*/false))
+                   /*Default=*/false))
     CmdArgs.push_back("/GR-");
 
   if (Args.hasFlag(options::OPT__SLASH_GS_, options::OPT__SLASH_GS,
-                   /*default=*/false))
+                   /*Default=*/false))
     CmdArgs.push_back("/GS-");
 
   if (Arg *A = Args.getLastArg(options::OPT_ffunction_sections,
@@ -685,7 +695,7 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   CmdArgs.push_back(Fo);
 
   std::string Exec = FindVisualStudioExecutable(getToolChain(), "cl.exe");
-  return llvm::make_unique<Command>(JA, *this, Args.MakeArgString(Exec),
+  return std::make_unique<Command>(JA, *this, Args.MakeArgString(Exec),
                                     CmdArgs, Inputs);
 }
 
@@ -838,7 +848,7 @@ MSVCToolChain::getSubDirectoryPath(SubDirectoryType Type,
     if (VSLayout == ToolsetLayout::VS2017OrNewer) {
       const bool HostIsX64 =
           llvm::Triple(llvm::sys::getProcessTriple()).isArch64Bit();
-      const char *const HostName = HostIsX64 ? "HostX64" : "HostX86";
+      const char *const HostName = HostIsX64 ? "Hostx64" : "Hostx86";
       llvm::sys::path::append(Path, "bin", HostName, SubdirName);
     } else { // OlderVS or DevDivInternal
       llvm::sys::path::append(Path, "bin", SubdirName);

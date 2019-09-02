@@ -171,9 +171,9 @@ define amdgpu_ps <2 x half> @ps_mesa_inreg_v2f16(<2 x half> inreg %arg0) {
 
 ; SI: v_lshlrev_b32_e32 v1, 16, v1
 ; SI: v_add_i32_e32 v0, vcc, 1, v0
-; SI: v_add_i32_e32 v1, vcc, 0x10000, v1
 ; SI: v_and_b32
 ; SI: v_or_b32
+; SI: v_add_i32_e32 v0, vcc, 0x10000, v0
 define amdgpu_ps void @ps_mesa_v2i16(<2 x i16> %arg0) {
   %add = add <2 x i16> %arg0, <i16 1, i16 1>
   store <2 x i16> %add, <2 x i16> addrspace(1)* undef
@@ -183,20 +183,51 @@ define amdgpu_ps void @ps_mesa_v2i16(<2 x i16> %arg0) {
 ; GCN-LABEL: {{^}}ps_mesa_inreg_v2i16:
 ; VI: s_and_b32 s1, s0, 0xffff0000
 ; VI: s_add_i32 s0, s0, 1
-; VI: s_add_i32 s1, s1, 0x10000
 ; VI: s_and_b32 s0, s0, 0xffff
-; VI: s_or_b32 s0, s0, s1
+; VI: s_or_b32 s0, s1, s0
+; VI: s_add_i32 s0, s0, 0x10000
 ; VI: v_mov_b32_e32 v0, s0
 
 ; SI: s_lshl_b32 s1, s1, 16
 ; SI: s_add_i32 s0, s0, 1
-; SI: s_add_i32 s1, s1, 0x10000
 ; SI: s_and_b32 s0, s0, 0xffff
-; SI: s_or_b32 s0, s0, s1
+; SI: s_or_b32 s0, s1, s0
+; SI: s_add_i32 s0, s0, 0x10000
 define amdgpu_ps void @ps_mesa_inreg_v2i16(<2 x i16> inreg %arg0) {
   %add = add <2 x i16> %arg0, <i16 1, i16 1>
   store <2 x i16> %add, <2 x i16> addrspace(1)* undef
   ret void
+}
+
+; FIXME: Differenet ABI for VI+
+; GCN-LABEL: {{^}}ps_mesa_v4f16:
+; SI: v_cvt_f16_f32_e32 v3, v3
+; SI: v_cvt_f16_f32_e32 v2, v2
+; SI: v_cvt_f16_f32_e32 v1, v1
+; SI: v_cvt_f16_f32_e32 v0, v0
+
+; VI: v_add_f16_e32 v2, 1.0, v1
+; VI: v_add_f16_sdwa v1, v1, v3 dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:DWORD
+; VI: v_add_f16_e32 v4, 1.0, v0
+; VI: v_add_f16_sdwa v0, v0, v3 dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:DWORD
+define amdgpu_ps <4 x half> @ps_mesa_v4f16(<4 x half> %arg0) {
+  %add = fadd <4 x half> %arg0, <half 1.0, half 1.0, half 1.0, half 1.0>
+  ret <4 x half> %add
+}
+
+; GCN-LABEL: {{^}}ps_mesa_inreg_v4f16:
+; SI: v_cvt_f16_f32_e32 v{{[0-9]+}}, s3
+; SI: v_cvt_f16_f32_e32 v{{[0-9]+}}, s2
+; SI: v_cvt_f16_f32_e32 v{{[0-9]+}}, s1
+; SI: v_cvt_f16_f32_e32 v{{[0-9]+}}, s0
+
+; VI: v_add_f16_e64
+; VI: v_add_f16_sdwa
+; VI: v_add_f16_e64
+; VI: v_add_f16_sdwa
+define amdgpu_ps <4 x half> @ps_mesa_inreg_v4f16(<4 x half> inreg %arg0) {
+  %add = fadd <4 x half> %arg0, <half 1.0, half 1.0, half 1.0, half 1.0>
+  ret <4 x half> %add
 }
 
 ; GCN-LABEL: {{^}}ps_mesa_inreg_v3i32:

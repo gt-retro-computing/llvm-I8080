@@ -221,7 +221,7 @@ void StackSlotColoring::InitializeSlots() {
   for (auto *I : Intervals) {
     LiveInterval &li = I->second;
     LLVM_DEBUG(li.dump());
-    int FI = TargetRegisterInfo::stackSlot2Index(li.reg);
+    int FI = Register::stackSlot2Index(li.reg);
     if (MFI->isDeadObjectIndex(FI))
       continue;
 
@@ -242,7 +242,7 @@ void StackSlotColoring::InitializeSlots() {
   LLVM_DEBUG(dbgs() << '\n');
 
   // Sort them by weight.
-  std::stable_sort(SSIntervals.begin(), SSIntervals.end(), IntervalSorter());
+  llvm::stable_sort(SSIntervals, IntervalSorter());
 
   NextColors.resize(AllColors.size());
 
@@ -268,7 +268,7 @@ StackSlotColoring::OverlapWithAssignments(LiveInterval *li, int Color) const {
 int StackSlotColoring::ColorSlot(LiveInterval *li) {
   int Color = -1;
   bool Share = false;
-  int FI = TargetRegisterInfo::stackSlot2Index(li->reg);
+  int FI = Register::stackSlot2Index(li->reg);
   uint8_t StackID = MFI->getStackID(FI);
 
   if (!DisableSharing) {
@@ -330,7 +330,7 @@ bool StackSlotColoring::ColorSlots(MachineFunction &MF) {
   bool Changed = false;
   for (unsigned i = 0, e = SSIntervals.size(); i != e; ++i) {
     LiveInterval *li = SSIntervals[i];
-    int SS = TargetRegisterInfo::stackSlot2Index(li->reg);
+    int SS = Register::stackSlot2Index(li->reg);
     int NewSS = ColorSlot(li);
     assert(NewSS >= 0 && "Stack coloring failed?");
     SlotMapping[SS] = NewSS;
@@ -343,11 +343,11 @@ bool StackSlotColoring::ColorSlots(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "\nSpill slots after coloring:\n");
   for (unsigned i = 0, e = SSIntervals.size(); i != e; ++i) {
     LiveInterval *li = SSIntervals[i];
-    int SS = TargetRegisterInfo::stackSlot2Index(li->reg);
+    int SS = Register::stackSlot2Index(li->reg);
     li->weight = SlotWeights[SS];
   }
   // Sort them by new weight.
-  std::stable_sort(SSIntervals.begin(), SSIntervals.end(), IntervalSorter());
+  llvm::stable_sort(SSIntervals, IntervalSorter());
 
 #ifndef NDEBUG
   for (unsigned i = 0, e = SSIntervals.size(); i != e; ++i)

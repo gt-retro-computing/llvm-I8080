@@ -36,13 +36,12 @@ enum ID : unsigned;
 }
 
 /// Identify if the intrinsic is trivially vectorizable.
-/// This method returns true if the intrinsic's argument types are all
-/// scalars for the scalar form of the intrinsic and all vectors for
-/// the vector form of the intrinsic.
+/// This method returns true if the intrinsic's argument types are all scalars
+/// for the scalar form of the intrinsic and all vectors (or scalars handled by
+/// hasVectorInstrinsicScalarOpd) for the vector form of the intrinsic.
 bool isTriviallyVectorizable(Intrinsic::ID ID);
 
-/// Identifies if the intrinsic has a scalar operand. It checks for
-/// ctlz,cttz and powi special intrinsics whose argument is scalar.
+/// Identifies if the vector form of the intrinsic has a scalar operand.
 bool hasVectorInstrinsicScalarOpd(Intrinsic::ID ID, unsigned ScalarOpdIdx);
 
 /// Returns intrinsic ID for call.
@@ -77,6 +76,12 @@ Value *findScalarElement(Value *V, unsigned EltNo);
 /// The value may be extracted from a splat constants vector or from
 /// a sequence of instructions that broadcast a single value into a vector.
 const Value *getSplatValue(const Value *V);
+
+/// Return true if the input value is known to be a vector with all identical
+/// elements (potentially including undefined elements).
+/// This may be more powerful than the related getSplatValue() because it is
+/// not limited by finding a scalar source value to a splatted vector.
+bool isSplatValue(const Value *V, unsigned Depth = 0);
 
 /// Compute a map of integer instructions to their minimum legal type
 /// size.
@@ -223,6 +228,20 @@ Constant *createSequentialMask(IRBuilder<> &Builder, unsigned Start,
 /// elements, it will be padded with undefs.
 Value *concatenateVectors(IRBuilder<> &Builder, ArrayRef<Value *> Vecs);
 
+/// Given a mask vector of the form <Y x i1>, Return true if all of the
+/// elements of this predicate mask are false or undef.  That is, return true
+/// if all lanes can be assumed inactive. 
+bool maskIsAllZeroOrUndef(Value *Mask);
+
+/// Given a mask vector of the form <Y x i1>, Return true if all of the
+/// elements of this predicate mask are true or undef.  That is, return true
+/// if all lanes can be assumed active. 
+bool maskIsAllOneOrUndef(Value *Mask);
+
+/// Given a mask vector of the form <Y x i1>, return an APInt (of bitwidth Y)
+/// for each lane which may be active.
+APInt possiblyDemandedEltsInMask(Value *Mask);
+  
 /// The group of interleaved loads/stores sharing the same stride and
 /// close to each other.
 ///

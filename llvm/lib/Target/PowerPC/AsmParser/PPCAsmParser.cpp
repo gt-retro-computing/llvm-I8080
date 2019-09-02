@@ -9,6 +9,7 @@
 #include "MCTargetDesc/PPCMCExpr.h"
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "PPCTargetStreamer.h"
+#include "TargetInfo/PowerPCTargetInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Twine.h"
@@ -146,8 +147,7 @@ public:
     : MCTargetAsmParser(Options, STI, MII) {
     // Check for 64-bit vs. 32-bit pointer mode.
     const Triple &TheTriple = STI.getTargetTriple();
-    IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
-               TheTriple.getArch() == Triple::ppc64le);
+    IsPPC64 = TheTriple.isPPC64();
     IsDarwin = TheTriple.isMacOSX();
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
@@ -579,7 +579,7 @@ public:
 
   static std::unique_ptr<PPCOperand> CreateToken(StringRef Str, SMLoc S,
                                                  bool IsPPC64) {
-    auto Op = make_unique<PPCOperand>(Token);
+    auto Op = std::make_unique<PPCOperand>(Token);
     Op->Tok.Data = Str.data();
     Op->Tok.Length = Str.size();
     Op->StartLoc = S;
@@ -608,7 +608,7 @@ public:
 
   static std::unique_ptr<PPCOperand> CreateImm(int64_t Val, SMLoc S, SMLoc E,
                                                bool IsPPC64) {
-    auto Op = make_unique<PPCOperand>(Immediate);
+    auto Op = std::make_unique<PPCOperand>(Immediate);
     Op->Imm.Val = Val;
     Op->StartLoc = S;
     Op->EndLoc = E;
@@ -618,7 +618,7 @@ public:
 
   static std::unique_ptr<PPCOperand> CreateExpr(const MCExpr *Val, SMLoc S,
                                                 SMLoc E, bool IsPPC64) {
-    auto Op = make_unique<PPCOperand>(Expression);
+    auto Op = std::make_unique<PPCOperand>(Expression);
     Op->Expr.Val = Val;
     Op->Expr.CRVal = EvaluateCRExpr(Val);
     Op->StartLoc = S;
@@ -629,7 +629,7 @@ public:
 
   static std::unique_ptr<PPCOperand>
   CreateTLSReg(const MCSymbolRefExpr *Sym, SMLoc S, SMLoc E, bool IsPPC64) {
-    auto Op = make_unique<PPCOperand>(TLSRegister);
+    auto Op = std::make_unique<PPCOperand>(TLSRegister);
     Op->TLSReg.Sym = Sym;
     Op->StartLoc = S;
     Op->EndLoc = E;
@@ -639,7 +639,7 @@ public:
 
   static std::unique_ptr<PPCOperand>
   CreateContextImm(int64_t Val, SMLoc S, SMLoc E, bool IsPPC64) {
-    auto Op = make_unique<PPCOperand>(ContextImmediate);
+    auto Op = std::make_unique<PPCOperand>(ContextImmediate);
     Op->Imm.Val = Val;
     Op->StartLoc = S;
     Op->EndLoc = E;

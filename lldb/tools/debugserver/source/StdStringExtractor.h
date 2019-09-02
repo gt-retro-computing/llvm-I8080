@@ -21,11 +21,7 @@ public:
   // Constructors and Destructors
   StdStringExtractor();
   StdStringExtractor(const char *packet_cstr);
-  StdStringExtractor(const StdStringExtractor &rhs);
   virtual ~StdStringExtractor();
-
-  // Operators
-  const StdStringExtractor &operator=(const StdStringExtractor &rhs);
 
   // Returns true if the file position is still valid for the data
   // contained in this string extractor object.
@@ -41,8 +37,6 @@ public:
   }
 
   void SkipSpaces();
-
-  std::string &GetStringRef() { return m_packet; }
 
   const std::string &GetStringRef() const { return m_packet; }
 
@@ -86,9 +80,6 @@ public:
   size_t GetHexBytes(void *dst, size_t dst_len, uint8_t fail_fill_value);
 
   size_t GetHexBytesAvail(void *dst, size_t dst_len);
-
-  uint64_t GetHexWithFixedSize(uint32_t byte_size, bool little_endian,
-                               uint64_t fail_value);
 
   size_t GetHexByteString(std::string &str);
 

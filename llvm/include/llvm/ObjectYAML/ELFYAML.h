@@ -54,8 +54,6 @@ LLVM_YAML_STRONG_TYPEDEF(uint64_t, ELF_SHF)
 LLVM_YAML_STRONG_TYPEDEF(uint16_t, ELF_SHN)
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STB)
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STT)
-LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STV)
-LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STO)
 
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, MIPS_AFL_REG)
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, MIPS_ABI_FP)
@@ -75,6 +73,11 @@ struct FileHeader {
   ELF_EM Machine;
   ELF_EF Flags;
   llvm::yaml::Hex64 Entry;
+
+  Optional<llvm::yaml::Hex16> SHEntSize;
+  Optional<llvm::yaml::Hex64> SHOffset;
+  Optional<llvm::yaml::Hex16> SHNum;
+  Optional<llvm::yaml::Hex16> SHStrNdx;
 };
 
 struct SectionName {
@@ -95,13 +98,14 @@ struct ProgramHeader {
 
 struct Symbol {
   StringRef Name;
+  Optional<uint32_t> NameIndex;
   ELF_STT Type;
   StringRef Section;
   Optional<ELF_SHN> Index;
   ELF_STB Binding;
   llvm::yaml::Hex64 Value;
   llvm::yaml::Hex64 Size;
-  uint8_t Other;
+  Optional<uint8_t> Other;
 };
 
 struct SectionOrType {
@@ -122,19 +126,33 @@ struct Section {
     NoBits,
     Verdef,
     Verneed,
+    SymtabShndxSection,
     Symver,
     MipsABIFlags
   };
   SectionKind Kind;
   StringRef Name;
   ELF_SHT Type;
-  ELF_SHF Flags;
+  Optional<ELF_SHF> Flags;
   llvm::yaml::Hex64 Address;
   StringRef Link;
   llvm::yaml::Hex64 AddressAlign;
   Optional<llvm::yaml::Hex64> EntSize;
 
-  Section(SectionKind Kind) : Kind(Kind) {}
+  // This can be used to override the sh_offset field. It does not place the
+  // section data at the offset specified. Useful for creating invalid objects.
+  Optional<llvm::yaml::Hex64> ShOffset;
+
+  // This can be used to override the sh_size field. It does not affect the
+  // content written.
+  Optional<llvm::yaml::Hex64> ShSize;
+
+  // Usually sections are not created implicitly, but loaded from YAML.
+  // When they are, this flag is used to signal about that.
+  bool IsImplicit;
+
+  Section(SectionKind Kind, bool IsImplicit = false)
+      : Kind(Kind), IsImplicit(IsImplicit) {}
   virtual ~Section();
 };
 
@@ -150,9 +168,9 @@ struct DynamicSection : Section {
 };
 
 struct RawContentSection : Section {
-  yaml::BinaryRef Content;
-  llvm::yaml::Hex64 Size;
-  llvm::yaml::Hex64 Info;
+  Optional<yaml::BinaryRef> Content;
+  Optional<llvm::yaml::Hex64> Size;
+  Optional<llvm::yaml::Hex64> Info;
 
   RawContentSection() : Section(SectionKind::RawContent) {}
 
@@ -252,6 +270,16 @@ struct RelocationSection : Section {
 
   static bool classof(const Section *S) {
     return S->Kind == SectionKind::Relocation;
+  }
+};
+
+struct SymtabShndxSection : Section {
+  std::vector<uint32_t> Entries;
+
+  SymtabShndxSection() : Section(SectionKind::SymtabShndxSection) {}
+
+  static bool classof(const Section *S) {
+    return S->Kind == SectionKind::SymtabShndxSection;
   }
 };
 
@@ -364,16 +392,6 @@ template <> struct ScalarEnumerationTraits<ELFYAML::ELF_STB> {
 template <>
 struct ScalarEnumerationTraits<ELFYAML::ELF_STT> {
   static void enumeration(IO &IO, ELFYAML::ELF_STT &Value);
-};
-
-template <>
-struct ScalarEnumerationTraits<ELFYAML::ELF_STV> {
-  static void enumeration(IO &IO, ELFYAML::ELF_STV &Value);
-};
-
-template <>
-struct ScalarBitSetTraits<ELFYAML::ELF_STO> {
-  static void bitset(IO &IO, ELFYAML::ELF_STO &Value);
 };
 
 template <>

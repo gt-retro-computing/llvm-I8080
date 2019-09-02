@@ -41,11 +41,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/TargetSelect.h"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wglobal-constructors"
-#include "llvm/ExecutionEngine/MCJIT.h"
-#pragma clang diagnostic pop
-
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -67,6 +62,7 @@
 #include "ClangHost.h"
 #include "ClangModulesDeclVendor.h"
 #include "ClangPersistentVariables.h"
+#include "IRDynamicChecks.h"
 #include "IRForTarget.h"
 #include "ModuleDependencyCollector.h"
 
@@ -74,7 +70,6 @@
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/StreamFile.h"
-#include "lldb/Expression/IRDynamicChecks.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Host/File.h"
@@ -83,7 +78,6 @@
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Language.h"
-#include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/ThreadPlanCallFunction.h"
@@ -94,6 +88,8 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
+
+#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 
 #include <cctype>
 #include <memory>
@@ -153,7 +149,7 @@ public:
   }
 
   void HandleDiagnostic(DiagnosticsEngine::Level DiagLevel,
-                        const clang::Diagnostic &Info) {
+                        const clang::Diagnostic &Info) override {
     if (m_manager) {
       llvm::SmallVector<char, 32> diag_str;
       Info.FormatDiagnostic(diag_str);
@@ -335,9 +331,8 @@ ClangExpressionParser::ClangExpressionParser(
 
   if (process_sp && frame_lang != lldb::eLanguageTypeUnknown) {
     lang_rt = process_sp->GetLanguageRuntime(frame_lang);
-    if (log)
-      log->Printf("Frame has language of type %s",
-                  Language::GetNameForLanguageType(frame_lang));
+    LLDB_LOGF(log, "Frame has language of type %s",
+              Language::GetNameForLanguageType(frame_lang));
   }
 
   // 2. Configure the compiler with a set of default options that are
@@ -345,9 +340,8 @@ ClangExpressionParser::ClangExpressionParser(
   if (target_arch.IsValid()) {
     std::string triple = target_arch.GetTriple().str();
     m_compiler->getTargetOpts().Triple = triple;
-    if (log)
-      log->Printf("Using %s as the target triple",
-                  m_compiler->getTargetOpts().Triple.c_str());
+    LLDB_LOGF(log, "Using %s as the target triple",
+              m_compiler->getTargetOpts().Triple.c_str());
   } else {
     // If we get here we don't have a valid target and just have to guess.
     // Sometimes this will be ok to just use the host target triple (when we
@@ -356,9 +350,8 @@ ClangExpressionParser::ClangExpressionParser(
     // the host triple. In such a case the language runtime should expose an
     // overridden options set (3), below.
     m_compiler->getTargetOpts().Triple = llvm::sys::getDefaultTargetTriple();
-    if (log)
-      log->Printf("Using default target triple of %s",
-                  m_compiler->getTargetOpts().Triple.c_str());
+    LLDB_LOGF(log, "Using default target triple of %s",
+              m_compiler->getTargetOpts().Triple.c_str());
   }
   // Now add some special fixes for known architectures: Any arm32 iOS
   // environment, but not on arm64
@@ -412,12 +405,13 @@ ClangExpressionParser::ClangExpressionParser(
   auto target_info = TargetInfo::CreateTargetInfo(
       m_compiler->getDiagnostics(), m_compiler->getInvocation().TargetOpts);
   if (log) {
-    log->Printf("Using SIMD alignment: %d", target_info->getSimdDefaultAlign());
-    log->Printf("Target datalayout string: '%s'",
-                target_info->getDataLayout().getStringRepresentation().c_str());
-    log->Printf("Target ABI: '%s'", target_info->getABI().str().c_str());
-    log->Printf("Target vector alignment: %d",
-                target_info->getMaxVectorAlign());
+    LLDB_LOGF(log, "Using SIMD alignment: %d",
+              target_info->getSimdDefaultAlign());
+    LLDB_LOGF(log, "Target datalayout string: '%s'",
+              target_info->getDataLayout().getStringRepresentation().c_str());
+    LLDB_LOGF(log, "Target ABI: '%s'", target_info->getABI().str().c_str());
+    LLDB_LOGF(log, "Target vector alignment: %d",
+              target_info->getMaxVectorAlign());
   }
   m_compiler->setTarget(target_info);
 
@@ -517,15 +511,15 @@ ClangExpressionParser::ClangExpressionParser(
   }
 
   if (process_sp && lang_opts.ObjC) {
-    if (process_sp->GetObjCLanguageRuntime()) {
-      if (process_sp->GetObjCLanguageRuntime()->GetRuntimeVersion() ==
+    if (auto *runtime = ObjCLanguageRuntime::Get(*process_sp)) {
+      if (runtime->GetRuntimeVersion() ==
           ObjCLanguageRuntime::ObjCRuntimeVersions::eAppleObjC_V2)
         lang_opts.ObjCRuntime.set(ObjCRuntime::MacOSX, VersionTuple(10, 7));
       else
         lang_opts.ObjCRuntime.set(ObjCRuntime::FragileMacOSX,
                                   VersionTuple(10, 7));
 
-      if (process_sp->GetObjCLanguageRuntime()->HasNewLiteralsAndIndexing())
+      if (runtime->HasNewLiteralsAndIndexing())
         lang_opts.DebuggerObjCLiteral = true;
     }
   }
@@ -541,8 +535,8 @@ ClangExpressionParser::ClangExpressionParser(
   // Set CodeGen options
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
-  m_compiler->getCodeGenOpts().DisableFPElim = true;
-  m_compiler->getCodeGenOpts().OmitLeafFramePointer = false;
+  m_compiler->getCodeGenOpts().setFramePointer(
+                                    CodeGenOptions::FramePointerKind::All);
   if (generate_debug_info)
     m_compiler->getCodeGenOpts().setDebugInfo(codegenoptions::FullDebugInfo);
   else
@@ -703,7 +697,7 @@ public:
   ///
   CodeComplete(CompletionRequest &request, clang::LangOptions ops,
                std::string expr, unsigned position)
-      : CodeCompleteConsumer(CodeCompleteOptions(), false),
+      : CodeCompleteConsumer(CodeCompleteOptions()),
         m_info(std::make_shared<GlobalCodeCompletionAllocator>()), m_expr(expr),
         m_position(position), m_request(request), m_desc_policy(ops) {
 
@@ -719,7 +713,7 @@ public:
   }
 
   /// Deregisters and destroys this code-completion consumer.
-  virtual ~CodeComplete() {}
+  ~CodeComplete() override {}
 
   /// \name Code-completion filtering
   /// Check if the result should be filtered out.
@@ -914,10 +908,13 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
       if (file.Write(expr_text, bytes_written).Success()) {
         if (bytes_written == expr_text_len) {
           file.Close();
-          source_mgr.setMainFileID(source_mgr.createFileID(
-              m_compiler->getFileManager().getFile(result_path),
-              SourceLocation(), SrcMgr::C_User));
-          created_main_file = true;
+          if (auto fileEntry =
+                  m_compiler->getFileManager().getFile(result_path)) {
+            source_mgr.setMainFileID(source_mgr.createFileID(
+                *fileEntry,
+                SourceLocation(), SrcMgr::C_User));
+            created_main_file = true;
+          }
         }
       }
     }
@@ -925,7 +922,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
 
   if (!created_main_file) {
     std::unique_ptr<MemoryBuffer> memory_buffer =
-        MemoryBuffer::getMemBufferCopy(expr_text, __FUNCTION__);
+        MemoryBuffer::getMemBufferCopy(expr_text, "<lldb-expr>");
     source_mgr.setMainFileID(source_mgr.createFileID(std::move(memory_buffer)));
   }
 
@@ -967,8 +964,10 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                *Consumer, TU_Complete, completion_consumer));
   m_compiler->setASTConsumer(std::move(Consumer));
 
-  if (ast_context.getLangOpts().Modules)
+  if (ast_context.getLangOpts().Modules) {
     m_compiler->createModuleManager();
+    m_ast_context->setSema(&m_compiler->getSema());
+  }
 
   ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap();
   if (decl_map) {
@@ -1005,6 +1004,10 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
         &m_compiler->getSema());
     ParseAST(m_compiler->getSema(), false, false);
   }
+
+  // Make sure we have no pointer to the Sema we are about to destroy.
+  if (ast_context.getLangOpts().Modules)
+    m_ast_context->setSema(nullptr);
   // Destroy the Sema. This is necessary because we want to emulate the
   // original behavior of ParseAST (which also destroys the Sema after parsing).
   m_compiler->setSema(nullptr);
@@ -1179,9 +1182,8 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
                                    m_expr.FunctionName());
       return err;
     } else {
-      if (log)
-        log->Printf("Found function %s for %s", function_name.AsCString(),
-                    m_expr.FunctionName());
+      LLDB_LOGF(log, "Found function %s for %s", function_name.AsCString(),
+                m_expr.FunctionName());
     }
   }
 
@@ -1196,9 +1198,8 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
   LLVMUserExpression::IRPasses custom_passes;
   {
     auto lang = m_expr.Language();
-    if (log)
-      log->Printf("%s - Current expression language is %s\n", __FUNCTION__,
-                  Language::GetNameForLanguageType(lang));
+    LLDB_LOGF(log, "%s - Current expression language is %s\n", __FUNCTION__,
+              Language::GetNameForLanguageType(lang));
     lldb::ProcessSP process_sp = exe_ctx.GetProcessSP();
     if (process_sp && lang != lldb::eLanguageTypeUnknown) {
       auto runtime = process_sp->GetLanguageRuntime(lang);
@@ -1208,10 +1209,10 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
   }
 
   if (custom_passes.EarlyPasses) {
-    if (log)
-      log->Printf("%s - Running Early IR Passes from LanguageRuntime on "
-                  "expression module '%s'",
-                  __FUNCTION__, m_expr.FunctionName());
+    LLDB_LOGF(log,
+              "%s - Running Early IR Passes from LanguageRuntime on "
+              "expression module '%s'",
+              __FUNCTION__, m_expr.FunctionName());
 
     custom_passes.EarlyPasses->run(*llvm_module_up);
   }
@@ -1228,7 +1229,7 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
       type_system_helper->DeclMap(); // result can be NULL
 
   if (decl_map) {
-    Stream *error_stream = NULL;
+    Stream *error_stream = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
     error_stream = target->GetDebugger().GetErrorFile().get();
 
@@ -1280,8 +1281,8 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
         (execution_policy != eExecutionPolicyTopLevel && !can_interpret)) {
       if (m_expr.NeedsValidation() && process) {
         if (!process->GetDynamicCheckers()) {
-          DynamicCheckerFunctions *dynamic_checkers =
-              new DynamicCheckerFunctions();
+          ClangDynamicCheckerFunctions *dynamic_checkers =
+              new ClangDynamicCheckerFunctions();
 
           DiagnosticManager install_diagnostics;
 
@@ -1296,28 +1297,30 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
           process->SetDynamicCheckers(dynamic_checkers);
 
-          if (log)
-            log->Printf("== [ClangExpressionParser::PrepareForExecution] "
-                        "Finished installing dynamic checkers ==");
+          LLDB_LOGF(log, "== [ClangExpressionParser::PrepareForExecution] "
+                         "Finished installing dynamic checkers ==");
         }
 
-        IRDynamicChecks ir_dynamic_checks(*process->GetDynamicCheckers(),
-                                          function_name.AsCString());
+        if (auto *checker_funcs = llvm::dyn_cast<ClangDynamicCheckerFunctions>(
+                process->GetDynamicCheckers())) {
+          IRDynamicChecks ir_dynamic_checks(*checker_funcs,
+                                            function_name.AsCString());
 
-        llvm::Module *module = execution_unit_sp->GetModule();
-        if (!module || !ir_dynamic_checks.runOnModule(*module)) {
-          err.SetErrorToGenericError();
-          err.SetErrorString("Couldn't add dynamic checks to the expression");
-          return err;
-        }
+          llvm::Module *module = execution_unit_sp->GetModule();
+          if (!module || !ir_dynamic_checks.runOnModule(*module)) {
+            err.SetErrorToGenericError();
+            err.SetErrorString("Couldn't add dynamic checks to the expression");
+            return err;
+          }
 
-        if (custom_passes.LatePasses) {
-          if (log)
-            log->Printf("%s - Running Late IR Passes from LanguageRuntime on "
-                        "expression module '%s'",
-                        __FUNCTION__, m_expr.FunctionName());
+          if (custom_passes.LatePasses) {
+            LLDB_LOGF(log,
+                      "%s - Running Late IR Passes from LanguageRuntime on "
+                      "expression module '%s'",
+                      __FUNCTION__, m_expr.FunctionName());
 
-          custom_passes.LatePasses->run(*module);
+            custom_passes.LatePasses->run(*module);
+          }
         }
       }
     }

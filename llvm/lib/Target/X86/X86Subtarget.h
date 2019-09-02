@@ -353,11 +353,20 @@ protected:
   /// Processor has AVX-512 Vector Neural Network Instructions
   bool HasVNNI = false;
 
+  /// Processor has AVX-512 bfloat16 floating-point extensions
+  bool HasBF16 = false;
+
+  /// Processor supports ENQCMD instructions
+  bool HasENQCMD = false;
+
   /// Processor has AVX-512 Bit Algorithms instructions
   bool HasBITALG = false;
 
-  /// Processor supports MPX - Memory Protection Extensions
-  bool HasMPX = false;
+  /// Processor has AVX-512 vp2intersect instructions
+  bool HasVP2INTERSECT = false;
+
+  /// Deprecated flag for MPX instructions.
+  bool DeprecatedHasMPX = false;
 
   /// Processor supports CET SHSTK - Control-Flow Enforcement Technology
   /// using Shadow Stack
@@ -392,6 +401,12 @@ protected:
 
   /// Try harder to combine to horizontal vector ops if they are fast.
   bool HasFastHorizontalOps = false;
+
+  /// Prefer a left/right scalar logical shifts pair over a shift+and pair.
+  bool HasFastScalarShiftMasks = false;
+
+  /// Prefer a left/right vector logical shifts pair over a shift+and pair.
+  bool HasFastVectorShiftMasks = false;
 
   /// Use a retpoline thunk rather than indirect calls to block speculative
   /// execution.
@@ -512,7 +527,7 @@ public:
 
   /// Methods used by Global ISel
   const CallLowering *getCallLowering() const override;
-  const InstructionSelector *getInstructionSelector() const override;
+  InstructionSelector *getInstructionSelector() const override;
   const LegalizerInfo *getLegalizerInfo() const override;
   const RegisterBankInfo *getRegBankInfo() const override;
 
@@ -644,6 +659,8 @@ public:
   bool hasFastSHLDRotate() const { return HasFastSHLDRotate; }
   bool hasFastBEXTR() const { return HasFastBEXTR; }
   bool hasFastHorizontalOps() const { return HasFastHorizontalOps; }
+  bool hasFastScalarShiftMasks() const { return HasFastScalarShiftMasks; }
+  bool hasFastVectorShiftMasks() const { return HasFastVectorShiftMasks; }
   bool hasMacroFusion() const { return HasMacroFusion; }
   bool hasBranchFusion() const { return HasBranchFusion; }
   bool hasERMSB() const { return HasERMSB; }
@@ -664,8 +681,9 @@ public:
   bool hasVLX() const { return HasVLX; }
   bool hasPKU() const { return HasPKU; }
   bool hasVNNI() const { return HasVNNI; }
+  bool hasBF16() const { return HasBF16; }
+  bool hasVP2INTERSECT() const { return HasVP2INTERSECT; }
   bool hasBITALG() const { return HasBITALG; }
-  bool hasMPX() const { return HasMPX; }
   bool hasSHSTK() const { return HasSHSTK; }
   bool hasCLFLUSHOPT() const { return HasCLFLUSHOPT; }
   bool hasCLWB() const { return HasCLWB; }
@@ -676,6 +694,7 @@ public:
   bool hasSGX() const { return HasSGX; }
   bool threewayBranchProfitable() const { return ThreewayBranchProfitable; }
   bool hasINVPCID() const { return HasINVPCID; }
+  bool hasENQCMD() const { return HasENQCMD; }
   bool useRetpolineIndirectCalls() const { return UseRetpolineIndirectCalls; }
   bool useRetpolineIndirectBranches() const {
     return UseRetpolineIndirectBranches;
@@ -749,10 +768,6 @@ public:
 
   bool isTargetWindowsMSVC() const {
     return TargetTriple.isWindowsMSVCEnvironment();
-  }
-
-  bool isTargetKnownWindowsMSVC() const {
-    return TargetTriple.isKnownWindowsMSVCEnvironment();
   }
 
   bool isTargetWindowsCoreCLR() const {
