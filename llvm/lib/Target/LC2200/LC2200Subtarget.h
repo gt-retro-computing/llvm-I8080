@@ -2,10 +2,10 @@
 #define LC2200SUBTARGET_H
 
 #include "LC2200.h"
-#include "LC2200FrameLowering.h"
-#include "LC2200ISelLowering.h"
-#include "LC2200InstrInfo.h"
-#include "LC2200SelectionDAGInfo.h"
+//#include "LC2200FrameLowering.h"
+//#include "LC2200ISelLowering.h"
+//#include "LC2200InstrInfo.h"
+//#include "LC2200SelectionDAGInfo.h"
 #include "LC2200Subtarget.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetSubtargetInfo.h"

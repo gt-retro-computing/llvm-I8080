@@ -26,7 +26,6 @@ type = TargetGroup
 name = LC2200
 parent = Target
 has_asmprinter = 0
-has_asmparser = 0
 has_disassembler = 0
 
 [component_1]
