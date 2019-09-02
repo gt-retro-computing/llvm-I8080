@@ -39,7 +39,7 @@ static MCRegisterInfo *createLC2200MCRegisterInfo(const Triple &TT) {
 //	return X;
 //}
 
-static MCAsmInfo *createLC2200MCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
+static MCAsmInfo *createLC2200MCAsmInfo(const MCRegisterInfo &MRI, const Triple &TT) {
 	MCAsmInfo *MAI = new LC2200MCAsmInfo(TT);
 	return MAI;
 }
@@ -86,8 +86,8 @@ createLC2200MCInstPrinter(const Target &T, unsigned SyntaxVariant,
 extern "C" void LLVMInitializeLC2200TargetMC() {
 
 // Register the MC asm info.
-//RegisterMCAsmInfoFn X(TheLC2200Target, createLC2200MCAsmInfo);
-//
+RegisterMCAsmInfoFn X(TheLC2200Target, createLC2200MCAsmInfo);
+
 //// Register the MC codegen info.
 //TargetRegistry::RegisterMCCodeGenInfo(TheLC2200Target,
 //createLC2200MCCodeGenInfo);

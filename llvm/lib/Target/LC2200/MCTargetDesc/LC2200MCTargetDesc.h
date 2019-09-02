@@ -29,7 +29,7 @@ namespace llvm {
 #include "LC2200GenRegisterInfo.inc"
 
 #define GET_INSTRINFO_ENUM
-//#include "LC2200GenInstrInfo.inc"
+#include "LC2200GenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_ENUM
 //#include "LC2200GenSubtargetInfo.inc"

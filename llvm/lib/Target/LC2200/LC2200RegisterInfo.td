@@ -7,12 +7,15 @@ let Namespace = "LC2200" in {
     def zero : LC2200Reg<0, "$zero">;
     def at: LC2200Reg<1, "$at">;
     def v0: LC2200Reg<2, "$v0">;
-    foreach i = 0-4 in {
-        def a#i : LC2200Reg<!add(i, 3), "$a$i">;
-    }
-    foreach i = 0-3 in {
-        def s#i : LC2200Reg<!add(i, 8), "$s$i">;
-    }
+    def a0 : LC2200Reg<3, "$a0">;
+    def a1 : LC2200Reg<4, "$a1">;
+    def a2 : LC2200Reg<5, "$a2">;
+    def a3 : LC2200Reg<6, "$a3">;
+    def a4 : LC2200Reg<7, "$a4">;
+    def s0 : LC2200Reg<8, "$s0">;
+    def s1 : LC2200Reg<9, "$s1">;
+    def s2 : LC2200Reg<10, "$s2">;
+    def s3 : LC2200Reg<11, "$s3">;
     def k0: LC2200Reg<12, "$k0">;
     def sp: LC2200Reg<13, "$sp">;
     def fp: LC2200Reg<14, "$fp">;

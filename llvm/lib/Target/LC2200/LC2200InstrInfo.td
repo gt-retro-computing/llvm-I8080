@@ -30,7 +30,7 @@ def ADD : RTypeInstr<0b0000, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$sr
         let Inst{19-4} = 0; // padding
     }
 def NAND: RTypeInstr<0b0001, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src2),
-    "NADD $dst, $src1, $src2",
+    "NAND $dst, $src1, $src2",
     [(set i32:$dst, (xor (xor i32:$src1, (xor i32:$src1, i32:$src2)), (xor i32:$src2, (xor i32:$src1, i32:$src2))))]> {
         bits<4> dst;
         bits<4> src1;
@@ -57,19 +57,19 @@ def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins SRCRegs:$src1, i32imm:$im
         let Inst{19-0} = imm;
     }
 
-def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins SRCRegs:$base, i32imm:$offset),
-    "LW $dst, $offset($base)",
-    [(set i32:$dst, (load (add addr:$base, addr:$offset)))]> {
+def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins SRCRegs:$base, i32imm:$off20),
+    "LW $dst, ${off20}(${base})",
+    [(set i32:$dst, (load (add addr:$base, addr:$off20)))]> {
         bits<4> dst;
         bits<4> base;
-        bits<20> offset;
+        bits<20> off20;
         let Inst{27-24} = base;
         let Inst{23-20} = dst;
-        let Inst{19-0} = offset;
+        let Inst{19-0} = off20;
     }
 
 def SW: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$base, i32imm:$offset),
-    "SW $src1, $offset($base)",
+    "SW $src1, ${offset}(${base})",
     [(store i32:$src1, (add addr:$base, addr:$offset))]> {
         bits<4> src1;
         bits<4> base;

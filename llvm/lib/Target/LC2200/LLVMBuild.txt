@@ -17,6 +17,7 @@
 
 [common]
 subdirectories =
+ AsmParser
  InstPrinter
  MCTargetDesc
  TargetInfo
@@ -25,7 +26,8 @@ subdirectories =
 type = TargetGroup
 name = LC2200
 parent = Target
-has_asmprinter = 0
+has_asmparser = 1
+has_asmprinter = 1
 has_disassembler = 0
 
 [component_1]
@@ -37,11 +39,12 @@ required_libraries =
     AsmPrinter
     CodeGen
     Core
-    LC2200Info
-    LC2200AsmPrinter
-    LC2200Desc
     MC
     SelectionDAG
+    LC2200Desc
+    LC2200Info
+    LC2200AsmPrinter
+    LC2200AsmParser
     Support
     Target
     TransformUtils

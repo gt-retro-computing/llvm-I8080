@@ -1,0 +1,6 @@
+[component_0]
+type = Library
+name = LC2200AsmParser
+parent = LC2200
+required_libraries = MC MCParser Support LC2200Desc LC2200Info
+add_to_library_groups = LC2200
