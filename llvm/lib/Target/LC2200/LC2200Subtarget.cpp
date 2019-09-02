@@ -6,7 +6,7 @@
 
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
-//#include "LC2200GenSubtargetInfo.inc"
+#include "LC2200GenSubtargetInfo.inc"
 
 using namespace llvm;
 

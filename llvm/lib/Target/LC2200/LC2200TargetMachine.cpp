@@ -3,7 +3,7 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/TargetRegistry.h"
-
+#include <iostream>
 
 //class LC2200PassConfig : public TargetPassConfig {
 // public:
@@ -26,7 +26,7 @@ LC2200TargetMachine::LC2200TargetMachine(const llvm::Target &T, const llvm::Trip
                 "e-m:e-p:16:16:16-i1:16:16-i8:8:8-i16:16:16-i32:32:32-f64:64:64-a:0:16-n16",
                 TT, CPU, FS, Options
         ) {
-
+    std::cout << "Create Triple: %s"  << TT.str() << std::endl;
 }
 //
 //namespace {

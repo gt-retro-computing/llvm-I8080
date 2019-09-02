@@ -23,6 +23,7 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+//#define PRINT_ALIAS_INSTR
 #include "LC2200GenAsmWriter.inc"
 
 void LC2200InstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {

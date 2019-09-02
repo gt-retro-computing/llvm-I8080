@@ -10,9 +10,9 @@
 #include "llvm/Target/TargetMachine.h"
 
 #define GET_SUBTARGETINFO_HEADER
-//#include "LC2200GenSubtargetInfo.inc"
+#include "LC2200GenSubtargetInfo.inc"
 
-//class LC2200Subtarget : public LC2200GenSubtargetInfo {
+class LC2200Subtarget : public LC2200GenSubtargetInfo {
 //virtual void anchor();
 // private:
 //	const DataLayout DL;	// Calculates type size & alignment.
@@ -21,8 +21,8 @@
 //	LC2200SelectionDAGInfo TSInfo;
 //	LC2200FrameLowering FrameLowering;
 //	InstrItineraryData InstrItins;
-// public:
-// 	LC2200Subtarget(const std::string &TT, const std::string &CPU, const std::string &FS, LC2200TargetMachine &TM);
+ public:
+// 	LC2200Subtarget(const std::string &TT, const std::string &CPU, const std::string &FS);
 //
 // 	const InstrItineraryData *getInstrItineraryData() const override {
 //		return &InstrItins;
@@ -49,6 +49,6 @@
 //	const DataLayout *getDataLayout() const override { return &DL; }
 //
 //	void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
-//};
+};
 //
 #endif
