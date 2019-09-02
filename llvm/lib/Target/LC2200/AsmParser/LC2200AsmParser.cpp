@@ -15,6 +15,8 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/TargetRegistry.h"
 
+#define DEBUG_TYPE "asm-matcher"
+
 using namespace llvm;
 
 namespace {
@@ -242,10 +244,8 @@ bool
 LC2200AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode, OperandVector &Operands, MCStreamer &Out,
                                          uint64_t &ErrorInfo, bool MatchingInlineAsm) {
     MCInst Inst;
-    SMLoc ErrorLoc;
-    uint64_t ErrorInfo_Impl;
 
-    if (MatchInstructionImpl(Operands, Inst, ErrorInfo_Impl, 0)) {
+    if (MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm)) {
         Out.EmitInstruction(Inst, this->STI);
         return false;
     } else {
