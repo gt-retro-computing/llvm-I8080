@@ -18,26 +18,26 @@ include "LC2200Operators.td"
 // R Type Instructions
 //==========================
 
-def ADD : RTypeInst<0b0000, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src2),
-    "ADD $dst, $src1, $src2"),
-    [(set i32:$dst, (add i32:$src1, i32:$src2))]> {
-        bits<3> dst;
-        bits<3> src1;
-        bits<3> src2;
-        let Inst{27-24} = $src1;
-        let Inst{23-20} = $src2;
-        let Inst{3-0} = $dst;
+def ADD : RTypeInstr<0b0000, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src2),
+    "ADD $dst, $src1, $src2",
+     [(set i32:$dst, (add i32:$src1, i32:$src2))]> {
+        bits<4> dst;
+        bits<4> src1;
+        bits<4> src2;
+        let Inst{27-24} = src1;
+        let Inst{23-20} = src2;
+        let Inst{3-0} = dst;
         let Inst{19-4} = 0; // padding
     }
-def NAND: RTypeInst<0b0001, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src2),
-    "NADD $dst, $src1, $src2"),
-    [(set i32:$dst, (nand i32:$src1, i32:$src2))]> {
-        bits<3> dst;
-        bits<3> src1;
-        bits<3> src2;
-        let Inst{27-24} = $src1;
-        let Inst{23-20} = $src2;
-        let Inst{3-0} = $dst;
+def NAND: RTypeInstr<0b0001, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src2),
+    "NADD $dst, $src1, $src2",
+    [(set i32:$dst, (xor (xor i32:$src1, (xor i32:$src1, i32:$src2)), (xor i32:$src2, (xor i32:$src1, i32:$src2))))]> {
+        bits<4> dst;
+        bits<4> src1;
+        bits<4> src2;
+        let Inst{27-24} = src1;
+        let Inst{23-20} = src2;
+        let Inst{3-0} = dst;
         let Inst{19-4} = 0; // padding
     }
 
@@ -49,8 +49,8 @@ def NAND: RTypeInst<0b0001, (outs GRRegs:$dst), (ins SRCRegs:$src1, SRCRegs:$src
 def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins SRCRegs:$src1, i32imm:$imm),
     "ADDI $dst, $src1, $imm",
     [(set i32:$dst, (add i32:$src1, LC2200imm20:$imm))]> {
-        bits<3> dst;
-        bits<3> src1;
+        bits<4> dst;
+        bits<4> src1;
         bits<20> imm;
         let Inst{27-24} = src1;
         let Inst{23-20} = dst;
@@ -60,8 +60,8 @@ def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins SRCRegs:$src1, i32imm:$im
 def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins SRCRegs:$base, i32imm:$offset),
     "LW $dst, $offset($base)",
     [(set i32:$dst, (load (add addr:$base, addr:$offset)))]> {
-        bits<3> dst;
-        bits<3> base;
+        bits<4> dst;
+        bits<4> base;
         bits<20> offset;
         let Inst{27-24} = base;
         let Inst{23-20} = dst;
@@ -71,24 +71,24 @@ def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins SRCRegs:$base, i32imm:$offse
 def SW: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$base, i32imm:$offset),
     "SW $src1, $offset($base)",
     [(store i32:$src1, (add addr:$base, addr:$offset))]> {
-        bits<3> src1;
-        bits<3> base;
+        bits<4> src1;
+        bits<4> base;
         bits<20> offset;
         let Inst{27-24} = base;
         let Inst{23-20} = src1;
         let Inst{19-0} = offset;
     }
 
-def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pcoffset),
-    "BEQ $src1, $src2, $pcoffset",
-    [(br_cc "chain", seteq, i32:$src1, i32:$src2, LC2200imm20:$pcoffset))]> { // pcoffset?? (add $pc, offset, 1???)
-        bits<3> src1;
-        bits<3> src2;
-        bits<20> pcoffset;
-        let Inst{27-24} = src1;
-        let Inst{23-20} = src2;
-        let Inst{19-0} = pcoffset;
-    }
+// def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pcoffset),
+//     "BEQ $src1, $src2, $pcoffset",
+//     [(BR_CC, i32:$src1, i32:$src2, LC2200imm20:$pcoffset))]> { // pcoffset?? (add $pc, offset, 1???)
+//         bits<4> src1;
+//         bits<4> src2;
+//         bits<20> pcoffset;
+//         let Inst{27-24} = src1;
+//         let Inst{23-20} = src2;
+//         let Inst{19-0} = pcoffset;
+//     }
 
 //===----------------------------------------------------------------------===//
 // ALU Instructions
@@ -97,9 +97,9 @@ def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pc
 //   def rr : ALUInst<opcode, (outs GRRegs:$dst), (ins GRRegs:$src1, GRRegs:$src2),
 //                     !strconcat(opstr, " $dst, $src1, $src2"),
 //                     [(set i16:$dst, (opnode i16:$src1, i16:$src2))]> {
-//     bits<3> dst;
-//     bits<3> src1;
-//     bits<3> src2;
+//     bits<4> dst;
+//     bits<4> src1;
+//     bits<4> src2;
 //     let Inst{5} = 0;
 //     let Inst{7-6} = 0b00;
 //     let Inst{11-9} = dst;

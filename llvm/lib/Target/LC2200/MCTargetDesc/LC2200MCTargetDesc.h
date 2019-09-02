@@ -25,12 +25,12 @@ namespace llvm {
 } // End llvm namespace
 
 #define GET_REGINFO_TARGET_DESC
-#include "LC2200GenRegisterInfo.inc"
+//#include "LC2200GenRegisterInfo.inc"
 
 #define GET_INSTRINFO_ENUM
-#include "LC2200GenInstInfo.inc"
+//#include "LC2200GenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_ENUM
-#include "LC2200GenSubtargetInfo.inc"
+//#include "LC2200GenSubtargetInfo.inc"
 
 #endif 

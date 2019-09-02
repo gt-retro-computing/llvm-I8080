@@ -13,7 +13,7 @@ include "LC2200RegisterInfo.td"
 include "LC2200InstrInfo.td"
 include "LC2200CallingConv.td"
 
-def LC2200InstInfo : InstInfo;
+def LC2200InstInfo : InstrInfo;
 
 //===----------------------------------------------------------------------===//
 // LC2200 processors supported.

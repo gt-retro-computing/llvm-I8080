@@ -24,23 +24,23 @@ class InstLC2200<dag outs, dag ins, string asmstr, list<dag> pattern> : Instruct
 }
 
 
-class LC2200PseudoInst<dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
+class LC2200PseudoInstr<dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
   let isPseudo = 1;
 }
 
-class RTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
+class RTypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
   let Inst{31-28} = opcode;
 }
 
-class ITypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
+class ITypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
   let Inst{31-28} = opcode;
 }
 
-class JTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
+class JTypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
   let Inst{31-28} = opcode;
 }
 
-class OTypeInst<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
+class OTypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
   let Inst{31-28} = opcode;
 }
 
