@@ -63,7 +63,7 @@ struct LC2200Operand : MCParsedAsmOperand {
     k_Token,
     k_Register,
     k_Immediate,
-    k_Memory
+    k_Memory,
   } Kind;
   SMLoc StartLoc, EndLoc;
 
@@ -263,7 +263,7 @@ bool LC2200AsmParser::ParseRegister(unsigned &RegNo, OperandVector &Operands) {
     case AsmToken::Dollar:
       const AsmToken &Next = getLexer().Lex();
       if (Next.getKind() == AsmToken::Identifier) {
-        StringRef regName = StringRef("$"+Next.getIdentifier().str());
+        StringRef regName = StringRef("$" + Next.getIdentifier().str());
         RegNo = MatchRegisterName(regName);
         if (RegNo != 0) {
           getLexer().Lex();
@@ -314,52 +314,28 @@ bool LC2200AsmParser::ParseSymbolReference(OperandVector &Operands) {
     return true;
 
   SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
-//    MCSymbolRefExpr::VariantKind VK = getVariantKind(Identifier);
-//    if(VK != MCSymbolRefExpr::VK_None) {
-//        // Parse a relocation expression.
-//        SMLoc ExprS = Parser.getTok().getLoc();
-//        if(getLexer().isNot(AsmToken::LParen))
-//            return Error(Parser.getTok().getLoc(),
-//                         "expected a parenthesized expression");
-//        getLexer().Lex();
-//
-//        const MCExpr *EVal;
-//        if(getParser().parseExpression(EVal))
-//            return true;
-//
-//        SMLoc ExprE = Parser.getTok().getLoc();
-//        if(getLexer().isNot(AsmToken::RParen))
-//            return Error(ExprE, "expected a closing parenthesis");
-//        getLexer().Lex();
-//
-////        const MCExpr *Res = evaluateRelocExpr(EVal, VK);
-////        if(!Res)
-////            return Error(ExprS, "unsupported relocation expression");
-//
-//        Operands.push_back(LC2200Operand::createImm(Res, S, ExprE));
-//        return false;
-//    } else {
-//        // Parse a symbol
-//        MCSymbol *Sym = getContext().getOrCreateSymbol(Identifier);
-//        const MCExpr *Res =
-//                MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
-//        Operands.push_back(OR1KOperand::createImm(Res, S, E));
-//        return false;
-//    }
+
+  // TODO relocations?
+
+  // Parse a symbol
+  MCSymbol *Sym = getContext().getOrCreateSymbol(Identifier);
+  const MCExpr *Res = MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
+  Operands.push_back(LC2200Operand::createImm(Res, S, E));
   return false;
 }
 
 bool LC2200AsmParser::ParseOperand(OperandVector &Operands) {
   // A register operand is always alone.
-    switch (getLexer().getKind()) {
-        case AsmToken::LParen:
-        case AsmToken::RParen:
-            Operands.push_back(LC2200Operand::CreateToken(getLexer().getTok().getString(), getLexer().getTok().getLoc()));
-            getLexer().Lex();
-            return false;
-        default:
-            break;
-    }
+  switch (getLexer().getKind()) {
+    case AsmToken::LParen:
+    case AsmToken::RParen:
+      Operands.push_back(LC2200Operand::CreateToken(
+              getLexer().getTok().getString(), getLexer().getTok().getLoc()));
+      getLexer().Lex();
+      return false;
+    default:
+      break;
+  }
   unsigned RegNo;
   if (!ParseRegister(RegNo, Operands))
     return false;
@@ -368,7 +344,7 @@ bool LC2200AsmParser::ParseOperand(OperandVector &Operands) {
   // by a base register.
   SMLoc S = getLexer().getTok().getLoc();
   if (!ParseImmediate(Operands) || !ParseSymbolReference(Operands)) {
-      return false;
+    return false;
   }
 
   return Error(S, "unsupported operand");
@@ -394,8 +370,8 @@ bool LC2200AsmParser::ParseInstruction(ParseInstructionInfo &Info,
   while (getLexer().isNot(AsmToken::EndOfStatement)) {
     // Consume comma token
     if (getLexer().is(AsmToken::Comma)) {
-        getLexer().Lex();
-        continue;
+      getLexer().Lex();
+      continue;
     }
 
     // Parse next operand
