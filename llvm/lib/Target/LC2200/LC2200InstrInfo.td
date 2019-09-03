@@ -22,7 +22,7 @@ def ADD : RTypeInstr<0b0000, "add",
     let isAdd = 1;
 }
 def NAND: RTypeInstr<0b0001, "nand",
-    [(set i32:$dr, (xor (xor i32:$sr1, (xor i32:$sr1, i32:$sr2)), (xor i32:$sr2, (xor i32:$sr1, i32:$sr2))))]>;
+    [(set (i32 GRRegs:$dr), (xor (xor (i32 GRRegs:$sr1), (xor (i32 GRRegs:$sr1), (i32 GRRegs:$sr2))), (xor (i32 GRRegs:$sr2), (xor (i32 GRRegs:$sr1), (i32 GRRegs:$sr2)))))]>;
 
 
 //=========================

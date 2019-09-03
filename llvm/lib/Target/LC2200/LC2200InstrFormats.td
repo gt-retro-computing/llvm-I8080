@@ -28,7 +28,7 @@ class LC2200PseudoInstr<dag outs, dag ins, string opcodestr, string argstr, list
   let isPseudo = 1;
 }
 
-class RTypeInstr<bits<4> opcode, string opcodestr, list<dag> pattern> : InstLC2200<(outs GRRegs:$dr), (ins SRCRegs:$sr1, SRCRegs:$sr2), opcode, opcodestr, "$dr, $sr1, $sr2", pattern> {
+class RTypeInstr<bits<4> opcode, string opcodestr, list<dag> pattern> : InstLC2200<(outs GRRegs:$dr), (ins GRRegs:$sr1, GRRegs:$sr2), opcode, opcodestr, "$dr, $sr1, $sr2", pattern> {
   bits<4> dr;
   bits<4> sr1;
   bits<4> sr2;

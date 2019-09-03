@@ -1,6 +1,6 @@
 #include "LC2200MCTargetDesc.h"
-#include "InstPrinter/LC2200InstPrinter.h"
 #include "LC2200MCAsmInfo.h"
+#include "InstPrinter/LC2200InstPrinter.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -114,7 +114,7 @@ createLC2200MCInstrInfo);
 //// Register the object streamer.
 //TargetRegistry::RegisterMCObjectStreamer(TheLC2200Target,
 //createMCStreamer);
-//// Register the MCCodeEmitter
-//TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target,
-//createLC2200MCCodeEmitter);
+// Register the MCCodeEmitter
+TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target,
+createLC2200MCCodeEmitter);
 }

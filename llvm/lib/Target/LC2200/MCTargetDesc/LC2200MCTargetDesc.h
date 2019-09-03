@@ -19,7 +19,7 @@ namespace llvm {
 	class raw_ostream;
 	extern Target TheLC2200Target;
 	MCCodeEmitter *createLC2200MCCodeEmitter(const MCInstrInfo &MCII,
-		const MCRegisterInfo &MRI, const MCSubtargetInfo &STI, MCContext &Ctx);
+		const MCRegisterInfo &MRI, MCContext &Ctx);
 	MCAsmBackend *createLC2200AsmBackend(const Target &T, const MCRegisterInfo &MRI,
 		StringRef TT, StringRef CPU);
 	MCObjectWriter *createLC2200ELFObjectWriter(raw_ostream &OS, uint8_t OSABI);
