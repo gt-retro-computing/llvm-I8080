@@ -115,6 +115,5 @@ createLC2200MCInstrInfo);
 //TargetRegistry::RegisterMCObjectStreamer(TheLC2200Target,
 //createMCStreamer);
 // Register the MCCodeEmitter
-TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target,
-createLC2200MCCodeEmitter);
+TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target, createLC2200MCCodeEmitter);
 }
