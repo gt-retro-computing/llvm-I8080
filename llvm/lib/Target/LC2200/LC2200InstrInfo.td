@@ -40,7 +40,7 @@ def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins GRRegs:$src1, LC2200imm20
         let Inst{19-0} = imm;
     }
 
-def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins GRRegs:$base, LC2200imm20:$off20),
+def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins LC2200imm20:$off20, GRRegs:$base),
     "lw", "$dst, ${off20}(${base})",
     [(set (i32 GRRegs:$dst), (load (add (i32 GRRegs:$base), LC2200imm20:$off20)))]> {
         bits<4> dst;
@@ -51,9 +51,9 @@ def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins GRRegs:$base, LC2200imm20:$o
         let Inst{19-0} = off20;
     }
 
-def SW: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$base, i32imm:$offset),
+def SW: ITypeInstr<0b0100, (outs GRRegs:$src1), (ins LC2200imm20:$offset, GRRegs:$base),
     "sw", "$src1, ${offset}(${base})",
-    [(store i32:$src1, (add addr:$base, addr:$offset))]> {
+    [(store i32:$src1, (add (i32 GRRegs:$base), LC2200imm20:$offset))]> {
         bits<4> src1;
         bits<4> base;
         bits<20> offset;
