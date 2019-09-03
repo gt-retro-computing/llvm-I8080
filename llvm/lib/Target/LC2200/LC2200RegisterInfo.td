@@ -20,6 +20,7 @@ let Namespace = "LC2200" in {
     def sp: LC2200Reg<13, "$sp">;
     def fp: LC2200Reg<14, "$fp">;
     def ra: LC2200Reg<15, "$ra">;
+    def pc: LC2200Reg<16, "$pc">;
 }
 
 def GRRegs : RegisterClass<"LC2200", [i32], 32, 

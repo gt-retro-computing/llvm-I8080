@@ -62,6 +62,41 @@ def SW: ITypeInstr<0b0100, (outs GRRegs:$src1), (ins LC2200imm20:$offset, GRRegs
         let Inst{19-0} = offset;
     }
 
+def GOTO: ITypeInstr<0b0101, (outs), (ins LC2200imm20:$offset),
+    "goto", "$offset",
+    [(brind LC2200imm20:$offset)]> {
+        bits<20> offset;
+        let Inst{27-24} = 0;
+        let Inst{23-20} = 0;
+        let Inst{19-0} = offset;
+        let isBranch = 1;
+        let isTerminator = 1;
+    }
+
+// TODO: JALR
+
+def HALT : InstLC2200<(outs), (ins), 0b0111, "halt", "", []> {
+    let Inst{27-0} = 0;
+    let isTerminator = 1;
+    let hasSideEffects = 1;
+}
+
+def SKPE : SKPTypeInstr<0b1000, 0b0000, "skpe", []>;
+def SKPLT : SKPTypeInstr<0b1000, 0b0001, "skplt", []>;
+
+
+def LEA: ITypeInstr<0b1001, (outs GRRegs:$dr), (ins LC2200imm20:$offset),
+    "lea", "$dr, $offset",
+    [(set i32:$dr, (add pc, LC2200imm20:$offset))]> {
+        bits<4> dr;
+        bits<20> offset;
+        let Inst{27-24} = dr;
+        let Inst{23-20} = 0;
+        let Inst{19-0} = offset;
+        let isAdd = 1;
+    }
+
+
 // def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pcoffset),
 //     "BEQ $src1, $src2, $pcoffset",
 //     [(BR_CC, i32:$src1, i32:$src2, LC2200imm20:$pcoffset))]> { // pcoffset?? (add $pc, offset, 1???)
