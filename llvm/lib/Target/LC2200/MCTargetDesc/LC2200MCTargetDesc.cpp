@@ -68,6 +68,13 @@ createLC2200MCInstPrinter(const Triple &T, unsigned SyntaxVariant,
   return new LC2200InstPrinter(MAI, MII, MRI);
 }
 
+static MCStreamer* createLC2200ELFStreamer(const Triple &T, MCContext &Ctx,
+        std::unique_ptr<MCAsmBackend> &&MAB,
+        std::unique_ptr<MCObjectWriter> &&OW,
+        std::unique_ptr<MCCodeEmitter> &&Emitter, bool RelaxAll) {
+    return createELFStreamer(Ctx, std::move(MAB), std::move(OW), std::move(Emitter), RelaxAll);
+}
+
 //static MCStreamer *
 //createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
 //	bool isVerboseAsm, bool useDwarfDirectory, MCInstPrinter *InstPrint,
@@ -106,14 +113,13 @@ createLC2200MCInstrInfo);
   TargetRegistry::RegisterMCInstPrinter(TheLC2200Target,
                                         createLC2200MCInstPrinter);
 //// Register the ASM Backend.
-//TargetRegistry::RegisterMCAsmBackend(TheLC2200Target,
-//createLC2200AsmBackend);
+TargetRegistry::RegisterMCAsmBackend(TheLC2200Target,
+createLC2200AsmBackend);
 //// Register the assembly streamer.
 //TargetRegistry::RegisterAsmStreamer(TheLC2200Target,
 //createMCAsmStreamer);
 //// Register the object streamer.
-//TargetRegistry::RegisterMCObjectStreamer(TheLC2200Target,
-//createMCStreamer);
+TargetRegistry::RegisterELFStreamer(TheLC2200Target, createLC2200ELFStreamer);
 // Register the MCCodeEmitter
 TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target, createLC2200MCCodeEmitter);
 }

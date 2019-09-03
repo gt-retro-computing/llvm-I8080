@@ -1,5 +1,9 @@
 #ifndef LC2200MCTARGETDESC_H
 #define LC2200MCTARGETDESC_H
+
+#include "llvm/MC/MCTargetOptions.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
@@ -20,9 +24,8 @@ namespace llvm {
 	extern Target TheLC2200Target;
 	MCCodeEmitter *createLC2200MCCodeEmitter(const MCInstrInfo &MCII,
 		const MCRegisterInfo &MRI, MCContext &Ctx);
-	MCAsmBackend *createLC2200AsmBackend(const Target &T, const MCRegisterInfo &MRI,
-		StringRef TT, StringRef CPU);
-	MCObjectWriter *createLC2200ELFObjectWriter(raw_ostream &OS, uint8_t OSABI);
+	MCAsmBackend *createLC2200AsmBackend(const Target &T, const MCSubtargetInfo &STI, const MCRegisterInfo &MRI, const MCTargetOptions &Options);
+	std::unique_ptr<MCObjectWriter> createLC2200ELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI);
 } // End llvm namespace
 
 #define GET_REGINFO_ENUM
