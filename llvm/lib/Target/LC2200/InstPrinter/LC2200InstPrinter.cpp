@@ -112,7 +112,7 @@ void LC2200InstPrinter::printCondCode(const MCInst *MI, unsigned OpNum,
 }
 
 // Print a 'memsrc' operand which is a (Register, Offset) pair.
-void LC2200InstPrinter::printAddrModeMemSrc(const MCInst *MI, unsigned OpNum,
+void LC2200InstPrinter::printMemOperand(const MCInst *MI, int OpNum,
                                          raw_ostream &O) {
     const MCOperand &Op1 = MI->getOperand(OpNum);
     const MCOperand &Op2 = MI->getOperand(OpNum + 1);

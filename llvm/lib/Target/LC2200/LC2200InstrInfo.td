@@ -29,38 +29,38 @@ def NAND: RTypeInstr<0b0001, "nand",
 // I Type Instruction
 //==========================
 
-// def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins SRCRegs:$src1, i32imm:$imm),
-//     "ADDI $dst, $src1, $imm",
-//     [(set i32:$dst, (add i32:$src1, LC2200imm20:$imm))]> {
-//         bits<4> dst;
-//         bits<4> src1;
-//         bits<20> imm;
-//         let Inst{27-24} = src1;
-//         let Inst{23-20} = dst;
-//         let Inst{19-0} = imm;
-//     }
+def ADDI : ITypeInstr<0b0010, (outs GRRegs:$dst), (ins GRRegs:$src1, LC2200imm20:$imm),
+    "addi", "$dst, $src1, $imm",
+    [(set (i32 GRRegs:$dst), (add (i32 GRRegs:$src1), LC2200imm20:$imm))]> {
+        bits<4> dst;
+        bits<4> src1;
+        bits<20> imm;
+        let Inst{27-24} = src1;
+        let Inst{23-20} = dst;
+        let Inst{19-0} = imm;
+    }
 
-// def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins SRCRegs:$base, i32imm:$off20),
-//     "LW $dst, ${off20}(${base})",
-//     [(set i32:$dst, (load (add addr:$base, addr:$off20)))]> {
-//         bits<4> dst;
-//         bits<4> base;
-//         bits<20> off20;
-//         let Inst{27-24} = base;
-//         let Inst{23-20} = dst;
-//         let Inst{19-0} = off20;
-//     }
+def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins GRRegs:$base, LC2200imm20:$off20),
+    "lw", "$dst, ${off20}(${base})",
+    [(set (i32 GRRegs:$dst), (load (add (i32 GRRegs:$base), LC2200imm20:$off20)))]> {
+        bits<4> dst;
+        bits<4> base;
+        bits<20> off20;
+        let Inst{23-20} = dst;
+        let Inst{27-24} = base;
+        let Inst{19-0} = off20;
+    }
 
-// def SW: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$base, i32imm:$offset),
-//     "SW $src1, ${offset}(${base})",
-//     [(store i32:$src1, (add addr:$base, addr:$offset))]> {
-//         bits<4> src1;
-//         bits<4> base;
-//         bits<20> offset;
-//         let Inst{27-24} = base;
-//         let Inst{23-20} = src1;
-//         let Inst{19-0} = offset;
-//     }
+def SW: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$base, i32imm:$offset),
+    "sw", "$src1, ${offset}(${base})",
+    [(store i32:$src1, (add addr:$base, addr:$offset))]> {
+        bits<4> src1;
+        bits<4> base;
+        bits<20> offset;
+        let Inst{27-24} = base;
+        let Inst{23-20} = src1;
+        let Inst{19-0} = offset;
+    }
 
 // def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pcoffset),
 //     "BEQ $src1, $src2, $pcoffset",

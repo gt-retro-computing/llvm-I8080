@@ -293,7 +293,8 @@ bool LC2200AsmParser::ParseImmediate(OperandVector &Operands) {
   SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
   const MCExpr *EVal;
-  switch (getLexer().getKind()) {
+  AsmToken::TokenKind kind = getLexer().getKind();
+  switch (kind) {
     default:
       return true;
     case AsmToken::LParen:
@@ -360,35 +361,36 @@ bool LC2200AsmParser::ParseOperand(OperandVector &Operands) {
   // by a base register.
   SMLoc S = getLexer().getTok().getLoc();
   if (!ParseImmediate(Operands) || !ParseSymbolReference(Operands)) {
-    // Try parsing a base register.
-    if (getLexer().is(AsmToken::LParen)) {
-      getLexer().Lex();
-
-      if (getLexer().is(AsmToken::Identifier)) {
-        unsigned BaseNum;
-        BaseNum = MatchRegisterName(getLexer().getTok().getIdentifier());
-        if (BaseNum != 0) {
-          getLexer().Lex();
-
-          if (getLexer().is(AsmToken::RParen)) {
-            getLexer().Lex();
-
-            // We have a memory operand. Grab the offset from an immediate
-            // operand we parsed earlier and put it in a memory operand.
-            std::unique_ptr<LC2200Operand> Off(
-                    static_cast<LC2200Operand *>(Operands.back().release()));
-            Operands.pop_back();
-
-            SMLoc E = getLexer().getTok().getLoc();
-            Operands.push_back(LC2200Operand::CreateMem(BaseNum, Off->getImm(), S, E));
-            return false;
-          }
-        }
-      }
-    } else {
-      // Just an immediate or expression.
       return false;
-    }
+    // Try parsing a base register.
+//    if (getLexer().is(AsmToken::LParen)) {
+//      getLexer().Lex();
+//
+//      if (getLexer().is(AsmToken::Identifier)) {
+//        unsigned BaseNum;
+//        BaseNum = MatchRegisterName(getLexer().getTok().getIdentifier());
+//        if (BaseNum != 0) {
+//          getLexer().Lex();
+//
+//          if (getLexer().is(AsmToken::RParen)) {
+//            getLexer().Lex();
+//
+//            // We have a memory operand. Grab the offset from an immediate
+//            // operand we parsed earlier and put it in a memory operand.
+//            std::unique_ptr<LC2200Operand> Off(
+//                    static_cast<LC2200Operand *>(Operands.back().release()));
+//            Operands.pop_back();
+//
+//            SMLoc E = getLexer().getTok().getLoc();
+//            Operands.push_back(LC2200Operand::CreateMem(BaseNum, Off->getImm(), S, E));
+//            return false;
+//          }
+//        }
+//      }
+//    } else {
+//      // Just an immediate or expression.
+//      return false;
+//    }
   }
 
   return Error(S, "unsupported operand");

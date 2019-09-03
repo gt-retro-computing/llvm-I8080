@@ -38,9 +38,8 @@ class RTypeInstr<bits<4> opcode, string opcodestr, list<dag> pattern> : InstLC22
   let Inst{19-4} = 0; // padding
 }
 
-// class ITypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, string argstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
-//   let Inst{31-28} = opcode;
-// }
+class ITypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, string argstr, list<dag> pattern> : InstLC2200<outs, ins, opcode, asmstr, argstr, pattern> {
+}
 
 // class JTypeInstr<bits<4> opcode, dag outs, dag ins, string asmstr, list<dag> pattern> : InstLC2200<outs, ins, asmstr, pattern> {
 //   let Inst{31-28} = opcode;

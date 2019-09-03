@@ -32,12 +32,12 @@ def CC_LC2200 : CallingConv<[
   CCIfType<[i16], CCPromoteToType<i32>>,
 
   // The first 5 integer arguments are passed in integer registers.
-  CCIfType<[i32], CCAssignToReg<[a0, a1, a2, a3, a4]>>,
+  CCIfType<[i32], CCAssignToReg<[a0, a1, a2]>>,
 
   // Integer values get stored in stack slots that are 4 bytes in
   // size and 4-byte aligned.
   CCIfType<[i32], CCAssignToStack<4, 4>>
 ]>;
 
-def CC_Save : CalleeSavedRegs<(add s0, s1, s2, s3, sp, fp, ra)>;
+def CC_Save : CalleeSavedRegs<(add s0, s1, s2, sp, fp, ra)>;
 // Should there be only R7 here?
