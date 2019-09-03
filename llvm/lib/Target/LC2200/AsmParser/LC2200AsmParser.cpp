@@ -297,8 +297,6 @@ bool LC2200AsmParser::ParseImmediate(OperandVector &Operands) {
   switch (kind) {
     default:
       return true;
-    case AsmToken::LParen:
-    case AsmToken::Plus:
     case AsmToken::Minus:
     case AsmToken::Integer:
       if (getParser().parseExpression(EVal))
@@ -353,6 +351,15 @@ bool LC2200AsmParser::ParseSymbolReference(OperandVector &Operands) {
 
 bool LC2200AsmParser::ParseOperand(OperandVector &Operands) {
   // A register operand is always alone.
+    switch (getLexer().getKind()) {
+        case AsmToken::LParen:
+        case AsmToken::RParen:
+            Operands.push_back(LC2200Operand::CreateToken(getLexer().getTok().getString(), getLexer().getTok().getLoc()));
+            getLexer().Lex();
+            return false;
+        default:
+            break;
+    }
   unsigned RegNo;
   if (!ParseRegister(RegNo, Operands))
     return false;
@@ -361,23 +368,7 @@ bool LC2200AsmParser::ParseOperand(OperandVector &Operands) {
   // by a base register.
   SMLoc S = getLexer().getTok().getLoc();
   if (!ParseImmediate(Operands) || !ParseSymbolReference(Operands)) {
-      if (getLexer().getKind() == AsmToken::LParen) {
-          AsmToken RegDollar = getLexer().Lex();
-          AsmToken RegName = getLexer().Lex();
-          AsmToken RightParen = getLexer().Lex();
-          getLexer().UnLex(RightParen);
-          getLexer().UnLex(RegName);
-          getLexer().UnLex(RegDollar);
-          if (RightParen.getKind() == AsmToken::RParen && (!ParseRegister(RegNo, Operands))) {
-              if (getLexer().Lex().getKind() != AsmToken::RParen) {
-                  return Error(getLexer().getLoc(), "Unexpected token (Expecting RParen)");
-              }
-              getLexer().Lex();
-              return false;
-          }
-      }
       return false;
-  } else {
   }
 
   return Error(S, "unsupported operand");
@@ -400,10 +391,12 @@ bool LC2200AsmParser::ParseInstruction(ParseInstructionInfo &Info,
     return true;
 
   // Parse until end of statement, consuming commas between operands
-  while (getLexer().isNot(AsmToken::EndOfStatement) &&
-         getLexer().is(AsmToken::Comma)) {
+  while (getLexer().isNot(AsmToken::EndOfStatement)) {
     // Consume comma token
-    getLexer().Lex();
+    if (getLexer().is(AsmToken::Comma)) {
+        getLexer().Lex();
+        continue;
+    }
 
     // Parse next operand
     if (ParseOperand(Operands))
