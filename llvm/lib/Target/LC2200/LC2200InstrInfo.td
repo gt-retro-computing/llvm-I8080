@@ -73,7 +73,17 @@ def GOTO: ITypeInstr<0b0101, (outs), (ins LC2200imm20:$offset),
         let isTerminator = 1;
     }
 
-// TODO: JALR
+def JALR: ITypeInstr<0b0101, (outs GRRegs:$dr), (ins GRRegs:$sr1),
+    "jalr", "$dr, $sr1",
+    []> {
+        bits<4> dr;
+        bits<4> sr1;
+        let Inst{27-24} = dr;
+        let Inst{23-20} = sr1;
+        let Inst{19-0} = 0;
+        let isBranch = 1;
+        let isTerminator = 1;
+    }
 
 def HALT : InstLC2200<(outs), (ins), 0b0111, "halt", "", []> {
     let Inst{27-0} = 0;
