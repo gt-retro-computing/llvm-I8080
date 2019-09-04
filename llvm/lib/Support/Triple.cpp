@@ -71,6 +71,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case renderscript32: return "renderscript32";
   case renderscript64: return "renderscript64";
   case lc2200:         return "lc2200";
+  case i8080:          return "i8080";
   }
 
   llvm_unreachable("Invalid ArchType!");
@@ -146,6 +147,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case riscv32:
   case riscv64:     return "riscv";
   case lc2200:      return "lc2200";
+  case i8080:       return "i8080";
   }
 }
 
@@ -318,6 +320,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("renderscript32", renderscript32)
     .Case("renderscript64", renderscript64)
     .Case("lc2200", lc2200)
+    .Case("i8080", i8080)
     .Default(UnknownArch);
 }
 
