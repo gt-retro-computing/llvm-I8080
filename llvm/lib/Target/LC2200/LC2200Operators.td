@@ -63,21 +63,15 @@
 //   let EncoderMethod = "getMemSrcValue";
 // }
 
+def Imm20 : AsmOperandClass {
+    let Name = "Imm20";
+}
+
 def LC2200imm20 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 0x100000;
-}]>;
-
-def OR1KMemAsmOperand : AsmOperandClass {
- let Name = "Mem";
+}]> {
+    let ParserMatchClass = Imm20;
 }
-def MEMri : Operand<iPTR> {
-  let ParserMatchClass = OR1KMemAsmOperand;
-  let PrintMethod = "printMemOperand";
-  let EncoderMethod = "getMemoryOpValue";
-  let DecoderMethod = "DecodeMemoryValue";
-  let MIOperandInfo = (add (i32 GRRegs:$base), LC2200imm20:$offset);
-}
-
 
 //===----------------------------------------------------------------------===//
 // Complex Pattern Definitions.

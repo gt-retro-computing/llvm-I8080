@@ -49,7 +49,10 @@ void LC2200AsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup, 
 }
 
 std::unique_ptr<MCObjectTargetWriter> LC2200AsmBackend::createObjectTargetWriter() const {
-  return createLC2200ELFObjectWriter(0);
+  if (OSType == Triple::OSType::UnknownOS) {
+    return createLC2200ELFObjectWriter(0);
+  }
+  llvm_unreachable("Can not process the specified OS");
 }
 
 unsigned int LC2200AsmBackend::getNumFixupKinds() const {

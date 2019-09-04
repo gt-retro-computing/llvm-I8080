@@ -55,15 +55,19 @@ public:
 //            setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
     MCAsmParserExtension::Initialize(Parser);
   }
+
+  unsigned int validateTargetOperandClass(MCParsedAsmOperand &Op, unsigned Kind) override;
 };
 
+unsigned int LC2200AsmParser::validateTargetOperandClass(MCParsedAsmOperand &Op, unsigned Kind) {
+  return MCTargetAsmParser::validateTargetOperandClass(Op, Kind);
+}
 
 struct LC2200Operand : MCParsedAsmOperand {
   enum KindTy {
     k_Token,
     k_Register,
     k_Immediate,
-    k_Memory,
   } Kind;
   SMLoc StartLoc, EndLoc;
 
@@ -80,16 +84,10 @@ struct LC2200Operand : MCParsedAsmOperand {
     const MCExpr *Val;
   };
 
-  struct MemOp {
-    unsigned BaseNum;
-    const MCExpr *Off;
-  };
-
   union {
     struct Token Tok;
     struct RegOp Reg;
     struct ImmOp Imm;
-    struct MemOp Mem;
   };
 
   LC2200Operand(KindTy K) : MCParsedAsmOperand(), Kind(K) {}
@@ -108,9 +106,6 @@ public:
         break;
       case k_Token:
         Tok = o.Tok;
-        break;
-      case k_Memory:
-        Mem = o.Mem;
         break;
     }
   }
@@ -136,16 +131,6 @@ public:
     return StringRef(Tok.Data, Tok.Length);
   }
 
-  unsigned getMemBaseNum() const {
-    assert((Kind == k_Memory) && "Invalid access!");
-    return Mem.BaseNum;
-  }
-
-  const MCExpr *getMemOff() const {
-    assert((Kind == k_Memory) && "Invalid access!");
-    return Mem.Off;
-  }
-
   // Functions for testing operand type
   bool isReg() const override { return Kind == k_Register; }
 
@@ -153,7 +138,15 @@ public:
 
   bool isToken() const override { return Kind == k_Token; }
 
-  bool isMem() const override { return Kind == k_Memory; }
+  bool isMem() const override  { return false; }
+
+  bool isImm20() const {
+    if (Kind == k_Immediate && Imm.Val->getKind() == MCExpr::ExprKind::Constant) {
+      uint64_t val = ((const MCConstantExpr *) Imm.Val)->getValue();
+      return val < (0x1U << 20U);
+    }
+    return false;
+  }
 
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
     // Add as immediates where possible. Null MCExpr = 0
@@ -175,10 +168,9 @@ public:
     addExpr(Inst, getImm());
   }
 
-  void addMemOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 2 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::createReg(getMemBaseNum()));
-    addExpr(Inst, getMemOff());
+  void addImm20Operands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!(Imm20)");
+    addExpr(Inst, getImm());
   }
 
   void print(raw_ostream &OS) const override {
@@ -191,9 +183,6 @@ public:
         break;
       case k_Token:
         OS << Tok.Data;
-        break;
-      case k_Memory:
-        OS << "Mem<Reg<" << Mem.BaseNum << ">, " << Mem.Off << ">";
         break;
     }
   }
@@ -220,17 +209,6 @@ public:
                                                   SMLoc S, SMLoc E) {
     auto Op = std::make_unique<LC2200Operand>(k_Immediate);
     Op->Imm.Val = Val;
-    Op->StartLoc = S;
-    Op->EndLoc = E;
-    return Op;
-  }
-
-  static std::unique_ptr<LC2200Operand> CreateMem(unsigned BaseNum,
-                                                  const MCExpr *Off,
-                                                  SMLoc S, SMLoc E) {
-    auto Op = std::make_unique<LC2200Operand>(k_Memory);
-    Op->Mem.BaseNum = BaseNum;
-    Op->Mem.Off = Off;
     Op->StartLoc = S;
     Op->EndLoc = E;
     return Op;
