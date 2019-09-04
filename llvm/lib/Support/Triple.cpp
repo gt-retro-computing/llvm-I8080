@@ -30,6 +30,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case bpfel:          return "bpfel";
   case bpfeb:          return "bpfeb";
   case hexagon:        return "hexagon";
+  case lc2200:         return "lc2200";
   case mips:           return "mips";
   case mipsel:         return "mipsel";
   case mips64:         return "mips64";
@@ -70,7 +71,6 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case wasm64:         return "wasm64";
   case renderscript32: return "renderscript32";
   case renderscript64: return "renderscript64";
-  case lc2200:         return "lc2200";
   }
 
   llvm_unreachable("Invalid ArchType!");
@@ -446,6 +446,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("wasm64", Triple::wasm64)
     .Case("renderscript32", Triple::renderscript32)
     .Case("renderscript64", Triple::renderscript64)
+    .Case("lc2200", Triple::lc2200)
     .Default(Triple::UnknownArch);
 
   // Some architectures require special parsing logic just to compute the
@@ -704,6 +705,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::tcele:
   case Triple::thumbeb:
   case Triple::xcore:
+  case Triple::lc2200:
     return Triple::ELF;
 
   case Triple::ppc:

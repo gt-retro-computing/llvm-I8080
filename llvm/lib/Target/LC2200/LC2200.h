@@ -10,6 +10,8 @@
 namespace llvm {
     class TargetMachine;
     class LC2200TargetMachine;
+    class MCInst;
+
     FunctionPass *createLC2200ISelDag(LC2200TargetMachine &TM, CodeGenOpt::Level OptLevel);
 } // end namespace llvm;
 
