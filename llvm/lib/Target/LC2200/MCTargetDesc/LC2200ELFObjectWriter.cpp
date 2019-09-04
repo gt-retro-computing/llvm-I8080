@@ -24,7 +24,7 @@ namespace {
     };
 }
 
-LC2200ELFObjectWriter::LC2200ELFObjectWriter(uint8_t OSABI) : MCELFObjectTargetWriter(false, OSABI, ELF::EM_LC2200, true){}
+LC2200ELFObjectWriter::LC2200ELFObjectWriter(uint8_t OSABI) : MCELFObjectTargetWriter(false, OSABI, ELF::EM_LC2200, false){}
 
 LC2200ELFObjectWriter::~LC2200ELFObjectWriter() {}
 
@@ -34,7 +34,6 @@ unsigned LC2200ELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Targ
     return (unsigned)Fixup.getKind();
 }
 
-std::unique_ptr<MCObjectWriter> llvm::createLC2200ELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI) {
-    auto MOTW = std::make_unique<LC2200ELFObjectWriter>(OSABI);
-    return createELFObjectWriter(std::move(MOTW), OS, true);
+std::unique_ptr<MCObjectTargetWriter> llvm::createLC2200ELFObjectWriter(uint8_t OSABI) {
+    return std::make_unique<LC2200ELFObjectWriter>(OSABI);
 }

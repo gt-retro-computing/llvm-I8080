@@ -31,13 +31,10 @@ static MCRegisterInfo *createLC2200MCRegisterInfo(const Triple &TT) {
   InitLC2200MCRegisterInfo(X, 0);
   return X;
 }
-//
+
 //static MCSubtargetInfo *createLC2200MCSubtargetInfo(const Triple &TT, StringRef CPU,
 //                                                    StringRef FS) {
-//  MCSubtargetInfo *X = new MCSubtargetInfo(TT, CPU, FS, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-//                                           nullptr);
-//  InitLC2200MCSubtargetInfo(X, TT, CPU, FS);
-//  return X;
+//  return createLC2200MCSubtargetInfoImpl(TT, CPU, FS);
 //}
 
 static MCAsmInfo *createLC2200MCAsmInfo(const MCRegisterInfo &MRI, const Triple &TT) {
@@ -107,18 +104,21 @@ createLC2200MCInstrInfo);
   TargetRegistry::RegisterMCRegInfo(TheLC2200Target,
                                     createLC2200MCRegisterInfo);
 // Register the MC subtarget info.
-//TargetRegistry::RegisterMCSubtargetInfo(TheLC2200Target,
-//createLC2200MCSubtargetInfo);
-//// Register the MCInstPrinter
-  TargetRegistry::RegisterMCInstPrinter(TheLC2200Target,
+TargetRegistry::RegisterMCSubtargetInfo(TheLC2200Target,
+createLC2200MCSubtargetInfoImpl);
+
+// Register the MCInstPrinter
+TargetRegistry::RegisterMCInstPrinter(TheLC2200Target,
                                         createLC2200MCInstPrinter);
-//// Register the ASM Backend.
+// Register the ASM Backend.
 TargetRegistry::RegisterMCAsmBackend(TheLC2200Target,
 createLC2200AsmBackend);
-//// Register the assembly streamer.
+
+// Register the assembly streamer.
 //TargetRegistry::RegisterAsmStreamer(TheLC2200Target,
 //createMCAsmStreamer);
-//// Register the object streamer.
+
+// Register the object streamer.
 TargetRegistry::RegisterELFStreamer(TheLC2200Target, createLC2200ELFStreamer);
 // Register the MCCodeEmitter
 TargetRegistry::RegisterMCCodeEmitter(TheLC2200Target, createLC2200MCCodeEmitter);
