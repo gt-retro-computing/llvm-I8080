@@ -224,6 +224,7 @@ public:
 
     COFF,
     ELF,
+    Hex,
     MachO,
     Wasm,
     XCOFF,
