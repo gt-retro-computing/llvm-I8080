@@ -1,0 +1,3 @@
+[submodule "llvm/lib/Target/I8080"]
+  path = llvm/lib/Target/I8080
+  url = git@github.com:gt-retro-computing/LLVM-I8080-backend.git
