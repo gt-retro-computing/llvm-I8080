@@ -6,6 +6,7 @@ tablegen(LLVM LC2200GenCallingConv.inc -gen-callingconv)
 tablegen(LLVM LC2200GenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM LC2200GenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM LC2200GenMCCodeEmitter.inc -gen-emitter)
+tablegen(LLVM LC2200GenMCPseudoLowering.inc -gen-pseudo-lowering)
 tablegen(LLVM LC2200GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM LC2200GenSubtargetInfo.inc -gen-subtarget)
 

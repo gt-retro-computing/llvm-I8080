@@ -53,7 +53,10 @@ class TargetLibraryInfo;
 class TargetRegisterClass;
 
 namespace LC2200ISD {
-
+enum NodeType : unsigned {
+  FIRST_NUMBER = ISD::BUILTIN_OP_END,
+  RET_FLAG,
+};
 } // ene namespace LC2200ISD
 
 //===--------------------------------------------------------------------===//
@@ -73,10 +76,25 @@ public:
                                const SDLoc &DL, SelectionDAG &DAG,
                                SmallVectorImpl<SDValue> &InVals) const override;
 
+  SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
+                      SelectionDAG &DAG) const override;
+
+  // Provide custom lowering hooks for some operations.
+  SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
+  const char *getTargetNodeName(unsigned Opcode) const override;
+
 private:
   void analyzeInputArgs(MachineFunction &MF, CCState &CCInfo,
                         const SmallVectorImpl<ISD::InputArg> &Ins,
                         bool IsRet) const;
+  void analyzeOutputArgs(MachineFunction &MF, CCState &CCInfo,
+                         const SmallVectorImpl<ISD::OutputArg> &Outs,
+                         bool IsRet, CallLoweringInfo *CLI) const;
+
+  SDValue lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const;
 
 };
 

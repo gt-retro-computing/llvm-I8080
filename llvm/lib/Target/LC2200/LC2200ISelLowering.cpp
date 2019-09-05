@@ -6,9 +6,19 @@
 
 using namespace llvm;
 
+#include "LC2200GenCallingConv.inc"
+
 
 LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM, const LC2200Subtarget &STI) :
   TargetLowering(TM), Subtarget(STI) {
+
+  // Set up the register classes.
+  addRegisterClass(MVT::i32, &LC2200::GRRegsRegClass);
+
+  // Compute derived properties from the register classes.
+  computeRegisterProperties(STI.getRegisterInfo());
+
+  setOperationAction(ISD::SHL, MVT::i32, Custom);
 
 }
 
@@ -28,11 +38,28 @@ void LC2200TargetLowering::analyzeInputArgs(
     else if (Ins[i].isOrigArg())
       ArgTy = FType->getParamType(Ins[i].getOrigArgIndex());
 
-    LC2200ABI::ABI ABI = MF.getSubtarget<LC2200Subtarget>().getTargetABI();
-    if (CC_LC2200(MF.getDataLayout(), ABI, i, ArgVT, ArgVT, CCValAssign::Full,
-                 ArgFlags, CCInfo, /*IsRet=*/true, IsRet, ArgTy)) {
+    if (CC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
       LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
                         << EVT(ArgVT).getEVTString() << '\n');
+      llvm_unreachable(nullptr);
+    }
+  }
+}
+
+void LC2200TargetLowering::analyzeOutputArgs(
+        MachineFunction &MF, CCState &CCInfo,
+        const SmallVectorImpl<ISD::OutputArg> &Outs, bool IsRet,
+        CallLoweringInfo *CLI) const {
+  unsigned NumArgs = Outs.size();
+
+  for (unsigned i = 0; i != NumArgs; i++) {
+    MVT ArgVT = Outs[i].VT;
+    ISD::ArgFlagsTy ArgFlags = Outs[i].Flags;
+    // Type *OrigTy = CLI ? CLI->getArgs()[Outs[i].OrigArgIndex].Ty : nullptr;
+
+    if (RetCC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
+      LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
+                        << EVT(ArgVT).getEVTString() << "\n");
       llvm_unreachable(nullptr);
     }
   }
@@ -279,3 +306,131 @@ SDValue LC2200TargetLowering::LowerFormalArguments(
 
   return Chain;
 }
+
+SDValue LC2200TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
+                                 bool IsVarArg,
+                                 const SmallVectorImpl<ISD::OutputArg> &Outs,
+                                 const SmallVectorImpl<SDValue> &OutVals,
+                                 const SDLoc &DL, SelectionDAG &DAG) const {
+  // Stores the assignment of the return value to a location.
+  SmallVector<CCValAssign, 16> RVLocs;
+
+  // Info about the registers and stack slot.
+  CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), RVLocs,
+                 *DAG.getContext());
+
+  analyzeOutputArgs(DAG.getMachineFunction(), CCInfo, Outs, /*IsRet=*/true,
+                    nullptr);
+
+  SDValue Glue;
+  SmallVector<SDValue, 4> RetOps(1, Chain);
+
+  // Copy the result values into the output registers.
+  for (unsigned i = 0, e = RVLocs.size(); i < e; ++i) {
+    SDValue Val = OutVals[i];
+    CCValAssign &VA = RVLocs[i];
+    assert(VA.isRegLoc() && "Can only return in registers!");
+
+    if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64) {
+      // Handle returning f64 on RV32D with a soft float ABI.
+      llvm_unreachable("not supported");
+//      assert(VA.isRegLoc() && "Expected return via registers");
+//      SDValue SplitF64 = DAG.getNode(RISCVISD::SplitF64, DL,
+//                                     DAG.getVTList(MVT::i32, MVT::i32), Val);
+//      SDValue Lo = SplitF64.getValue(0);
+//      SDValue Hi = SplitF64.getValue(1);
+//      Register RegLo = VA.getLocReg();
+//      Register RegHi = RegLo + 1;
+//      Chain = DAG.getCopyToReg(Chain, DL, RegLo, Lo, Glue);
+//      Glue = Chain.getValue(1);
+//      RetOps.push_back(DAG.getRegister(RegLo, MVT::i32));
+//      Chain = DAG.getCopyToReg(Chain, DL, RegHi, Hi, Glue);
+//      Glue = Chain.getValue(1);
+//      RetOps.push_back(DAG.getRegister(RegHi, MVT::i32));
+    } else {
+      // Handle a 'normal' return.
+      Val = convertValVTToLocVT(DAG, Val, VA, DL);
+      Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Glue);
+
+      // Guarantee that all emitted copies are stuck together.
+      Glue = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+    }
+  }
+
+  RetOps[0] = Chain; // Update chain.
+
+  // Add the glue node if we have it.
+  if (Glue.getNode()) {
+    RetOps.push_back(Glue);
+  }
+
+  // Interrupt service routines use different return instructions.
+  const Function &Func = DAG.getMachineFunction().getFunction();
+  if (Func.hasFnAttribute("interrupt")) {
+    llvm_unreachable("interrupts not supported");
+//    if (!Func.getReturnType()->isVoidTy())
+//      report_fatal_error(
+//              "Functions with the interrupt attribute must have void return type!");
+//
+//    MachineFunction &MF = DAG.getMachineFunction();
+//    StringRef Kind =
+//            MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+//
+//    unsigned RetOpc;
+//    if (Kind == "user")
+//      RetOpc = RISCVISD::URET_FLAG;
+//    else if (Kind == "supervisor")
+//      RetOpc = RISCVISD::SRET_FLAG;
+//    else
+//      RetOpc = RISCVISD::MRET_FLAG;
+//
+//    return DAG.getNode(RetOpc, DL, MVT::Other, RetOps);
+  }
+
+  return DAG.getNode(LC2200ISD::RET_FLAG, DL, MVT::Other, RetOps);
+}
+
+SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  switch (Op.getOpcode()) {
+    default:
+      report_fatal_error("unimplemented operand");
+    case ISD::SHL:
+      return lowerShiftLeft(Op, DAG);
+  }
+}
+
+SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
+                                                 SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Vl = Op.getOperand(0);
+  SDValue ShiftAmt = Op.getOperand(1);
+
+  if (ShiftAmt.getOpcode() != ISD::Constant) {
+    llvm_unreachable("cannot lower non constant shifts");
+  }
+
+  // fold constant shift into repeated ADDs
+
+  EVT VT = Vl.getValueType();
+  uint64_t ShAmt = cast<ConstantSDNode>(ShiftAmt.getNode())->getZExtValue();
+
+  for (uint64_t i = 0; i < ShAmt; i++) {
+    Vl = DAG.getNode(ISD::ADD, DL, VT, Vl, Vl);
+  }
+
+  return Vl;
+}
+
+
+const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
+  switch ((LC2200ISD::NodeType)Opcode) {
+    case LC2200ISD::FIRST_NUMBER:
+      break;
+    case LC2200ISD::RET_FLAG:
+      return "LC2200ISD::RET_FLAG";
+  }
+  return nullptr;
+}
+

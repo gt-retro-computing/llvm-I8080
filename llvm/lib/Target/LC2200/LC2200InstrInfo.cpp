@@ -3,6 +3,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 
 #include "LC2200InstrInfo.h"
+#include "MCTargetDesc/LC2200MCTargetDesc.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "LC2200GenInstrInfo.inc"
@@ -128,4 +129,15 @@ LC2200InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock
 
 bool LC2200InstrInfo::validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount) {
   return isInt<20>(Amount);
+}
+
+bool LC2200InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
+  const unsigned Opcode = MI.getOpcode();
+  switch(Opcode) {
+    default:
+      break;
+    case LC2200::ADDI:
+      return (MI.getOperand(1).isReg() && MI.getOperand(1).getReg() == LC2200::zero);
+  }
+  return MI.isAsCheapAsAMove();
 }
