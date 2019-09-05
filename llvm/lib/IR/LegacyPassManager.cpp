@@ -1645,16 +1645,7 @@ bool FPPassManager::runOnFunction(Function &F) {
     {
       PassManagerPrettyStackEntry X(FP, F);
       TimeRegion PassTimer(getPassTimer(FP));
-      dbgs() << "Size of function: " << F.size() << "\n";
-      if (F.size() == 0) {
-        llvm_unreachable("Foo Bar!");
-      }
-
       LocalChanged |= FP->runOnFunction(F);
-      if (F.size() == 0) {
-        llvm_unreachable("Foo Baz!");
-      }
-
       if (EmitICRemark) {
         unsigned NewSize = F.getInstructionCount();
 

@@ -44,6 +44,8 @@ public:
 
   static bool validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount);
 
+  bool isAsCheapAsAMove(const MachineInstr &MI) const override;
+
 //  unsigned isLoadFromStackSlot(const MachineInstr &MI,
 //                               int &FrameIndex) const override;
 //  unsigned isStoreToStackSlot(const MachineInstr &MI,

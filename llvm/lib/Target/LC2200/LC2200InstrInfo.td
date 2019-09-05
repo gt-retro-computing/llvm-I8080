@@ -52,9 +52,9 @@ def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins LC2200imm20:$off20, GRRegs:$
         let mayLoad = 1;
     }
 
-def SW: ITypeInstr<0b0100, (outs GRRegs:$src1), (ins LC2200imm20:$offset, GRRegs:$base),
+def SW: ITypeInstr<0b0100, (outs), (ins GRRegs:$src1, LC2200imm20:$offset, GRRegs:$base),
     "sw", "$src1, ${offset}(${base})",
-    [(store i32:$src1, (add (i32 GRRegs:$base), LC2200imm20:$offset))]> {
+    [(store i32:$src1, (add (i32 GRRegs:$base), LC2200imm20:$offset)), (store i32:$src1, (i32 GRRegs:$base))]> {
         bits<4> src1;
         bits<4> base;
         bits<20> offset;
@@ -263,9 +263,72 @@ def LEA: ITypeInstr<0b1001, (outs GRRegs:$dr), (ins LC2200imm20:$offset),
 //}
 
 
+/// Predicates
+
+def IsOrAdd: PatFrag<(ops node:$A, node:$B), (or node:$A, node:$B), [{
+  return isOrEquivalentToAdd(N);
+}]>;
+
+/// Immediates
+
+def : Pat<(LC2200imm20:$imm), (ADDI zero, LC2200imm20:$imm)>;
+
+// Addressing modes.
+// Necessary because a frameindex can't be matched directly in a pattern.
+def AddrFI : ComplexPattern<iPTR, 1, "SelectAddrFI", [frameindex], []>;
+
+/// FrameIndex calculations
+
+def : Pat<(add (i32 AddrFI:$Rs), LC2200imm20:$imm12),
+          (ADDI (i32 AddrFI:$Rs), LC2200imm20:$imm12)>;
+def : Pat<(IsOrAdd (i32 AddrFI:$Rs), LC2200imm20:$imm12),
+        (ADDI (i32 AddrFI:$Rs), LC2200imm20:$imm12)>;
+
+// FrameIndex Loads
+
+multiclass LdPat<PatFrag LoadOp, InstLC2200 Inst> {
+  def : Pat<(LoadOp GRRegs:$rs1), (Inst GRRegs:$rs1, 0)>;
+  def : Pat<(LoadOp AddrFI:$rs1), (Inst AddrFI:$rs1, 0)>;
+  def : Pat<(LoadOp (add GRRegs:$rs1, LC2200imm20:$imm12)),
+            (Inst GRRegs:$rs1, LC2200imm20:$imm12)>;
+  def : Pat<(LoadOp (add AddrFI:$rs1, LC2200imm20:$imm12)),
+            (Inst AddrFI:$rs1, LC2200imm20:$imm12)>;
+  def : Pat<(LoadOp (IsOrAdd AddrFI:$rs1, LC2200imm20:$imm12)),
+            (Inst AddrFI:$rs1, LC2200imm20:$imm12)>;
+}
+
+defm : LdPat<load, LW>;
+
+/// Stores
+
+multiclass StPat<PatFrag StoreOp, InstLC2200 Inst, RegisterClass StTy> {
+  def : Pat<(StoreOp StTy:$rs2, GRRegs:$rs1), (Inst StTy:$rs2, GRRegs:$rs1, 0)>;
+
+  def : Pat<(StoreOp StTy:$rs2, AddrFI:$rs1), (Inst StTy:$rs2, AddrFI:$rs1, 0)>;
+  def : Pat<(StoreOp StTy:$rs2, (add GRRegs:$rs1, LC2200imm20:$imm12)),
+            (Inst StTy:$rs2, GRRegs:$rs1, LC2200imm20:$imm12)>;
+  def : Pat<(StoreOp StTy:$rs2, (add AddrFI:$rs1, LC2200imm20:$imm12)),
+            (Inst StTy:$rs2, AddrFI:$rs1, LC2200imm20:$imm12)>;
+  def : Pat<(StoreOp StTy:$rs2, (IsOrAdd AddrFI:$rs1, LC2200imm20:$imm12)),
+            (Inst StTy:$rs2, AddrFI:$rs1, LC2200imm20:$imm12)>;
+
+
+}
+
+def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, 0, GRRegs:$rs1)>;
+
+
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
+
+def lc2200_ret_flag  : SDNode<"LC2200ISD::RET_FLAG", SDTNone,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
+ let isBarrier = 1, isReturn = 1, isTerminator = 1 in
+ def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret_flag)]>,
+                 PseudoInstExpansion<(JALR zero, ra)>;
+
 
 // let Defs = [R7], Uses = [R7] in {
 // def ADJCALLSTACKDOWN : LC2200PseudoInst<(outs), (ins i16imm:$amt),
@@ -274,4 +337,4 @@ def LEA: ITypeInstr<0b1001, (outs GRRegs:$dr), (ins LC2200imm20:$offset),
 // def ADJCALLSTACKUP   : LC2200PseudoInst<(outs), (ins i16imm:$amt1, i16imm:$amt2),
 //                                     "# ADJCALLSTACKUP $amt1",
 //                                     [(callseq_end timm:$amt1, timm:$amt2)]>;
-// } 
+// }

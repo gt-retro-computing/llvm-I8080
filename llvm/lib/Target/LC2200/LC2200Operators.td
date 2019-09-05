@@ -63,9 +63,14 @@
 //   let EncoderMethod = "getMemSrcValue";
 // }
 
-def LC2200imm20 : Operand<i32>, ImmLeaf<i32, [{
-  return Imm >= 0 && Imm < 0x100000;
-}]>;
+def LC2200imm20 : Operand<i32>, ImmLeaf<i32, [{return isInt<20>(Imm);}]> {
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isInt<20>(Imm);
+    return MCOp.isBareSymbolRef();
+  }];
+}
 
 def OR1KMemAsmOperand : AsmOperandClass {
  let Name = "Mem";
