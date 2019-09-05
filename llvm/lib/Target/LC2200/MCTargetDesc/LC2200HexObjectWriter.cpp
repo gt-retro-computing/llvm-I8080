@@ -9,7 +9,9 @@ using namespace llvm;
 
 namespace {
 class LC2200HexObjectWriter : MCObjectTargetWriter {
-  
+    Triple::ObjectFormatType getFormat() const override {
+        return Triple::Hex;
+    }
 };
 
 }

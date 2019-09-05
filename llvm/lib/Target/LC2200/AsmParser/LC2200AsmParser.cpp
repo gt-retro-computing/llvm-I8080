@@ -143,7 +143,7 @@ public:
   bool isImm20() const {
     if (Kind == k_Immediate && Imm.Val->getKind() == MCExpr::ExprKind::Constant) {
       int64_t val = ((const MCConstantExpr *) Imm.Val)->getValue();
-      return (val > -524288 && val < 524287);
+      return isInt<20>(val);
     }
     return false;
   }
