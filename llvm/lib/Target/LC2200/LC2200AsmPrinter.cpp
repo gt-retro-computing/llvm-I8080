@@ -44,7 +44,7 @@ static bool LowerLC2200MachineOperandToMCOperand(const MachineOperand &MO,
                                                const AsmPrinter &AP) {
   switch (MO.getType()) {
     default:
-      report_fatal_error("LowerRISCVMachineInstrToMCInst: unknown operand type");
+      report_fatal_error("LowerLC2200MachineInstrToMCInst: unknown operand type");
     case MachineOperand::MO_Register:
       // Ignore all implicit register operands.
       if (MO.isImplicit())

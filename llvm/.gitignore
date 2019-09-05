@@ -45,6 +45,7 @@ autoconf/autom4te.cache
 /CMakeSettings.json
 # CLion project configuration
 /.idea
+/build_i8080
 # Qt Creator project configuration
 /CMakeLists.txt.user
 
