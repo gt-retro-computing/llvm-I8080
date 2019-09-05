@@ -17,6 +17,9 @@ add_llvm_target(LC2200CodeGen
         LC2200ISelDAGToDAG.cpp
         LC2200Subtarget.cpp
         LC2200TargetMachine.cpp
+        LC2200ISelLowering.cpp
+        LC2200InstrInfo.cpp
+        LC2200RegisterInfo.cpp
         )
 
 add_subdirectory(InstPrinter)

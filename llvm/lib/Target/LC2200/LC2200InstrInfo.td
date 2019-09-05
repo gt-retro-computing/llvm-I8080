@@ -49,6 +49,7 @@ def LW: ITypeInstr<0b0011, (outs GRRegs:$dst), (ins LC2200imm20:$off20, GRRegs:$
         let Inst{23-20} = dst;
         let Inst{27-24} = base;
         let Inst{19-0} = off20;
+        let mayLoad = 1;
     }
 
 def SW: ITypeInstr<0b0100, (outs GRRegs:$src1), (ins LC2200imm20:$offset, GRRegs:$base),
@@ -60,6 +61,7 @@ def SW: ITypeInstr<0b0100, (outs GRRegs:$src1), (ins LC2200imm20:$offset, GRRegs
         let Inst{27-24} = base;
         let Inst{23-20} = src1;
         let Inst{19-0} = offset;
+        let mayStore = 1;
     }
 
 def GOTO: ITypeInstr<0b0101, (outs), (ins LC2200imm20:$offset),
@@ -83,6 +85,7 @@ def JALR: ITypeInstr<0b0101, (outs GRRegs:$dr), (ins GRRegs:$sr1),
         let Inst{19-0} = 0;
         let isBranch = 1;
         let isTerminator = 1;
+        let isReturn = 1;
     }
 
 def HALT : InstLC2200<(outs), (ins), 0b0111, "halt", "", []> {
