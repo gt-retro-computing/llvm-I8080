@@ -16,7 +16,8 @@
 
 using namespace llvm;
 
-LC2200RegisterInfo::LC2200RegisterInfo() : LC2200GenRegisterInfo(LC2200::ra) {}
+LC2200RegisterInfo::LC2200RegisterInfo() : LC2200GenRegisterInfo(LC2200::ra,
+        /*DwarfFlavour*/0, /*EHFlavor*/0, LC2200::pc) {}
 
 const uint32_t *LC2200RegisterInfo::getCallPreservedMask(const MachineFunction &MF, CallingConv::ID) const {
   return CC_Save_RegMask;

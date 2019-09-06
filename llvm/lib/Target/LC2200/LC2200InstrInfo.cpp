@@ -14,6 +14,47 @@ LC2200InstrInfo::LC2200InstrInfo() : LC2200GenInstrInfo(), RI() {
 
 }
 
+void LC2200InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         unsigned SrcReg, bool IsKill, int FI,
+                                         const TargetRegisterClass *RC,
+                                         const TargetRegisterInfo *TRI) const {
+  DebugLoc DL;
+  if (I != MBB.end())
+    DL = I->getDebugLoc();
+
+  unsigned Opcode;
+
+  if (LC2200::GRRegsRegClass.hasSubClassEq(RC))
+    Opcode = LC2200::SW;
+  else
+    llvm_unreachable("Can't store this register to stack slot");
+
+  BuildMI(MBB, I, DL, get(Opcode))
+          .addReg(SrcReg, getKillRegState(IsKill))
+          .addFrameIndex(FI)
+          .addImm(0);
+}
+
+void LC2200InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                          MachineBasicBlock::iterator I,
+                                          unsigned DstReg, int FI,
+                                          const TargetRegisterClass *RC,
+                                          const TargetRegisterInfo *TRI) const {
+  DebugLoc DL;
+  if (I != MBB.end())
+    DL = I->getDebugLoc();
+
+  unsigned Opcode;
+
+  if (LC2200::GRRegsRegClass.hasSubClassEq(RC))
+    Opcode = LC2200::LW;
+  else
+    llvm_unreachable("Can't load this register from stack slot");
+
+  BuildMI(MBB, I, DL, get(Opcode), DstReg).addFrameIndex(FI).addImm(0);
+}
+
 unsigned
 LC2200InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock &MBB, MachineBasicBlock::iterator II,
                                const DebugLoc &DL, unsigned &NewImm) const {

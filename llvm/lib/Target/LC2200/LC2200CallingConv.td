@@ -39,5 +39,4 @@ def CC_LC2200 : CallingConv<[
   CCIfType<[i32], CCAssignToStack<4, 4>>
 ]>;
 
-def CC_Save : CalleeSavedRegs<(add s0, s1, s2, sp, fp, ra)>;
-// Should there be only R7 here?
+def CC_Save : CalleeSavedRegs<(add s0, s1, s2, fp, ra)>;

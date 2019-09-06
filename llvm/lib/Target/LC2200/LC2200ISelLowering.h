@@ -56,6 +56,8 @@ namespace LC2200ISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET_FLAG,
+
+  CALL,
 };
 } // ene namespace LC2200ISD
 
@@ -80,6 +82,10 @@ public:
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
+
+  virtual SDValue
+  LowerCall(CallLoweringInfo &/*CLI*/,
+            SmallVectorImpl<SDValue> &/*InVals*/) const override;
 
   // Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
