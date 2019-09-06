@@ -104,6 +104,7 @@ private:
   SDValue lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBrCc(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBr(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerSelectCc(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // end namespace llvm

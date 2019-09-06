@@ -707,6 +707,11 @@ SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   return Jmp;
 }
 
+SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op, SelectionDAG &DAG) const {
+  // TODO
+  return Op;
+}
+
 const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch ((LC2200ISD::NodeType)Opcode) {
   case LC2200ISD::FIRST_NUMBER:
