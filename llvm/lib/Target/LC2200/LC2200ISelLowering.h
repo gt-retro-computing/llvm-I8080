@@ -1,4 +1,5 @@
-//===- LC2200ISelLowering.h - LC2200 DAG Lowering Interface ---------*- C++ -*-===//
+//===- LC2200ISelLowering.h - LC2200 DAG Lowering Interface ---------*- C++
+//-*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -14,8 +15,8 @@
 #ifndef LLVM_LIB_TARGET_LC2200_LC2200ISELLOWERING_H
 #define LLVM_LIB_TARGET_LC2200_LC2200ISELLOWERING_H
 
-#include "MCTargetDesc/LC2200MCTargetDesc.h"
 #include "LC2200.h"
+#include "MCTargetDesc/LC2200MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
@@ -55,22 +56,23 @@ class TargetRegisterClass;
 namespace LC2200ISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
-  RET_FLAG,
-
+  RET,
   CALL,
+  CMPSKIP,
+  JMP
 };
-} // ene namespace LC2200ISD
+} // namespace LC2200ISD
 
 //===--------------------------------------------------------------------===//
 // TargetLowering Implementation
 //===--------------------------------------------------------------------===//
 
-class LC2200TargetLowering : public TargetLowering  {
+class LC2200TargetLowering : public TargetLowering {
   const LC2200Subtarget &Subtarget;
 
 public:
   explicit LC2200TargetLowering(const LC2200TargetMachine &TM,
-                              const LC2200Subtarget &STI);
+                                const LC2200Subtarget &STI);
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
@@ -83,8 +85,8 @@ public:
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
 
-  SDValue LowerCall(CallLoweringInfo &/*CLI*/,
-            SmallVectorImpl<SDValue> &/*InVals*/) const override;
+  SDValue LowerCall(CallLoweringInfo & /*CLI*/,
+                    SmallVectorImpl<SDValue> & /*InVals*/) const override;
 
   // Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
@@ -100,10 +102,8 @@ private:
                          bool IsRet, CallLoweringInfo *CLI) const;
 
   SDValue lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerBranch(SDValue Op, SelectionDAG &DAG) const;
-
+  SDValue lowerBrCc(SDValue Op, SelectionDAG &DAG) const;
 };
-
 
 } // end namespace llvm
 

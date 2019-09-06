@@ -19,7 +19,7 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
-  //setOperationAction(ISD::BR, MVT::Other, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i32, Custom);
 }
 
 void LC2200TargetLowering::analyzeInputArgs(
@@ -258,7 +258,7 @@ SDValue LC2200TargetLowering::LowerFormalArguments(
   //    MachineFrameInfo &MFI = MF.getFrameInfo();
   //    MachineRegisterInfo &RegInfo = MF.getRegInfo();
   ////    RISCVMachineFunctionInfo *RVFI =
-  ///MF.getInfo<RISCVMachineFunctionInfo>();
+  /// MF.getInfo<RISCVMachineFunctionInfo>();
   //
   //    // Offset of the first variable argument from stack pointer, and size of
   //    // the vararg save area. For now, the varargs save area is either zero
@@ -410,7 +410,7 @@ LC2200TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     //    return DAG.getNode(RetOpc, DL, MVT::Other, RetOps);
   }
 
-  return DAG.getNode(LC2200ISD::RET_FLAG, DL, MVT::Other, RetOps);
+  return DAG.getNode(LC2200ISD::RET, DL, MVT::Other, RetOps);
 }
 
 SDValue
@@ -643,13 +643,13 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     report_fatal_error("unimplemented operand");
   case ISD::SHL:
     return lowerShiftLeft(Op, DAG);
-  case ISD::BR:
-    return lowerBranch(Op, DAG);
+  case ISD::BR_CC:
+    return lowerBrCc(Op, DAG);
   }
 }
 
 SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
-                                                 SelectionDAG &DAG) const {
+                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
   SDValue Vl = Op.getOperand(0);
   SDValue ShiftAmt = Op.getOperand(1);
@@ -670,27 +670,44 @@ SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
   return Vl;
 }
 
-
-SDValue LC2200TargetLowering::lowerBranch(SDValue Op,
-                                             SelectionDAG &DAG) const {
+SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DagLoc(Op);
   SDValue Chain = Op.getOperand(0);
-  SDValue DestinationMBB = Op.getOperand(1);
+  SDValue CC = Op.getOperand(1);
+  // ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  
+  SDLoc DL(Op);
+  //EVT VT = Dest.getValueType();
 
-  llvm_unreachable("im aaaaaaay lmao");
+//a =  b  ==> !(a != b)
+//a >  b  ==> b < a
+//a >= b  ==> skplt a, b; jmp dst
+//a <  b  ==> !(a >= b)
+//a <= b  ==> b >= a
+//a != b  ==> skpe a, b; jmp dst
 
-  return Op;
+
+  SDValue Cmp = DAG.getNode(LC2200ISD::CMPSKIP, DL, MVT::Glue, CC, LHS, RHS);
+  SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest, Cmp);
+
+  return Jmp;
 }
-
 
 const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch ((LC2200ISD::NodeType)Opcode) {
-    case LC2200ISD::FIRST_NUMBER:
-      break;
-    case LC2200ISD::RET_FLAG:
-      return "LC2200ISD::RET_FLAG";
-    case LC2200ISD::CALL:
-      return "LC2200ISD::CALL";
-    }
-    return nullptr;
+  case LC2200ISD::FIRST_NUMBER:
+    break;
+  case LC2200ISD::RET:
+    return "LC2200ISD::RET";
+  case LC2200ISD::CALL:
+    return "LC2200ISD::CALL";
+  case LC2200ISD::JMP:
+    return "LC2200ISD::JMP";
+  case LC2200ISD::CMPSKIP:
+    return "LC2200ISD::CMPSKIP";
+  }
+  return nullptr;
 }

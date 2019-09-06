@@ -27,15 +27,18 @@ include "LC2200InstrFormats.td"
 //  let ParserMatchClass = CallSymbol;
 //}
 
-// Target-independent type requirements, but with target-specific formats.
 def SDT_CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>,
                                        SDTCisVT<1, i32>]>;
 def SDT_CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>,
                                      SDTCisVT<1, i32>]>;
 
-def SDT_LC2200Call     : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
+def SDT_LC2200Call   : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
 
-// Target-independent nodes, but with target-specific formats.
+def SDT_LC2200Jmp    : SDTypeProfile<0, 1, [SDTCisVT<0, OtherVT>]>;
+
+// Operands: [CC, A, B]
+def SDT_LC2200Cmpskip  : SDTypeProfile<0, 3, [SDTCisVT<0, OtherVT>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+
 def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
                            [SDNPHasChain, SDNPOutGlue]>;
 def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_CallSeqEnd,
@@ -123,9 +126,6 @@ def HALT : InstLC2200<(outs), (ins), 0b0111, "halt", "", []> {
     let hasSideEffects = 1;
 }
 
-def SKPE : SKPTypeInstr<0b1000, 0b0000, "skpe", []>;
-def SKPLT : SKPTypeInstr<0b1000, 0b0001, "skplt", []>;
-
 
 def LEA: ITypeInstr<0b1001, (outs GRRegs:$dr), (ins LC2200imm20:$offset),
     "lea", "$dr, $offset",
@@ -138,159 +138,8 @@ def LEA: ITypeInstr<0b1001, (outs GRRegs:$dr), (ins LC2200imm20:$offset),
         let isAdd = 1;
     }
 
-
-// def BEQ: ITypeInstr<0b0100, (outs SRCRegs:$src1), (ins SRCRegs:$src2, i32imm:$pcoffset),
-//     "BEQ $src1, $src2, $pcoffset",
-//     [(BR_CC, i32:$src1, i32:$src2, LC2200imm20:$pcoffset))]> { // pcoffset?? (add $pc, offset, 1???)
-//         bits<4> src1;
-//         bits<4> src2;
-//         bits<20> pcoffset;
-//         let Inst{27-24} = src1;
-//         let Inst{23-20} = src2;
-//         let Inst{19-0} = pcoffset;
-//     }
-
-//===----------------------------------------------------------------------===//
-// ALU Instructions
-//===----------------------------------------------------------------------===//
-// multiclass BinOp<bits<4> opcode, string opstr, SDNode opnode> {
-//   def rr : ALUInst<opcode, (outs GRRegs:$dst), (ins GRRegs:$src1, GRRegs:$src2),
-//                     !strconcat(opstr, " $dst, $src1, $src2"),
-//                     [(set i16:$dst, (opnode i16:$src1, i16:$src2))]> {
-//     bits<4> dst;
-//     bits<4> src1;
-//     bits<4> src2;
-//     let Inst{5} = 0;
-//     let Inst{7-6} = 0b00;
-//     let Inst{11-9} = dst;
-//     let Inst{8-6} = src1;
-//     let Inst{2-0} = src2;
-//     }
-//   def ri : ALUInst<opcode, (outs GRRegs:$dst), (ins GRRegs:$src1, i16imm:$imm),
-//                     !strconcat(opstr, " $dst, $src1, $imm"),
-//                     [(set i16:$dst, (opnode i16:$src1, LC2200imm5:$imm))]> {
-//     bits<3> dst;
-//     bits<3> src1;
-//     bits<5> imm;
-//     let Inst{5} = 1;
-//     let Inst{11-9} = dst;
-//     let Inst{8-6} = src1;
-//     let Inst{4-0} = imm;
-//     }
-// }
-
-// defm ADD : BinOp<0b0001, "add", add>;
-// defm AND : BinOp<0b0101, "and", and>;
-
-
-//===----------------------------------------------------------------------===//
-// Load/Store Instructions
-//===----------------------------------------------------------------------===//
-// def LD : InstLC2200<(outs GRRegs:$val), (ins memsrc:$addr),
-//                   "ld $val, $addr",
-//                   [(set i16:$val, (load addr:$addr))]> {
-//     bits<3> val;
-//     bits<9> addr;
-//     let Inst{15-12} = 0b0010;
-//     let Inst{11-9} = val;
-//     let Inst{8-0} = addr;
-//   }
-
-//def ST : InstLC2200<(outs), (ins GRRegs:$val, memsrc:$addr),
- //                 "st $val, $addr",
-  //                [(store i16:$val, addr:$addr)] {
- //   bits<3> val;
- //   bits<9> addr;
- //   let Inst{15-12} = 0b0011;
- //   let Inst{11-9} = val;
- //   let Inst{8-0} = addr;
- // }
-
-// def LDR : InstLC2200<(outs GRRegs:$val), (ins GRRegs:$src1, i16imm:$imm),
-//                     "ldr $val, $src1, $imm",
-//                     [(set i16:$val, (load (add addr:$src1, addr:$imm)))]> {
-//     bits<3> val;
-//     bits<3> src1; //Base Register
-//     bits<6> addr;
-//     let Inst{15-12} = 0b0110;
-//     let Inst{11-9} = val;
-//     let Inst{8-6} = src1;
-//     let Inst{5-0} = addr;
-//   }
-
-// def STR : InstLC2200<(outs GRRegs:$val), (ins GRRegs:$src1, i16imm:$imm),
-//                     "str $val, $src1, $imm",
-//                     [(store i16:$val, (add addr:$src1, addr:$imm))]> {
-//     bits<3> val;
-//     bits<3> src1; //Base Register
-//     bits<6> addr;
-//     let Inst{15-12} = 0b0110;
-//     let Inst{11-9} = val;
-//     let Inst{8-6} = src1;
-//     let Inst{5-0} = addr;
-//   }
-
-// def LDI : InstLC2200<(outs GRRegs:$val), (ins memsrc:$addr),
-//                   "ldi $val, $addr",
-//                   [(set i16:$val, (load (load addr:$addr)))]> {
-//     bits<3> val;
-//     bits<9> addr;
-//     let Inst{15-12} = 0b0010;
-//     let Inst{11-9} = val;
-//     let Inst{8-0} = addr;
-//   }
-
-
-//===----------------------------------------------------------------------===//
-// Return Instructions
-//===----------------------------------------------------------------------===//
-
-// let isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [LR] in {
-//   def RET : InstLC2200<(outs), (ins variable_ops),
-//                     "bx lr",  [(LC2200RetFlag)]> {
-//     let Inst{27-0}  = 0b0001001011111111111100011110;
-//   }
-// }
-
-
-//===----------------------------------------------------------------------===//
-// Call Instructions
-//===----------------------------------------------------------------------===//
-// JSR
-// let isCall = 1, Defs = [LR], Uses = [SP] in {
-//   def BL : BranchInst<0b1011, (outs), (ins GRRegs:$addr),
-//                       "bl $addr",
-//                       [(lc3_call i16:$addr)]> {
-//     bits<4> addr;
-//     let Inst{31-28} = 0b1110;
-//     let Inst{3-0} = addr;
-//   }
-// }
-
-// def : Pattern<(i32 (load_sym tglobaladdr:$addr)),  [(MOVi32 $addr)]>;
-
-
-
-//===----------------------------------------------------------------------===//
-//Branch Instructions
-//===----------------------------------------------------------------------===//
-// let isTerminator = 1, isBranch = 1, isBarrier = 1 in {
-//   def B : InstLC2200<(outs), (ins b_target:$dst),
-//                   "brnzp $dst", [(br bb:$dst)]> {
-//     bits<9> dst;
-//     bits<3> cc;
-//     let Inst{15-12} = 0b0000;
-//     let Inst{11-9} = 0b111;
-//     let Inst{8-0} = dst;
-//   }
-// }
-
-//let isTerminator = 1, isBranch = 1, Uses = [CPSR] in {
-//  def Bcc : InstLC2200<(outs), (ins cc_val:$cc, b_target:$dst),
-//                      "br$cc, $dst", []> {
-//  }
-//}
-
+def SKPE  : SKPTypeInstr<0b1000, 0b0000, "skpe",  []>;
+def SKPLT : SKPTypeInstr<0b1000, 0b0001, "skplt", []>;
 
 /// Predicates
 
@@ -355,8 +204,14 @@ def lc2200_call      : SDNode<"LC2200ISD::CALL", SDT_LC2200Call,
                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                               SDNPVariadic]>;
 
-def lc2200_ret_flag  : SDNode<"LC2200ISD::RET_FLAG", SDTNone,
+def lc2200_ret       : SDNode<"LC2200ISD::RET", SDTNone,
                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
+// Generate skips to implement a compare
+def lc2200_cmpskip   : SDNode<"LC2200ISD::CMPSKIP", SDT_LC2200Cmpskip, [SDNPOutGlue]>;
+
+def lc2200_jmp       : SDNode<"LC2200ISD::JMP", SDT_LC2200Jmp, [SDNPHasChain, SDNPOptInGlue]>;
+
 
 // PseudoCALL is a pseudo instruction which will eventually expand to auipc
 // and jalr while encoding. This is desirable, as an auipc+jalr pair with
@@ -364,9 +219,9 @@ def lc2200_ret_flag  : SDNode<"LC2200ISD::RET_FLAG", SDTNone,
 // if the offset fits in a signed 21-bit immediate.
 // Define AsmString to print "call" when compile with -S flag.
 // Define isCodeGenOnly = 0 to support parsing assembly "call" instruction.
-let isCall = 1, Defs = [fp, at], isCodeGenOnly = 0 in
+let isCall = 1, Defs = [fp, at], isCodeGenOnly = 1 in
 def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
-    let AsmString = "call\t$func";
+    // let AsmString = "call\t$func";
 }
 
 
@@ -374,7 +229,7 @@ def : Pat<(lc2200_call tglobaladdr:$func), (PseudoCALL tglobaladdr:$func)>;
 def : Pat<(lc2200_call texternalsym:$func), (PseudoCALL texternalsym:$func)>;
 
 let isBarrier = 1, isReturn = 1, isTerminator = 1 in
- def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret_flag)]>,
+ def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret)]>,
                  PseudoInstExpansion<(JALR zero, ra)>;
 
 
@@ -383,4 +238,10 @@ def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt, i32imm:$amt2),
                                     [(callseq_start timm:$amt, timm:$amt2)]>;
 def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
                                     [(callseq_end timm:$amt1, timm:$amt2)]>;
+}
+
+def CMPSKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
+                     [(lc2200_cmpskip cond:$cc, (i32 GRRegs:$a), (i32 GRRegs:$b))]>;
+def JMP : Pseudo<(outs), (ins b_target:$dst), [(lc2200_jmp bb:$dst)]> {
+  let Defs = [at];
 }
