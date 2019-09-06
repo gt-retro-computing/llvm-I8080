@@ -230,7 +230,7 @@ def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, 0, GRRegs:$rs1)>;
 // if the offset fits in a signed 21-bit immediate.
 // Define AsmString to print "call" when compile with -S flag.
 // Define isCodeGenOnly = 0 to support parsing assembly "call" instruction.
-let isCall = 1, Defs = [fp, at], isCodeGenOnly = 1 in
+let isCall = 1, Defs = [ra, at], isCodeGenOnly = 1 in
 def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
     let AsmString = "call\t$func";
 }
@@ -239,7 +239,7 @@ def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
 def : Pat<(lc2200_call tglobaladdr:$func), (PseudoCALL tglobaladdr:$func)>;
 def : Pat<(lc2200_call texternalsym:$func), (PseudoCALL texternalsym:$func)>;
 
-let isBarrier = 1, isReturn = 1, isTerminator = 1 in {
+let isReturn = 1, isBarrier = 1, isTerminator = 1 in {
   def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret)]>,
                          PseudoInstExpansion<(JALR zero, ra)>;
 }

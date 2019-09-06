@@ -97,15 +97,13 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock *MBB,
 }
 
 bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
-  DebugLoc DL;
-  MachineBasicBlock *MBB;
+  DebugLoc DL = MI.getDebugLoc();
+  MachineBasicBlock *MBB = MI.getParent();
   switch (MI.getOpcode()) {
   default:
     return false;
 
   case LC2200::CMP_SKIP: {
-    DL = MI.getDebugLoc();
-    MBB = MI.getParent();
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
     resolveComparison(MBB, DL, ConditionCode, MI.getOperand(1),
                       MI.getOperand(2));
@@ -113,8 +111,6 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   }
 
   case LC2200::SELECT_MOVE: {
-    DL = MI.getDebugLoc();
-    MBB = MI.getParent();
     auto TrueValue = MI.getOperand(0).getReg();
     auto FalseValue = MI.getOperand(1).getReg();
     BuildMI(MBB, DL, get(LC2200::COPY)).addReg(FalseValue);
@@ -123,18 +119,29 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   }
 
   case LC2200::JMP: {
-    DL = MI.getDebugLoc();
-    MBB = MI.getParent();
-    MachineOperand *op = &MI.getOperand(0);
-    if (op->isMBB()) {
-      MachineBasicBlock *dst = op->getMBB();
+    MachineOperand &op = MI.getOperand(0);
+    if (op.isMBB()) {
+      MachineBasicBlock *dst = op.getMBB();
       BuildMI(MBB, DL, get(LC2200::GOTO)).addMBB(dst);
     } else {
-      int64_t dst = op->getImm();
+      int64_t dst = op.getImm();
       BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(dst);
     }
     break;
   }
+
+  case LC2200::PseudoCALL: {
+    MachineOperand &op = MI.getOperand(0);
+    if (!op.isGlobal())
+      llvm_unreachable("dude weed lmao");
+    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+    BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
+    break;
+  }
+
+  //case LC2200::PseudoRET: {
+  //  break;
+  //}
   }
 
   MBB->erase(MI);
