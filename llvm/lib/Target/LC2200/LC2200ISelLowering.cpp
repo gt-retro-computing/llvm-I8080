@@ -19,6 +19,7 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM, const 
   computeRegisterProperties(STI.getRegisterInfo());
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
+  setOperationAction(ISD::BR, MVT::i32, );
 
 }
 
@@ -184,6 +185,7 @@ SDValue LC2200TargetLowering::LowerFormalArguments(
         SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
   assert(!IsVarArg && "var arg not yet supported");
+  //TODO Vararg
 
   switch (CallConv) {
     default:
@@ -223,11 +225,6 @@ SDValue LC2200TargetLowering::LowerFormalArguments(
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
     SDValue ArgValue;
-    // Passing f64 on RV32D with a soft float ABI must be handled as a special
-    // case.
-//    if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64)
-//      ArgValue = unpackF64OnRV32DSoftABI(DAG, Chain, VA, DL);
-//    else
     if (VA.isRegLoc())
       ArgValue = unpackFromRegLoc(DAG, Chain, VA, DL);
     else

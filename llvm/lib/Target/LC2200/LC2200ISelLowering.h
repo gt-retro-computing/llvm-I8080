@@ -83,8 +83,7 @@ public:
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
 
-  virtual SDValue
-  LowerCall(CallLoweringInfo &/*CLI*/,
+  SDValue LowerCall(CallLoweringInfo &/*CLI*/,
             SmallVectorImpl<SDValue> &/*InVals*/) const override;
 
   // Provide custom lowering hooks for some operations.
