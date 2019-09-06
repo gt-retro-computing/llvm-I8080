@@ -53,13 +53,13 @@ void LC2200InstrInfo::loadRegFromStackSlot(
   BuildMI(MBB, I, DL, get(Opcode), DstReg).addFrameIndex(FI).addImm(0);
 }
 
-void LC2200InstrInfo::resolveComparison(MachineInstr &MI,
-                                        ISD::CondCode ConditionCode,
-                                        MachineOperand &a,
-                                        MachineOperand &b) const {
-  MachineBasicBlock *MBB = MI.getParent();
-  const DebugLoc &DL = MI.getDebugLoc();
-
+unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock *MBB,
+                                            const DebugLoc &DL,
+                                            ISD::CondCode ConditionCode,
+                                            MachineOperand &a,
+                                            MachineOperand &b) const {
+  unsigned bytesAdded;
+  // Recursive rewrite rules :^)))
   // a =  b  ==> !(a != b)
   // a >  b  ==> b < a
   // a >= b  ==> skplt a, b; jmp dst
@@ -68,29 +68,32 @@ void LC2200InstrInfo::resolveComparison(MachineInstr &MI,
   // a != b  ==> skpe a, b; jmp dst
   switch (ConditionCode) {
   case ISD::CondCode::SETEQ:
-    resolveComparison(MI, ISD::CondCode::SETNE, a, b);
+    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETNE, a, b) + 1;
     BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETGT:
-    resolveComparison(MI, ISD::CondCode::SETLT, b, a);
+    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETLT, b, a);
     break;
   case ISD::CondCode::SETGE:
     BuildMI(MBB, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
+    bytesAdded = 1;
     break;
   case ISD::CondCode::SETLT:
-    resolveComparison(MI, ISD::CondCode::SETGE, a, b);
+    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETGE, a, b) + 1;
     BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETLE:
-    resolveComparison(MI, ISD::CondCode::SETGE, b, a);
+    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETGE, b, a);
     break;
   case ISD::CondCode::SETNE:
     BuildMI(MBB, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
+    bytesAdded = 1;
     break;
   default:
     llvm_unreachable("dude weed lmao: how did we get such a condition code in "
                      "this pseudo instruction?! are we fLoATiNg?");
   }
+  return bytesAdded;
 }
 
 bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
@@ -104,7 +107,8 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     DL = MI.getDebugLoc();
     MBB = MI.getParent();
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
-    resolveComparison(MI, ConditionCode, MI.getOperand(1), MI.getOperand(2));
+    resolveComparison(MBB, DL, ConditionCode, MI.getOperand(1),
+                      MI.getOperand(2));
     break;
   }
 
@@ -171,4 +175,43 @@ void LC2200InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       .addReg(DestReg)
       .addReg(SrcReg)
       .addReg(LC2200::zero);
+}
+
+unsigned LC2200InstrInfo::insertBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *TBB, MachineBasicBlock *FBB,
+    ArrayRef<MachineOperand> Cond, const DebugLoc &DL, int *BytesAdded) const {
+  if (BytesAdded)
+    *BytesAdded = 0;
+
+  if (Cond.empty()) {
+    assert(!FBB && "Unconditional branch with multiple successors!");
+    auto &MI = *BuildMI(&MBB, DL, get(LC2200::GOTO)).addMBB(TBB);
+    if (BytesAdded)
+      *BytesAdded += 4;
+    return 1;
+  }
+
+  // Conditional branch, do the skips
+  auto ConditionCode = (ISD::CondCode)Cond[0].getImm();
+  auto a = Cond[1];
+  auto b = Cond[2];
+  unsigned Count = resolveComparison(&MBB, DL, ConditionCode, a, b);
+  if (BytesAdded)
+    *BytesAdded += (int)Count * 4;
+
+  // True branch instruction
+  BuildMI(&MBB, DL, get(LC2200::GOTO)).addMBB(TBB);
+  if (BytesAdded)
+    *BytesAdded += 4;
+  Count++;
+
+  if (FBB) {
+    // Two-way Conditional branch. Insert the second branch.
+    BuildMI(&MBB, DL, get(LC2200::GOTO)).addMBB(FBB);
+    if (BytesAdded)
+      *BytesAdded += 4;
+    Count++;
+  }
+
+  return Count;
 }

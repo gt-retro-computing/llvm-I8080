@@ -36,6 +36,22 @@ public:
   void restoreFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
                     MachineBasicBlock::iterator I) const;
 
+  /// Emit a series of instructions to load an immediate.
+  // This is to adjust some FrameReg. We return the new register to be used
+  // in place of FrameReg and the adjusted immediate field (&NewImm)
+  unsigned loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator II, const DebugLoc &DL,
+                         unsigned &NewImm) const;
+
+  static bool validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount);
+
+  // Generates instructions to conditionally execute the next instruction only
+  // if the comparison (a CC b) was true. Returns number of instructions added
+  unsigned resolveComparison(MachineBasicBlock *MBB, const DebugLoc &DL,
+                             ISD::CondCode ConditionCode, MachineOperand &a,
+                             MachineOperand &b) const;
+
+  // Overrides
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI, unsigned SrcReg,
                            bool IsKill, int FrameIndex,
@@ -47,15 +63,6 @@ public:
                             int FrameIndex, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
-  /// Emit a series of instructions to load an immediate.
-  // This is to adjust some FrameReg. We return the new register to be used
-  // in place of FrameReg and the adjusted immediate field (&NewImm)
-  unsigned loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock &MBB,
-                         MachineBasicBlock::iterator II, const DebugLoc &DL,
-                         unsigned &NewImm) const;
-
-  static bool validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount);
-
   bool isAsCheapAsAMove(const MachineInstr &MI) const override;
 
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
@@ -64,8 +71,15 @@ public:
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
-  void resolveComparison(MachineInstr &MI, ISD::CondCode ConditionCode,
-                         MachineOperand &a, MachineOperand &b) const;
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
+
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override {
+    // DUDE RISC LMAO
+    return 4U;
+  }
 };
 } // namespace llvm
 #endif
