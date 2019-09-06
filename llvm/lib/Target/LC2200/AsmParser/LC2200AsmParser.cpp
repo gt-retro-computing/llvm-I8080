@@ -241,7 +241,7 @@ bool LC2200AsmParser::ParseRegister(unsigned &RegNo, OperandVector &Operands) {
     case AsmToken::Dollar:
       const AsmToken &Next = getLexer().Lex();
       if (Next.getKind() == AsmToken::Identifier) {
-        StringRef regName = StringRef("$" + Next.getIdentifier().str());
+        std::string regName = "$" + Next.getIdentifier().str();
         RegNo = MatchRegisterName(regName);
         if (RegNo != 0) {
           getLexer().Lex();
