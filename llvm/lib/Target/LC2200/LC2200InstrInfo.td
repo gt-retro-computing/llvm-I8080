@@ -92,14 +92,15 @@ def SW: ITypeInstr<0b0100, (outs), (ins GRRegs:$src1, LC2200imm20:$offset, GRReg
         let mayStore = 1;
     }
 
-def GOTO: ITypeInstr<0b0101, (outs), (ins LC2200imm20:$offset),
+def GOTO: ITypeInstr<0b0101, (outs), (ins b_target:$offset),
     "goto", "$offset",
-    [(brind LC2200imm20:$offset)]> {
+    [(br bb:$offset)]> {
         bits<20> offset;
         let Inst{27-24} = 0;
         let Inst{23-20} = 0;
         let Inst{19-0} = offset;
         let isBranch = 1;
+        let isBarrier = 1;
         let isTerminator = 1;
     }
 

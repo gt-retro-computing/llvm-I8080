@@ -100,6 +100,7 @@ private:
                          bool IsRet, CallLoweringInfo *CLI) const;
 
   SDValue lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerBranch(SDValue Op, SelectionDAG &DAG) const;
 
 };
 
