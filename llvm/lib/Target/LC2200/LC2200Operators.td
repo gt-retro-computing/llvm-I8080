@@ -53,11 +53,11 @@
 
 def b_target : Operand<OtherVT>;
 
-def cc_val : Operand<OtherVT>;
+// def cc_val : Operand<OtherVT>;
 
-// def cc_val : Operand<i32>, ImmLeaf<i32, [{}]> {
+def cc_val : Operand<i32>, ImmLeaf<i32, [{}]> {
 //   let PrintMethod = "printCondCode";
-// }
+}
 
 // def memsrc : Operand<i16> {
 //   let MIOperandInfo = (ops GRRegs, i16imm);

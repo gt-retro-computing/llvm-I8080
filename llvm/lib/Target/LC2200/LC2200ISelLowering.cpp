@@ -673,8 +673,8 @@ SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
 SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DagLoc(Op);
   SDValue Chain = Op.getOperand(0);
-  SDValue CC = Op.getOperand(1);
-  // ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  //SDValue CC = Op.getOperand(1);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
@@ -689,8 +689,7 @@ SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
 //a <= b  ==> b >= a
 //a != b  ==> skpe a, b; jmp dst
 
-
-  SDValue Cmp = DAG.getNode(LC2200ISD::CMPSKIP, DL, MVT::Glue, CC, LHS, RHS);
+  SDValue Cmp = DAG.getNode(LC2200ISD::CMPSKIP, DL, MVT::Glue, DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
   SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest, Cmp);
 
   return Jmp;

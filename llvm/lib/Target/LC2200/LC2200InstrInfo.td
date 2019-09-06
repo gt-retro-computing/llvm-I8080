@@ -37,7 +37,7 @@ def SDT_LC2200Call   : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
 def SDT_LC2200Jmp    : SDTypeProfile<0, 1, [SDTCisVT<0, OtherVT>]>;
 
 // Operands: [CC, A, B]
-def SDT_LC2200Cmpskip  : SDTypeProfile<0, 3, [SDTCisVT<0, OtherVT>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+def SDT_LC2200Cmpskip  : SDTypeProfile<0, 3, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
 def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
                            [SDNPHasChain, SDNPOutGlue]>;
@@ -241,7 +241,7 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 }
 
 def CMPSKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
-                     [(lc2200_cmpskip cond:$cc, (i32 GRRegs:$a), (i32 GRRegs:$b))]>;
+                     [(lc2200_cmpskip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]>;
 def JMP : Pseudo<(outs), (ins b_target:$dst), [(lc2200_jmp bb:$dst)]> {
   let Defs = [at];
 }
