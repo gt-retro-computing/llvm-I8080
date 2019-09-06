@@ -35,6 +35,17 @@ public:
   void restoreFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
                     MachineBasicBlock::iterator I) const;
 
+  void storeRegToStackSlot(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator MBBI, unsigned SrcReg,
+                           bool IsKill, int FrameIndex,
+                           const TargetRegisterClass *RC,
+                           const TargetRegisterInfo *TRI) const override;
+
+  void loadRegFromStackSlot(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator MBBI, unsigned DstReg,
+                            int FrameIndex, const TargetRegisterClass *RC,
+                            const TargetRegisterInfo *TRI) const override;
+
   /// Emit a series of instructions to load an immediate.
   // This is to adjust some FrameReg. We return the new register to be used
   // in place of FrameReg and the adjusted immediate field (&NewImm)

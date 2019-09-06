@@ -13,6 +13,34 @@
 
 include "LC2200InstrFormats.td"
 
+// Intrinsics
+
+//def CallSymbol : AsmOperandClass {
+//  let Name = "CallSymbol";
+//  let RenderMethod = "addImmOperands";
+//  let DiagnosticType = "InvalidCallSymbol";
+//  let ParserMethod = "parseCallSymbol";
+// }
+
+// A bare symbol used in call/tail only.
+//def call_symbol : Operand<i32> {
+//  let ParserMatchClass = CallSymbol;
+//}
+
+// Target-independent type requirements, but with target-specific formats.
+def SDT_CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>,
+                                       SDTCisVT<1, i32>]>;
+def SDT_CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>,
+                                     SDTCisVT<1, i32>]>;
+
+def SDT_LC2200Call     : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
+
+// Target-independent nodes, but with target-specific formats.
+def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
+                           [SDNPHasChain, SDNPOutGlue]>;
+def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_CallSeqEnd,
+                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
 //==========================
 // R Type Instructions
 //==========================
@@ -322,19 +350,36 @@ def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, 0, GRRegs:$rs1)>;
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
+def lc2200_call      : SDNode<"LC2200ISD::CALL", SDT_LC2200Call,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                              SDNPVariadic]>;
+
 def lc2200_ret_flag  : SDNode<"LC2200ISD::RET_FLAG", SDTNone,
                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
- let isBarrier = 1, isReturn = 1, isTerminator = 1 in
+// PseudoCALL is a pseudo instruction which will eventually expand to auipc
+// and jalr while encoding. This is desirable, as an auipc+jalr pair with
+// R_RISCV_CALL and R_RISCV_RELAX relocations can be be relaxed by the linker
+// if the offset fits in a signed 21-bit immediate.
+// Define AsmString to print "call" when compile with -S flag.
+// Define isCodeGenOnly = 0 to support parsing assembly "call" instruction.
+let isCall = 1, Defs = [fp, at], isCodeGenOnly = 0 in
+def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
+    let AsmString = "call\t$func";
+}
+
+
+def : Pat<(lc2200_call tglobaladdr:$func), (PseudoCALL tglobaladdr:$func)>;
+def : Pat<(lc2200_call texternalsym:$func), (PseudoCALL texternalsym:$func)>;
+
+let isBarrier = 1, isReturn = 1, isTerminator = 1 in
  def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret_flag)]>,
                  PseudoInstExpansion<(JALR zero, ra)>;
 
 
-// let Defs = [R7], Uses = [R7] in {
-// def ADJCALLSTACKDOWN : LC2200PseudoInst<(outs), (ins i16imm:$amt),
-//                                     "# ADJCALLSTACKDOWN $amt",
-//                                     [(callseq_start timm:$amt)]>;
-// def ADJCALLSTACKUP   : LC2200PseudoInst<(outs), (ins i16imm:$amt1, i16imm:$amt2),
-//                                     "# ADJCALLSTACKUP $amt1",
-//                                     [(callseq_end timm:$amt1, timm:$amt2)]>;
-// }
+let Defs = [sp, ra], Uses = [sp] in {
+def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt, i32imm:$amt2),
+                                    [(callseq_start timm:$amt, timm:$amt2)]>;
+def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
+                                    [(callseq_end timm:$amt1, timm:$amt2)]>;
+}

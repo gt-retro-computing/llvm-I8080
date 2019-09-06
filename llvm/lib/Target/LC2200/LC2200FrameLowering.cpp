@@ -195,6 +195,9 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   // investigation. Get the number of bytes to allocate from the FrameInfo.
   uint64_t StackSize = MFI.getStackSize();
 
+  assert(StackSize % 4 == 0 && "Addressibility is 4-bytes");
+  StackSize /= 4;
+
   // Early exit if there is no need to allocate on the stack
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
@@ -283,6 +286,10 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
   auto LastFrameDestroy = std::prev(MBBI, MFI.getCalleeSavedInfo().size());
 
   uint64_t StackSize = MFI.getStackSize();
+
+  assert(StackSize % 4 == 0 && "Addressibility is 4-bytes");
+  StackSize /= 4;
+
   uint64_t FPOffset = StackSize;// - RVFI->getVarArgsSaveSize();
 
   // Restore the stack pointer using the value of the frame pointer. Only
@@ -344,4 +351,10 @@ bool LC2200FrameLowering::hasFP(const MachineFunction &MF) const {
   return MF.getTarget().Options.DisableFramePointerElim(MF) ||
          MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken() ||
          TRI->needsStackRealignment(MF);
+}
+
+int LC2200FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI, unsigned &FrameReg) const {
+  int offset = TargetFrameLowering::getFrameIndexReference(MF, FI, FrameReg);
+  assert(offset % 4 == 0 && "4-byte addressibility");
+  return offset / 4;
 }

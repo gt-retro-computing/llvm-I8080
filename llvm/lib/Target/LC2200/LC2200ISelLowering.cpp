@@ -32,16 +32,20 @@ void LC2200TargetLowering::analyzeInputArgs(
     MVT ArgVT = Ins[i].VT;
     ISD::ArgFlagsTy ArgFlags = Ins[i].Flags;
 
-    Type *ArgTy = nullptr;
-    if (IsRet)
-      ArgTy = FType->getReturnType();
-    else if (Ins[i].isOrigArg())
-      ArgTy = FType->getParamType(Ins[i].getOrigArgIndex());
-
-    if (CC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
-      LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
-                        << EVT(ArgVT).getEVTString() << '\n');
-      llvm_unreachable(nullptr);
+    if (IsRet) {
+      // caller interpreting returned values
+      if (RetCC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
+        LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
+                          << EVT(ArgVT).getEVTString() << '\n');
+        llvm_unreachable(nullptr);
+      }
+    } else {
+      // callee interpreting input args
+      if (CC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
+        LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
+                          << EVT(ArgVT).getEVTString() << '\n');
+        llvm_unreachable(nullptr);
+      }
     }
   }
 }
@@ -57,10 +61,20 @@ void LC2200TargetLowering::analyzeOutputArgs(
     ISD::ArgFlagsTy ArgFlags = Outs[i].Flags;
     // Type *OrigTy = CLI ? CLI->getArgs()[Outs[i].OrigArgIndex].Ty : nullptr;
 
-    if (RetCC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
-      LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
-                        << EVT(ArgVT).getEVTString() << "\n");
-      llvm_unreachable(nullptr);
+    if (IsRet) {
+      // callee emitting return values
+      if (RetCC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
+        LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
+                          << EVT(ArgVT).getEVTString() << "\n");
+        llvm_unreachable(nullptr);
+      }
+    } else {
+      // caller emitting args
+      if (CC_LC2200(i, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo)) {
+        LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
+                          << EVT(ArgVT).getEVTString() << "\n");
+        llvm_unreachable(nullptr);
+      }
     }
   }
 }
@@ -142,7 +156,7 @@ static SDValue unpackFromMemLoc(SelectionDAG &DAG, SDValue Chain,
   EVT LocVT = VA.getLocVT();
   EVT ValVT = VA.getValVT();
   EVT PtrVT = MVT::getIntegerVT(DAG.getDataLayout().getPointerSizeInBits(0));
-  int FI = MFI.CreateFixedObject(ValVT.getSizeInBits() / 8,
+  int FI = MFI.CreateFixedObject(ValVT.getSizeInBits() / 32,
                                  VA.getLocMemOffset(), /*Immutable=*/true);
   SDValue FIN = DAG.getFrameIndex(FI, PtrVT);
   SDValue Val;
@@ -391,6 +405,229 @@ SDValue LC2200TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallCon
   return DAG.getNode(LC2200ISD::RET_FLAG, DL, MVT::Other, RetOps);
 }
 
+SDValue LC2200TargetLowering::LowerCall(CallLoweringInfo &CLI,
+          SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc &DL = CLI.DL;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
+  SDValue Chain = CLI.Chain;
+  SDValue Callee = CLI.Callee;
+  bool &IsTailCall = CLI.IsTailCall;
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool IsVarArg = CLI.IsVarArg;
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  MVT XLenVT = MVT::i32;
+
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  // Analyze the operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState ArgCCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false, &CLI);
+
+  IsTailCall = false;
+  // Check if it's really possible to do a tail call.
+//  if (IsTailCall)
+//    IsTailCall = isEligibleForTailCallOptimization(ArgCCInfo, CLI, MF, ArgLocs);
+//
+//  if (IsTailCall)
+//    ++NumTailCalls;
+//  else
+  if (CLI.CS && CLI.CS.isMustTailCall())
+    report_fatal_error("failed to perform tail call elimination on a call "
+                       "site marked musttail");
+
+  // Get a count of how many bytes are to be pushed on the stack.
+  unsigned NumBytes = ArgCCInfo.getNextStackOffset();
+
+  // Create local copies for byval args
+  SmallVector<SDValue, 8> ByValArgs;
+  for (unsigned i = 0, e = Outs.size(); i != e; ++i) {
+    ISD::ArgFlagsTy Flags = Outs[i].Flags;
+    if (!Flags.isByVal())
+      continue;
+
+    SDValue Arg = OutVals[i];
+    unsigned Size = Flags.getByValSize();
+    unsigned Align = Flags.getByValAlign();
+
+    int FI = MF.getFrameInfo().CreateStackObject(Size, Align, /*isSS=*/false);
+    SDValue FIPtr = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+    SDValue SizeNode = DAG.getConstant(Size, DL, XLenVT);
+
+    Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Align,
+            /*IsVolatile=*/false,
+            /*AlwaysInline=*/false,
+                          IsTailCall, MachinePointerInfo(),
+                          MachinePointerInfo());
+    ByValArgs.push_back(FIPtr);
+  }
+
+  if (!IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
+
+  // Copy argument values to their designated locations.
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<SDValue, 8> MemOpChains;
+  SDValue StackPtr;
+  for (unsigned i = 0, j = 0, e = ArgLocs.size(); i != e; ++i) {
+    CCValAssign &VA = ArgLocs[i];
+    SDValue ArgValue = OutVals[i];
+    ISD::ArgFlagsTy Flags = Outs[i].Flags;
+
+    // IsF64OnRV32DSoftABI && VA.isMemLoc() is handled below in the same way
+    // as any other MemLoc.
+
+    // Promote the value if needed.
+    // For now, only handle fully promoted and indirect arguments.
+    if (VA.getLocInfo() == CCValAssign::Indirect) {
+      // Store the argument in a stack slot and pass its address.
+      SDValue SpillSlot = DAG.CreateStackTemporary(Outs[i].ArgVT);
+      int FI = cast<FrameIndexSDNode>(SpillSlot)->getIndex();
+      MemOpChains.push_back(
+              DAG.getStore(Chain, DL, ArgValue, SpillSlot,
+                           MachinePointerInfo::getFixedStack(MF, FI)));
+      // If the original argument was split (e.g. i128), we need
+      // to store all parts of it here (and pass just one address).
+      unsigned ArgIndex = Outs[i].OrigArgIndex;
+      assert(Outs[i].PartOffset == 0);
+      while (i + 1 != e && Outs[i + 1].OrigArgIndex == ArgIndex) {
+        SDValue PartValue = OutVals[i + 1];
+        unsigned PartOffset = Outs[i + 1].PartOffset;
+        SDValue Address = DAG.getNode(ISD::ADD, DL, PtrVT, SpillSlot,
+                                      DAG.getIntPtrConstant(PartOffset, DL));
+        MemOpChains.push_back(
+                DAG.getStore(Chain, DL, PartValue, Address,
+                             MachinePointerInfo::getFixedStack(MF, FI)));
+        ++i;
+      }
+      ArgValue = SpillSlot;
+    } else {
+      ArgValue = convertValVTToLocVT(DAG, ArgValue, VA, DL);
+    }
+
+    // Use local copy if it is a byval arg.
+    if (Flags.isByVal())
+      ArgValue = ByValArgs[j++];
+
+    if (VA.isRegLoc()) {
+      // Queue up the argument copies and emit them at the end.
+      RegsToPass.push_back(std::make_pair(VA.getLocReg(), ArgValue));
+    } else {
+      assert(VA.isMemLoc() && "Argument not register or memory");
+      assert(!IsTailCall && "Tail call not allowed if stack is used "
+                            "for passing parameters");
+
+      // Work out the address of the stack slot.
+      if (!StackPtr.getNode())
+        StackPtr = DAG.getCopyFromReg(Chain, DL, LC2200::sp, PtrVT);
+      SDValue Address =
+              DAG.getNode(ISD::ADD, DL, PtrVT, StackPtr,
+                          DAG.getIntPtrConstant(VA.getLocMemOffset(), DL));
+
+      // Emit the store.
+      MemOpChains.push_back(
+              DAG.getStore(Chain, DL, ArgValue, Address, MachinePointerInfo()));
+    }
+  }
+
+  // Join the stores, which are independent of one another.
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOpChains);
+
+  SDValue Glue;
+
+  // Build a sequence of copy-to-reg nodes, chained and glued together.
+  for (auto &Reg : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, DL, Reg.first, Reg.second, Glue);
+    Glue = Chain.getValue(1);
+  }
+
+  // If the callee is a GlobalAddress/ExternalSymbol node, turn it into a
+  // TargetGlobalAddress/TargetExternalSymbol node so that legalize won't
+  // split it and then direct call can be matched by PseudoCALL.
+  if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = S->getGlobal();
+
+    unsigned OpFlags = 0; //RISCVII::MO_CALL;
+//    if (!getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV))
+//      OpFlags = RISCVII::MO_PLT;
+
+    Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, OpFlags);
+  } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    unsigned OpFlags = 0;// RISCVII::MO_CALL;
+//
+//    if (!getTargetMachine().shouldAssumeDSOLocal(*MF.getFunction().getParent(),
+//                                                 nullptr))
+//      OpFlags = RISCVII::MO_PLT;
+
+    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), PtrVT, OpFlags);
+  }
+
+  // The first call operand is the chain and the second is the target address.
+  SmallVector<SDValue, 8> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+
+  // Add argument registers to the end of the list so that they are
+  // known live into the call.
+  for (auto &Reg : RegsToPass)
+    Ops.push_back(DAG.getRegister(Reg.first, Reg.second.getValueType()));
+
+  if (!IsTailCall) {
+    // Add a register mask operand representing the call-preserved registers.
+    const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+    const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
+    assert(Mask && "Missing call preserved mask for calling convention");
+    Ops.push_back(DAG.getRegisterMask(Mask));
+  }
+
+  // Glue the call to the argument copies, if any.
+  if (Glue.getNode())
+    Ops.push_back(Glue);
+
+  // Emit the call.
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+
+//  if (IsTailCall) {
+//    MF.getFrameInfo().setHasTailCall();
+//    return DAG.getNode(RISCVISD::TAIL, DL, NodeTys, Ops);
+//  }
+
+  Chain = DAG.getNode(LC2200ISD::CALL, DL, NodeTys, Ops);
+  Glue = Chain.getValue(1);
+
+  // Mark the end of the call, which is glued to the call itself.
+  Chain = DAG.getCALLSEQ_END(Chain,
+                             DAG.getConstant(NumBytes, DL, PtrVT, true),
+                             DAG.getConstant(0, DL, PtrVT, true),
+                             Glue, DL);
+  Glue = Chain.getValue(1);
+
+  // Assign locations to each value returned by this call.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState RetCCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
+  analyzeInputArgs(MF, RetCCInfo, Ins, /*IsRet=*/true);
+
+  // Copy all of the result registers out of their specified physreg.
+  for (auto &VA : RVLocs) {
+    // Copy the value out
+    SDValue RetValue =
+            DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(), Glue);
+    // Glue the RetValue to the end of the call sequence
+    Chain = RetValue.getValue(1);
+    Glue = RetValue.getValue(2);
+
+    RetValue = convertLocVTToValVT(DAG, RetValue, VA, DL);
+
+    InVals.push_back(RetValue);
+  }
+
+  return Chain;
+}
+
 SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
@@ -430,6 +667,8 @@ const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
       break;
     case LC2200ISD::RET_FLAG:
       return "LC2200ISD::RET_FLAG";
+    case LC2200ISD::CALL:
+      return "LC2200ISD::CALL";
   }
   return nullptr;
 }

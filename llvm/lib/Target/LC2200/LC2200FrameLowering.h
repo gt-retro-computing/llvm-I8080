@@ -39,6 +39,9 @@ public:
 
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
 
+  virtual int getFrameIndexReference(const MachineFunction &MF, int FI,
+                                     unsigned &FrameReg) const override;
+
 //  bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
 //                                 MachineBasicBlock::iterator MI,
 //                                 const std::vector<CalleeSavedInfo> &CSI,
