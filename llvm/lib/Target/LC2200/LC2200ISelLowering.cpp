@@ -19,12 +19,18 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
+
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Custom);
+
   setOperationAction(ISD::BR, MVT::Other, Custom);
 
-  setOperationAction(ISD::SETCC, MVT::i32, Expand); // MEMEs
-  setOperationAction(ISD::SETCC, MVT::Other, Expand); // MEMEs
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+
+  setOperationAction(ISD::AND, MVT::i32, Custom);
+
+  setOperationAction(ISD::SETCC, MVT::i32, Expand);
+  setOperationAction(ISD::SETCC, MVT::Other, Expand);
 }
 
 void LC2200TargetLowering::analyzeInputArgs(
@@ -654,6 +660,8 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     return lowerBr(Op, DAG);
   case ISD::SELECT_CC:
     return lowerSelectCc(Op, DAG);
+  case ISD::AND:
+    return lowerAnd(Op, DAG);
   }
 }
 
@@ -692,24 +700,51 @@ SDValue LC2200TargetLowering::lowerBr(SDValue Op, SelectionDAG &DAG) const {
 SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DagLoc(Op);
   SDValue Chain = Op.getOperand(0);
-  //SDValue CC = Op.getOperand(1);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
-  
-  SDLoc DL(Op);
-  //EVT VT = Dest.getValueType();
 
-  SDValue Cmp = DAG.getNode(LC2200ISD::CMPSKIP, DL, MVT::Glue, DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
+  SDLoc DL(Op);
+  SDValue Cmp = DAG.getNode(LC2200ISD::CMP_SKIP, DL, MVT::Glue,
+                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
   SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest, Cmp);
 
   return Jmp;
 }
 
-SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op, SelectionDAG &DAG) const {
-  // TODO
-  return Op;
+SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  SDLoc DagLoc(Op);
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue TrueValue = Op.getOperand(2);
+  SDValue FalseValue = Op.getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+
+  SDLoc DL(Op);
+  EVT TrueType = TrueValue.getValueType();
+  EVT FalseType = FalseValue.getValueType();
+  if (TrueType != FalseType) {
+    llvm_unreachable("mismatched types of select_cc true and false nodes");
+  }
+
+  SDValue Cmp = DAG.getNode(LC2200ISD::CMP_SKIP, DL, MVT::Glue,
+                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
+  SDValue SelectMove =
+      DAG.getNode(LC2200ISD::SELECT_MOVE, DL, TrueType, TrueValue, FalseValue, Cmp);
+  return SelectMove;
+}
+
+SDValue LC2200TargetLowering::lowerAnd(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  EVT VT = LHS.getValueType();
+  SDLoc DL(Op);
+  // A AND B = (A NAND B) NAND (A NAND B)
+  SDValue Nand = DAG.getNode(LC2200ISD::NAND, DL, VT, LHS, RHS);
+  SDValue And = DAG.getNode(LC2200ISD::NAND, DL, VT, Nand, Nand);
+  return And;
 }
 
 const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
@@ -722,8 +757,10 @@ const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "LC2200ISD::CALL";
   case LC2200ISD::JMP:
     return "LC2200ISD::JMP";
-  case LC2200ISD::CMPSKIP:
-    return "LC2200ISD::CMPSKIP";
+  case LC2200ISD::CMP_SKIP:
+    return "LC2200ISD::CMP_SKIP";
+  case LC2200ISD::SELECT_MOVE:
+    return "LC2200ISD::SELECT_MOVE";
   }
   return nullptr;
 }

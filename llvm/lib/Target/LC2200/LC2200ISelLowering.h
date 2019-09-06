@@ -58,8 +58,10 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET,
   CALL,
-  CMPSKIP,
-  JMP
+  JMP,
+  CMP_SKIP,
+  SELECT_MOVE,
+  NAND
 };
 } // namespace LC2200ISD
 
@@ -105,6 +107,7 @@ private:
   SDValue lowerBrCc(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBr(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSelectCc(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerAnd(SDValue Op, SelectionDAG &DAG) const; // can't believe this god damn method exist -.-
 };
 
 } // end namespace llvm

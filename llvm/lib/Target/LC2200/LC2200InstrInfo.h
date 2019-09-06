@@ -116,7 +116,7 @@ namespace llvm {
 
     bool expandPostRAPseudo(MachineInstr &MI) const override;
 
-    bool resolveComparison(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const;
+    void resolveComparison(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const;
 };
 }
 #endif

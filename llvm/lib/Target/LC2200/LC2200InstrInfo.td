@@ -13,36 +13,61 @@
 
 include "LC2200InstrFormats.td"
 
-// Intrinsics
+//===----------------------------------------------------------------------===//
+// Selection DAG types
+//===----------------------------------------------------------------------===//
+def SDT_CallSeqStart      : SDCallSeqStart<[SDTCisVT<0, i32>,
+                                            SDTCisVT<1, i32>]>;
+def SDT_CallSeqEnd        : SDCallSeqEnd<[SDTCisVT<0, i32>,
+                                          SDTCisVT<1, i32>]>;
 
-//def CallSymbol : AsmOperandClass {
-//  let Name = "CallSymbol";
-//  let RenderMethod = "addImmOperands";
-//  let DiagnosticType = "InvalidCallSymbol";
-//  let ParserMethod = "parseCallSymbol";
-// }
+def SDT_LC2200Call        : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
 
-// A bare symbol used in call/tail only.
-//def call_symbol : Operand<i32> {
-//  let ParserMatchClass = CallSymbol;
-//}
+def SDT_LC2200Jmp         : SDTypeProfile<0, 1, [SDTCisVT<0, OtherVT>]>;
 
-def SDT_CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>,
-                                       SDTCisVT<1, i32>]>;
-def SDT_CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>,
-                                     SDTCisVT<1, i32>]>;
+def SDT_LC2200CmpSkip     : SDTypeProfile<0, 3, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
-def SDT_LC2200Call   : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
+def SDT_LC2200SelectMove  : SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
-def SDT_LC2200Jmp    : SDTypeProfile<0, 1, [SDTCisVT<0, OtherVT>]>;
+def SDT_LC2200Nand        : SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
+
+//===----------------------------------------------------------------------===//
+// Selection DAG Nodes
+//===----------------------------------------------------------------------===//
+def callseq_start         : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
+                                   [SDNPHasChain, SDNPOutGlue]>;
+def callseq_end           : SDNode<"ISD::CALLSEQ_END", SDT_CallSeqEnd,
+                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
+
+def lc2200_call           : SDNode<"LC2200ISD::CALL", SDT_LC2200Call,
+                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                                   SDNPVariadic]>;
+
+def lc2200_ret            : SDNode<"LC2200ISD::RET", SDTNone,
+                                   [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
+// Implements a conditional comparison: generates skips/goto to
+// conditionally execute the immediately following instruction
+// Paired with a following JMP, it forms a BR_CC node.
 // Operands: [CC, A, B]
-def SDT_LC2200Cmpskip  : SDTypeProfile<0, 3, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+def lc2200_cmp_skip       : SDNode<"LC2200ISD::CMP_SKIP", SDT_LC2200CmpSkip, [SDNPOutGlue]>;
 
-def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
-                           [SDNPHasChain, SDNPOutGlue]>;
-def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_CallSeqEnd,
-                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+// Implements a selectable move: generates two sequential
+// moves to the destination, first from the False source, then
+// from the True source. Paired with a preceding CMP_SKIP, it forms
+// a SELECT_CC.
+// Operands: [T, F]
+def lc2200_select_move    : SDNode<"LC2200ISD::SELECT_MOVE", SDT_LC2200SelectMove, [SDNPInGlue]>;
+
+// Implements a direct unconditional branch
+// Operands: [Dst]
+def lc2200_jmp            : SDNode<"LC2200ISD::JMP", SDT_LC2200Jmp, [SDNPHasChain, SDNPOptInGlue]>;
+
+// Implements NAND
+// Operands: [Dst, Src1, Src2]
+def lc2200_nand           : SDNode<"LC2200ISD::NAND", SDT_LC2200Nand, []>;
 
 //==========================
 // R Type Instructions
@@ -53,7 +78,7 @@ def ADD : RTypeInstr<0b0000, "add",
     let isAdd = 1;
 }
 def NAND: RTypeInstr<0b0001, "nand",
-    [(set (i32 GRRegs:$dr), (xor (xor (i32 GRRegs:$sr1), (xor (i32 GRRegs:$sr1), (i32 GRRegs:$sr2))), (xor (i32 GRRegs:$sr2), (xor (i32 GRRegs:$sr1), (i32 GRRegs:$sr2)))))]>;
+    [(set i32:$dr, (lc2200_nand (i32 GRRegs:$sr1), (i32 GRRegs:$sr2)))]>;
 
 
 //=========================
@@ -196,23 +221,9 @@ multiclass StPat<PatFrag StoreOp, InstLC2200 Inst, RegisterClass StTy> {
 
 def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, 0, GRRegs:$rs1)>;
 
-
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
-
-def lc2200_call      : SDNode<"LC2200ISD::CALL", SDT_LC2200Call,
-                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
-                              SDNPVariadic]>;
-
-def lc2200_ret       : SDNode<"LC2200ISD::RET", SDTNone,
-                             [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
-
-// Generate skips to implement a compare
-def lc2200_cmpskip   : SDNode<"LC2200ISD::CMPSKIP", SDT_LC2200Cmpskip, [SDNPOutGlue]>;
-
-def lc2200_jmp       : SDNode<"LC2200ISD::JMP", SDT_LC2200Jmp, [SDNPHasChain, SDNPOptInGlue]>;
-
 // PseudoCALL is a pseudo instruction which will eventually expand to auipc
 // and jalr while encoding. This is desirable, as an auipc+jalr pair with
 // R_RISCV_CALL and R_RISCV_RELAX relocations can be be relaxed by the linker
@@ -221,31 +232,41 @@ def lc2200_jmp       : SDNode<"LC2200ISD::JMP", SDT_LC2200Jmp, [SDNPHasChain, SD
 // Define isCodeGenOnly = 0 to support parsing assembly "call" instruction.
 let isCall = 1, Defs = [fp, at], isCodeGenOnly = 1 in
 def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
-    // let AsmString = "call\t$func";
+    let AsmString = "call\t$func";
 }
 
-
+// PseudoRET
 def : Pat<(lc2200_call tglobaladdr:$func), (PseudoCALL tglobaladdr:$func)>;
 def : Pat<(lc2200_call texternalsym:$func), (PseudoCALL texternalsym:$func)>;
 
-let isBarrier = 1, isReturn = 1, isTerminator = 1 in
- def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret)]>,
-                 PseudoInstExpansion<(JALR zero, ra)>;
+let isBarrier = 1, isReturn = 1, isTerminator = 1 in {
+  def PseudoRET : Pseudo<(outs), (ins), [(lc2200_ret)]>,
+                         PseudoInstExpansion<(JALR zero, ra)>;
+}
 
-
+// ADJCALLSTACKDOWN/UP
 let Defs = [sp, ra], Uses = [sp] in {
-def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt, i32imm:$amt2),
-                                    [(callseq_start timm:$amt, timm:$amt2)]>;
-def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
-                                    [(callseq_end timm:$amt1, timm:$amt2)]>;
+  def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt, i32imm:$amt2),
+                                [(callseq_start timm:$amt, timm:$amt2)]>;
+  def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
+                                [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
-def CMPSKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
-                     [(lc2200_cmpskip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
+// CMP_SKIP
+def CMP_SKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
+                     [(lc2200_cmp_skip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
   let hasSideEffects = 1;
 }
 
-def JMP : Pseudo<(outs), (ins b_target:$dst), [(lc2200_jmp bb:$dst)]> {
+// JMP
+def JMP : Pseudo<(outs), (ins b_target:$dst),
+                 [(lc2200_jmp bb:$dst)]> {
   // let Defs = [at];
-  let hasSideEffects = 1;
+  let isBarrier = 1;
+  let isTerminator = 1;
+  let isBranch = 1;
 }
+
+// SELECT_MOVE
+def SELECT_MOVE : Pseudo<(outs GRRegs:$dst), (ins GRRegs:$src1, GRRegs:$src2),
+                         [(set (i32 GRRegs:$dst), (lc2200_select_move (i32 GRRegs:$src1), (i32 GRRegs:$src2)))]>;
