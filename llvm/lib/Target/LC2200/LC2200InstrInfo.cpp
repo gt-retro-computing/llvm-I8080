@@ -30,7 +30,7 @@ void LC2200InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
     llvm_unreachable("Can't store this register to stack slot");
 
   BuildMI(MBB, I, DL, get(Opcode))
-      .addReg(SrcReg, getKillRegState(IsKill))
+      .addReg(SrcReg)
       .addFrameIndex(FI)
       .addImm(0);
 }
@@ -134,7 +134,8 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineOperand &op = MI.getOperand(0);
     if (!op.isGlobal())
       llvm_unreachable("dude weed lmao");
-    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+    BuildMI(MBB, DL, get(LC2200::ADDI)).addReg(LC2200::at).addReg(LC2200::zero).addGlobalAddress(op.getGlobal());
+//    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
     BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
     break;
   }

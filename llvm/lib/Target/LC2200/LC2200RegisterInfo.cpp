@@ -122,7 +122,7 @@ void LC2200RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II, int
     const LC2200InstrInfo &TII = *static_cast<const LC2200InstrInfo *>(MF.getSubtarget().getInstrInfo());
     FrameReg = TII.loadImmediate(FrameReg, Offset, MBB, II, DL, NewImm);
     Offset = SignExtend64<16>(NewImm);
-    IsKill = true;
+//    IsKill = true;
   }
   MI.getOperand(OpNo).ChangeToRegister(FrameReg, false, false, IsKill);
   MI.getOperand(OpNo + 1).ChangeToImmediate(Offset);
