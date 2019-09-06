@@ -731,8 +731,8 @@ SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op,
 
   SDValue Cmp = DAG.getNode(LC2200ISD::CMP_SKIP, DL, MVT::Glue,
                             DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
-  SDValue SelectMove =
-      DAG.getNode(LC2200ISD::SELECT_MOVE, DL, TrueType, TrueValue, FalseValue, Cmp);
+  SDValue SelectMove = DAG.getNode(LC2200ISD::SELECT_MOVE, DL, TrueType,
+                                   TrueValue, FalseValue, Cmp);
   return SelectMove;
 }
 
