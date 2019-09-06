@@ -213,7 +213,6 @@ def lc2200_cmpskip   : SDNode<"LC2200ISD::CMPSKIP", SDT_LC2200Cmpskip, [SDNPOutG
 
 def lc2200_jmp       : SDNode<"LC2200ISD::JMP", SDT_LC2200Jmp, [SDNPHasChain, SDNPOptInGlue]>;
 
-
 // PseudoCALL is a pseudo instruction which will eventually expand to auipc
 // and jalr while encoding. This is desirable, as an auipc+jalr pair with
 // R_RISCV_CALL and R_RISCV_RELAX relocations can be be relaxed by the linker
@@ -245,7 +244,8 @@ def CMPSKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
                      [(lc2200_cmpskip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
   let hasSideEffects = 1;
 }
+
 def JMP : Pseudo<(outs), (ins b_target:$dst), [(lc2200_jmp bb:$dst)]> {
-  let Defs = [at];
+  // let Defs = [at];
   let hasSideEffects = 1;
 }

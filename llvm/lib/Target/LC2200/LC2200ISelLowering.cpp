@@ -20,7 +20,11 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i32, Custom);
   setOperationAction(ISD::BR, MVT::Other, Custom);
+
+  setOperationAction(ISD::SETCC, MVT::i32, Expand); // MEMEs
+  setOperationAction(ISD::SETCC, MVT::Other, Expand); // MEMEs
 }
 
 void LC2200TargetLowering::analyzeInputArgs(
@@ -648,6 +652,8 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     return lowerBrCc(Op, DAG);
   case ISD::BR:
     return lowerBr(Op, DAG);
+  case ISD::SELECT_CC:
+    return lowerSelectCc(Op, DAG);
   }
 }
 

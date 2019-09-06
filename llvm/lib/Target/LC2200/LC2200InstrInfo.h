@@ -57,6 +57,8 @@ namespace llvm {
 
         bool isAsCheapAsAMove(const MachineInstr &MI) const override;
 
+        void copyPhysReg(MachineBasicBlock& MBB, MachineBasicBlock::iterator MI, const DebugLoc& DL, unsigned DestReg, unsigned SrcReg, bool KillSrc) const override;
+
 //  unsigned isLoadFromStackSlot(const MachineInstr &MI,
 //                               int &FrameIndex) const override;
 //  unsigned isStoreToStackSlot(const MachineInstr &MI,
@@ -112,9 +114,9 @@ namespace llvm {
 //
 //  bool isAsCheapAsAMove(const MachineInstr &MI) const override;
 
-    virtual bool expandPostRAPseudo(MachineInstr &MI) const override;
+    bool expandPostRAPseudo(MachineInstr &MI) const override;
 
-    bool doTheThang(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const;
+    bool resolveComparison(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const;
 };
 }
 #endif

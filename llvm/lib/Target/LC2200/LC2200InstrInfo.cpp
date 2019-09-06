@@ -56,7 +56,7 @@ void LC2200InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   BuildMI(MBB, I, DL, get(Opcode), DstReg).addFrameIndex(FI).addImm(0);
 }
 
-bool LC2200InstrInfo::doTheThang(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const {
+bool LC2200InstrInfo::resolveComparison(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const {
     MachineBasicBlock *MBB = MI.getParent();
     const DebugLoc &DL = MI.getDebugLoc();
 
@@ -68,19 +68,21 @@ bool LC2200InstrInfo::doTheThang(MachineInstr &MI, ISD::CondCode ConditionCode, 
     //a != b  ==> skpe a, b; jmp dst
     switch (ConditionCode) {
     case ISD::CondCode::SETEQ:
-        llvm_unreachable("dude weedlmao");
+      resolveComparison(MI, ISD::CondCode::SETNE, a, b);
+      BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
       break;
     case ISD::CondCode::SETGT:
-        llvm_unreachable("dude weedlmao");
+      resolveComparison(MI, ISD::CondCode::SETLT, b, a);
       break;
     case ISD::CondCode::SETGE:
       BuildMI(MBB, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
       break;
     case ISD::CondCode::SETLT:
-        llvm_unreachable("dude weedlmao");
+      resolveComparison(MI, ISD::CondCode::SETGE, a, b);
+      BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
       break;
     case ISD::CondCode::SETLE:
-        llvm_unreachable("dude weedlmao");
+      resolveComparison(MI, ISD::CondCode::SETGE, b, a);
       break;
     case ISD::CondCode::SETNE:
         BuildMI(MBB, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
@@ -99,17 +101,24 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     DebugLoc DL = MI.getDebugLoc();
     MachineBasicBlock *MBB = MI.getParent();
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
-    doTheThang(MI, ConditionCode, MI.getOperand(1), MI.getOperand(2));
+    resolveComparison(MI, ConditionCode, MI.getOperand(1), MI.getOperand(2));
     MBB->erase(MI);
     return true;
   }
   case LC2200::JMP : {
     DebugLoc DL = MI.getDebugLoc();
     MachineBasicBlock *MBB = MI.getParent();
-    MachineBasicBlock *dst = MI.getOperand(0).getMBB();
+    MachineOperand *op = &MI.getOperand(0);
+    if (op->isMBB()) {
+      MachineBasicBlock *dst = op->getMBB();
+      BuildMI(MBB, DL, get(LC2200::GOTO)).addMBB(dst);
+    } else {
+      int64_t dst = op->getImm();
+      BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(dst);
+    }
+
 //    BuildMI(MBB, DL, get(LC2200::ADDI)).addReg(LC2200::at).addReg(LC2200::zero).addMBB(dst);
 //    BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::zero).addReg(LC2200::at);
-    BuildMI(MBB, DL, get(LC2200::GOTO)).addMBB(dst);
     MBB->erase(MI);
     return true;
   }
@@ -242,4 +251,8 @@ bool LC2200InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
       return (MI.getOperand(1).isReg() && MI.getOperand(1).getReg() == LC2200::zero);
   }
   return MI.isAsCheapAsAMove();
+}
+
+void LC2200InstrInfo::copyPhysReg(MachineBasicBlock& MBB, MachineBasicBlock::iterator MI, const DebugLoc& DL, unsigned DestReg, unsigned SrcReg, bool KillSrc) const {
+  BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(DestReg).addReg(SrcReg).addReg(LC2200::zero);
 }
