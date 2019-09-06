@@ -1,4 +1,5 @@
 
+#include <llvm/CodeGen/SelectionDAGNodes.h>
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 
@@ -53,6 +54,66 @@ void LC2200InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     llvm_unreachable("Can't load this register from stack slot");
 
   BuildMI(MBB, I, DL, get(Opcode), DstReg).addFrameIndex(FI).addImm(0);
+}
+
+bool LC2200InstrInfo::doTheThang(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const {
+    MachineBasicBlock *MBB = MI.getParent();
+    const DebugLoc &DL = MI.getDebugLoc();
+
+    //a =  b  ==> !(a != b)
+    //a >  b  ==> b < a
+    //a >= b  ==> skplt a, b; jmp dst
+    //a <  b  ==> !(a >= b)
+    //a <= b  ==> b >= a
+    //a != b  ==> skpe a, b; jmp dst
+    switch (ConditionCode) {
+    case ISD::CondCode::SETEQ:
+        llvm_unreachable("dude weedlmao");
+      break;
+    case ISD::CondCode::SETGT:
+        llvm_unreachable("dude weedlmao");
+      break;
+    case ISD::CondCode::SETGE:
+      BuildMI(MBB, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
+      break;
+    case ISD::CondCode::SETLT:
+        llvm_unreachable("dude weedlmao");
+      break;
+    case ISD::CondCode::SETLE:
+        llvm_unreachable("dude weedlmao");
+      break;
+    case ISD::CondCode::SETNE:
+        BuildMI(MBB, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
+      break;
+    default:
+      llvm_unreachable("dude weed lmao: how did we get such a condition code in this pseudo instruction?! are we fLoATiNg?");
+    }
+}
+
+bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  switch (MI.getOpcode())
+  {
+  default:
+    return false;
+  case LC2200::CMPSKIP : {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineBasicBlock *MBB = MI.getParent();
+    auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
+    doTheThang(MI, ConditionCode, MI.getOperand(1), MI.getOperand(2));
+    MBB->erase(MI);
+    return true;
+  }
+  case LC2200::JMP : {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineBasicBlock *MBB = MI.getParent();
+    MachineBasicBlock *dst = MI.getOperand(0).getMBB();
+//    BuildMI(MBB, DL, get(LC2200::ADDI)).addReg(LC2200::at).addReg(LC2200::zero).addMBB(dst);
+//    BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::zero).addReg(LC2200::at);
+    BuildMI(MBB, DL, get(LC2200::GOTO)).addMBB(dst);
+    MBB->erase(MI);
+    return true;
+  }
+  }
 }
 
 unsigned

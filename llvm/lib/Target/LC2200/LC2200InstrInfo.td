@@ -97,7 +97,8 @@ def SW: ITypeInstr<0b0100, (outs), (ins GRRegs:$src1, LC2200imm20:$offset, GRReg
 
 def GOTO: ITypeInstr<0b0101, (outs), (ins b_target:$offset),
     "goto", "$offset",
-    [(br bb:$offset)]> {
+//    [(br bb:$offset)]> {
+    []> {
         bits<20> offset;
         let Inst{27-24} = 0;
         let Inst{23-20} = 0;
@@ -241,7 +242,10 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 }
 
 def CMPSKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
-                     [(lc2200_cmpskip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]>;
+                     [(lc2200_cmpskip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
+  let hasSideEffects = 1;
+}
 def JMP : Pseudo<(outs), (ins b_target:$dst), [(lc2200_jmp bb:$dst)]> {
   let Defs = [at];
+  let hasSideEffects = 1;
 }

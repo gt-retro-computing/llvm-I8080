@@ -19,7 +19,8 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
-  setOperationAction(ISD::BR_CC, MVT::i32, Custom);
+  setOperationAction(ISD::BR_CC, MVT::Other, Custom);
+  setOperationAction(ISD::BR, MVT::Other, Custom);
 }
 
 void LC2200TargetLowering::analyzeInputArgs(
@@ -645,6 +646,8 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     return lowerShiftLeft(Op, DAG);
   case ISD::BR_CC:
     return lowerBrCc(Op, DAG);
+  case ISD::BR:
+    return lowerBr(Op, DAG);
   }
 }
 
@@ -670,6 +673,16 @@ SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
   return Vl;
 }
 
+SDValue LC2200TargetLowering::lowerBr(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DagLoc(Op);
+  SDValue Chain = Op.getOperand(0);
+  SDValue Dest = Op.getOperand(1);
+  SDLoc DL(Op);
+
+  SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest);
+  return Jmp;
+}
+
 SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DagLoc(Op);
   SDValue Chain = Op.getOperand(0);
@@ -681,13 +694,6 @@ SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   
   SDLoc DL(Op);
   //EVT VT = Dest.getValueType();
-
-//a =  b  ==> !(a != b)
-//a >  b  ==> b < a
-//a >= b  ==> skplt a, b; jmp dst
-//a <  b  ==> !(a >= b)
-//a <= b  ==> b >= a
-//a != b  ==> skpe a, b; jmp dst
 
   SDValue Cmp = DAG.getNode(LC2200ISD::CMPSKIP, DL, MVT::Glue, DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
   SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest, Cmp);

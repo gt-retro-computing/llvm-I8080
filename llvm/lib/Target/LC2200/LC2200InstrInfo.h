@@ -21,41 +21,41 @@
 
 namespace llvm {
 
-class LC2200InstrInfo : public LC2200GenInstrInfo {
-  const LC2200RegisterInfo RI;
+    class LC2200InstrInfo : public LC2200GenInstrInfo {
+        const LC2200RegisterInfo RI;
 
-public:
-  LC2200InstrInfo();
+    public:
+        LC2200InstrInfo();
 
-  // Adjust SP by FrameSize bytes. Save RA, S0, S1
-  void makeFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
-                 MachineBasicBlock::iterator I) const;
+        // Adjust SP by FrameSize bytes. Save RA, S0, S1
+        void makeFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
+                       MachineBasicBlock::iterator I) const;
 
-  // Adjust SP by FrameSize bytes. Restore RA, S0, S1
-  void restoreFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
-                    MachineBasicBlock::iterator I) const;
+        // Adjust SP by FrameSize bytes. Restore RA, S0, S1
+        void restoreFrame(unsigned SP, int64_t FrameSize, MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator I) const;
 
-  void storeRegToStackSlot(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator MBBI, unsigned SrcReg,
-                           bool IsKill, int FrameIndex,
-                           const TargetRegisterClass *RC,
-                           const TargetRegisterInfo *TRI) const override;
+        void storeRegToStackSlot(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI, unsigned SrcReg,
+                                 bool IsKill, int FrameIndex,
+                                 const TargetRegisterClass *RC,
+                                 const TargetRegisterInfo *TRI) const override;
 
-  void loadRegFromStackSlot(MachineBasicBlock &MBB,
-                            MachineBasicBlock::iterator MBBI, unsigned DstReg,
-                            int FrameIndex, const TargetRegisterClass *RC,
-                            const TargetRegisterInfo *TRI) const override;
+        void loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI, unsigned DstReg,
+                                  int FrameIndex, const TargetRegisterClass *RC,
+                                  const TargetRegisterInfo *TRI) const override;
 
-  /// Emit a series of instructions to load an immediate.
-  // This is to adjust some FrameReg. We return the new register to be used
-  // in place of FrameReg and the adjusted immediate field (&NewImm)
-  unsigned loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock &MBB,
-                         MachineBasicBlock::iterator II, const DebugLoc &DL,
-                         unsigned &NewImm) const;
+        /// Emit a series of instructions to load an immediate.
+        // This is to adjust some FrameReg. We return the new register to be used
+        // in place of FrameReg and the adjusted immediate field (&NewImm)
+        unsigned loadImmediate(unsigned FrameReg, int64_t Imm, MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator II, const DebugLoc &DL,
+                               unsigned &NewImm) const;
 
-  static bool validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount);
+        static bool validImmediate(unsigned Opcode, unsigned Reg, int64_t Amount);
 
-  bool isAsCheapAsAMove(const MachineInstr &MI) const override;
+        bool isAsCheapAsAMove(const MachineInstr &MI) const override;
 
 //  unsigned isLoadFromStackSlot(const MachineInstr &MI,
 //                               int &FrameIndex) const override;
@@ -111,6 +111,10 @@ public:
 //                             int64_t BrOffset) const override;
 //
 //  bool isAsCheapAsAMove(const MachineInstr &MI) const override;
+
+    virtual bool expandPostRAPseudo(MachineInstr &MI) const override;
+
+    bool doTheThang(MachineInstr &MI, ISD::CondCode ConditionCode, MachineOperand& a, MachineOperand& b) const;
 };
 }
 #endif
