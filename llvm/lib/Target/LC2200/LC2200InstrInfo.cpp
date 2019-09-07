@@ -97,7 +97,7 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock *MBB,
 }
 
 bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc DL = MI.getDebugLoc();
   MachineBasicBlock *MBB = MI.getParent();
   switch (MI.getOpcode()) {
   default:
@@ -135,8 +135,8 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     if (!op.isGlobal()) {
       llvm_unreachable("dude weed lmao");
     }
-    BuildMI(MBB, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
-    BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
+    BuildMI(*MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+    BuildMI(*MBB, MI, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
     break;
   }
 
