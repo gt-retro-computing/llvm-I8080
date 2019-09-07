@@ -13,4 +13,4 @@ using namespace llvm;
 LC2200Subtarget::LC2200Subtarget(const Triple &TT, const StringRef CPU, const StringRef FS, const LC2200TargetMachine &TM) :
   LC2200GenSubtargetInfo(TT, CPU, FS),
   TLInfo(TM, *this),
-  FrameLowering(*this, 4) {}
+  FrameLowering(*this, /* Alignment in units of memory *not* bytes */ 1) {}

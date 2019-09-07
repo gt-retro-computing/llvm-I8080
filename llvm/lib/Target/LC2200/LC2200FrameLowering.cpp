@@ -142,9 +142,6 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   // investigation. Get the number of bytes to allocate from the FrameInfo.
   uint64_t StackSize = MFI.getStackSize();
 
-  assert(StackSize % 4 == 0 && "Addressibility is 4-bytes");
-  StackSize /= 4;
-
   // Early exit if there is no need to allocate on the stack
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
@@ -233,9 +230,6 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
   auto LastFrameDestroy = std::prev(MBBI, MFI.getCalleeSavedInfo().size());
 
   uint64_t StackSize = MFI.getStackSize();
-
-  assert(StackSize % 4 == 0 && "Addressibility is 4-bytes");
-  StackSize /= 4;
 
   uint64_t FPOffset = StackSize;// - RVFI->getVarArgsSaveSize();
 
