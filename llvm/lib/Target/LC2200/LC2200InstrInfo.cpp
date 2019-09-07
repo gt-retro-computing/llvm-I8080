@@ -132,10 +132,10 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   case LC2200::PseudoCALL: {
     MachineOperand &op = MI.getOperand(0);
-    if (!op.isGlobal())
+    if (!op.isGlobal()) {
       llvm_unreachable("dude weed lmao");
-    BuildMI(MBB, DL, get(LC2200::ADDI)).addReg(LC2200::at).addReg(LC2200::zero).addGlobalAddress(op.getGlobal());
-//    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+    }
+    BuildMI(MBB, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
     BuildMI(MBB, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
     break;
   }
