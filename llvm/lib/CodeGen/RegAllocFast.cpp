@@ -253,8 +253,10 @@ int RegAllocFast::getStackSpaceFor(unsigned VirtReg) {
 
   // Allocate a new stack object for this spill location...
   const TargetRegisterClass &RC = *MRI->getRegClass(VirtReg);
-  unsigned Size = TRI->getSpillSize(RC);
-  unsigned Align = TRI->getSpillAlignment(RC);
+  const DataLayout &DL = MBB->getParent()->getDataLayout();
+
+  unsigned Size = TRI->getSpillSize(RC, DL);
+  unsigned Align = TRI->getSpillAlignment(RC, DL);
   int FrameIdx = MFI->CreateSpillStackObject(Size, Align);
 
   // Assign the slot.

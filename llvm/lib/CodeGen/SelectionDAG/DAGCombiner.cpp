@@ -4906,8 +4906,11 @@ bool DAGCombiner::isLegalNarrowLdSt(LSBaseSDNode *LDST,
                                     unsigned ShAmt) {
   if (!LDST)
     return false;
-  // Only allow byte offsets.
-  if (ShAmt % 8)
+
+  unsigned BitsPerUnit = TLI.getTargetMachine().createDataLayout().getBitsPerMemoryUnit();
+
+  // Only allow unit memory offsets.
+  if (ShAmt % BitsPerUnit)
     return false;
 
   // Do not generate loads of non-round integer types since these can
@@ -4926,7 +4929,7 @@ bool DAGCombiner::isLegalNarrowLdSt(LSBaseSDNode *LDST,
   // Ensure that this isn't going to produce an unsupported unaligned access.
   if (ShAmt &&
       !TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), MemVT,
-                              LDST->getAddressSpace(), ShAmt / 8,
+                              LDST->getAddressSpace(), ShAmt / BitsPerUnit,
                               LDST->getMemOperand()->getFlags()))
     return false;
 
@@ -6530,7 +6533,7 @@ private:
 /// use this function iterates over trees, not DAGs. So it never visits the same
 /// node more than once.
 static const Optional<ByteProvider>
-calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
+calculateByteProvider(const DataLayout &DL, SDValue Op, unsigned Index, unsigned Depth,
                       bool Root = false) {
   // Typical i64 by i8 pattern requires recursion up to 8 calls depth
   if (Depth == 10)
@@ -6539,20 +6542,22 @@ calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
   if (!Root && !Op.hasOneUse())
     return None;
 
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
   assert(Op.getValueType().isScalarInteger() && "can't handle other types");
   unsigned BitWidth = Op.getValueSizeInBits();
-  if (BitWidth % 8 != 0)
+  if (BitWidth % BitsPerUnit != 0)
     return None;
-  unsigned ByteWidth = BitWidth / 8;
+  unsigned ByteWidth = BitWidth / BitsPerUnit;
   assert(Index < ByteWidth && "invalid index requested");
   (void) ByteWidth;
 
   switch (Op.getOpcode()) {
   case ISD::OR: {
-    auto LHS = calculateByteProvider(Op->getOperand(0), Index, Depth + 1);
+    auto LHS = calculateByteProvider(DL, Op->getOperand(0), Index, Depth + 1);
     if (!LHS)
       return None;
-    auto RHS = calculateByteProvider(Op->getOperand(1), Index, Depth + 1);
+    auto RHS = calculateByteProvider(DL, Op->getOperand(1), Index, Depth + 1);
     if (!RHS)
       return None;
 
@@ -6568,13 +6573,13 @@ calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
       return None;
 
     uint64_t BitShift = ShiftOp->getZExtValue();
-    if (BitShift % 8 != 0)
+    if (BitShift % BitsPerUnit != 0)
       return None;
-    uint64_t ByteShift = BitShift / 8;
+    uint64_t ByteShift = BitShift / BitsPerUnit;
 
     return Index < ByteShift
                ? ByteProvider::getConstantZero()
-               : calculateByteProvider(Op->getOperand(0), Index - ByteShift,
+               : calculateByteProvider(DL, Op->getOperand(0), Index - ByteShift,
                                        Depth + 1);
   }
   case ISD::ANY_EXTEND:
@@ -6582,18 +6587,18 @@ calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
   case ISD::ZERO_EXTEND: {
     SDValue NarrowOp = Op->getOperand(0);
     unsigned NarrowBitWidth = NarrowOp.getScalarValueSizeInBits();
-    if (NarrowBitWidth % 8 != 0)
+    if (NarrowBitWidth % BitsPerUnit != 0)
       return None;
-    uint64_t NarrowByteWidth = NarrowBitWidth / 8;
+    uint64_t NarrowByteWidth = NarrowBitWidth / BitsPerUnit;
 
     if (Index >= NarrowByteWidth)
       return Op.getOpcode() == ISD::ZERO_EXTEND
                  ? Optional<ByteProvider>(ByteProvider::getConstantZero())
                  : None;
-    return calculateByteProvider(NarrowOp, Index, Depth + 1);
+    return calculateByteProvider(DL, NarrowOp, Index, Depth + 1);
   }
   case ISD::BSWAP:
-    return calculateByteProvider(Op->getOperand(0), ByteWidth - Index - 1,
+    return calculateByteProvider(DL, Op->getOperand(0), ByteWidth - Index - 1,
                                  Depth + 1);
   case ISD::LOAD: {
     auto L = cast<LoadSDNode>(Op.getNode());
@@ -6601,9 +6606,9 @@ calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
       return None;
 
     unsigned NarrowBitWidth = L->getMemoryVT().getSizeInBits();
-    if (NarrowBitWidth % 8 != 0)
+    if (NarrowBitWidth % BitsPerUnit != 0)
       return None;
-    uint64_t NarrowByteWidth = NarrowBitWidth / 8;
+    uint64_t NarrowByteWidth = NarrowBitWidth / BitsPerUnit;
 
     if (Index >= NarrowByteWidth)
       return L->getExtensionType() == ISD::ZEXTLOAD
@@ -6861,7 +6866,11 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
   EVT VT = N->getValueType(0);
   if (VT != MVT::i16 && VT != MVT::i32 && VT != MVT::i64)
     return SDValue();
-  unsigned ByteWidth = VT.getSizeInBits() / 8;
+
+  const DataLayout &DL = DAG.getDataLayout();
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
+  unsigned ByteWidth = VT.getSizeInBits() / BitsPerUnit;
 
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   // Before legalize we can introduce too wide illegal loads which will be later
@@ -6874,9 +6883,9 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
   auto MemoryByteOffset = [&] (ByteProvider P) {
     assert(P.isMemory() && "Must be a memory byte provider");
     unsigned LoadBitWidth = P.Load->getMemoryVT().getSizeInBits();
-    assert(LoadBitWidth % 8 == 0 &&
-           "can only analyze providers for individual bytes not bit");
-    unsigned LoadByteWidth = LoadBitWidth / 8;
+    assert(LoadBitWidth % BitsPerUnit == 0 &&
+           "can only analyze providers for individual memory units not bit");
+    unsigned LoadByteWidth = LoadBitWidth / BitsPerUnit;
     return IsBigEndianTarget
             ? BigEndianByteAt(LoadByteWidth, P.ByteOffset)
             : LittleEndianByteAt(LoadByteWidth, P.ByteOffset);
@@ -6893,7 +6902,7 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
   // base address. Collect bytes offsets from Base address in ByteOffsets.
   SmallVector<int64_t, 4> ByteOffsets(ByteWidth);
   for (unsigned i = 0; i < ByteWidth; i++) {
-    auto P = calculateByteProvider(SDValue(N, 0), i, 0, /*Root=*/true);
+    auto P = calculateByteProvider(DL, SDValue(N, 0), i, 0, /*Root=*/true);
     if (!P || !P->isMemory()) // All the bytes must be loaded from memory
       return SDValue();
 
@@ -10373,8 +10382,10 @@ SDValue DAGCombiner::ReduceLoadWidth(SDNode *N) {
   if (DAG.getDataLayout().isBigEndian())
     ShAmt = AdjustBigEndianShift(ShAmt);
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   EVT PtrType = N0.getOperand(1).getValueType();
-  uint64_t PtrOff = ShAmt / 8;
+  uint64_t PtrOff = ShAmt / BitsPerUnit;
   unsigned NewAlign = MinAlign(LN0->getAlignment(), PtrOff);
   SDLoc DL(LN0);
   // The original load itself didn't wrap, so an offset within it doesn't.
@@ -14043,18 +14054,20 @@ SDValue DAGCombiner::ForwardStoreValueToDirectLoad(LoadSDNode *LD) {
   if (!BasePtrST.equalBaseIndex(BasePtrLD, DAG, Offset))
     return SDValue();
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   // Normalize for Endianness. After this Offset=0 will denote that the least
   // significant bit in the loaded value maps to the least significant bit in
   // the stored value). With Offset=n (for n > 0) the loaded value starts at the
   // n:th least significant byte of the stored value.
   if (DAG.getDataLayout().isBigEndian())
     Offset = (STMemType.getStoreSizeInBits() -
-              LDMemType.getStoreSizeInBits()) / 8 - Offset;
+              LDMemType.getStoreSizeInBits()) / BitsPerUnit - Offset;
 
   // Check that the stored value cover all bits that are loaded.
   bool STCoversLD =
       (Offset >= 0) &&
-      (Offset * 8 + LDMemType.getSizeInBits() <= STMemType.getSizeInBits());
+      (Offset * BitsPerUnit + LDMemType.getSizeInBits() <= STMemType.getSizeInBits());
 
   auto ReplaceLd = [&](LoadSDNode *LD, SDValue Val, SDValue Chain) -> SDValue {
     if (LD->isIndexed()) {
@@ -14376,11 +14389,12 @@ struct LoadedSlice {
     return UsedBits;
   }
 
-  /// Get the size of the slice to be loaded in bytes.
+  /// Get the size of the slice to be loaded in memory units.
   unsigned getLoadedSize() const {
     unsigned SliceSize = getUsedBits().countPopulation();
-    assert(!(SliceSize & 0x7) && "Size is not a multiple of a byte.");
-    return SliceSize / 8;
+    unsigned BitsPerUnit = DAG->getDataLayout().getBitsPerMemoryUnit();
+    assert(SliceSize % BitsPerUnit == 0 && "Size is not a multiple of a byte.");
+    return SliceSize / BitsPerUnit;
   }
 
   /// Get the type that will be loaded for this slice.
@@ -14444,24 +14458,26 @@ struct LoadedSlice {
     return true;
   }
 
-  /// Get the offset in bytes of this slice in the original chunk of
+  /// Get the offset in memory units of this slice in the original chunk of
   /// bits.
   /// \pre DAG != nullptr.
   uint64_t getOffsetFromBase() const {
     assert(DAG && "Missing context.");
     bool IsBigEndian = DAG->getDataLayout().isBigEndian();
-    assert(!(Shift & 0x7) && "Shifts not aligned on Bytes are not supported.");
-    uint64_t Offset = Shift / 8;
-    unsigned TySizeInBytes = Origin->getValueSizeInBits(0) / 8;
-    assert(!(Origin->getValueSizeInBits(0) & 0x7) &&
+    unsigned BitsPerUnit = DAG->getDataLayout().getBitsPerMemoryUnit();
+
+    assert(Shift % BitsPerUnit == 0 && "Shifts not aligned on Bytes are not supported.");
+    uint64_t Offset = Shift / BitsPerUnit;
+    unsigned TySizeInUnits = Origin->getValueSizeInBits(0) / BitsPerUnit;
+    assert(Origin->getValueSizeInBits(0) % BitsPerUnit == 0 &&
            "The size of the original loaded type is not a multiple of a"
            " byte.");
     // If Offset is bigger than TySizeInBytes, it means we are loading all
     // zeros. This should have been optimized before in the process.
-    assert(TySizeInBytes > Offset &&
+    assert(TySizeInUnits > Offset &&
            "Invalid shift amount for given loaded size");
     if (IsBigEndian)
-      Offset = TySizeInBytes - Offset - getLoadedSize();
+      Offset = TySizeInUnits - Offset - getLoadedSize();
     return Offset;
   }
 
@@ -15011,11 +15027,14 @@ SDValue DAGCombiner::ReduceLoadOpStoreWidth(SDNode *N) {
       APInt NewImm = (Imm & Mask).lshr(ShAmt).trunc(NewBW);
       if (Opc == ISD::AND)
         NewImm ^= APInt::getAllOnesValue(NewBW);
-      uint64_t PtrOff = ShAmt / 8;
+
+      unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
+      uint64_t PtrOff = ShAmt / BitsPerUnit;
       // For big endian targets, we need to adjust the offset to the pointer to
       // load the correct bytes.
       if (DAG.getDataLayout().isBigEndian())
-        PtrOff = (BitWidth + 7 - NewBW) / 8 - PtrOff;
+        PtrOff = (BitWidth + (BitsPerUnit - 1) - NewBW) / BitsPerUnit - PtrOff;
 
       unsigned NewAlign = MinAlign(LD->getAlignment(), PtrOff);
       Type *NewVTTy = NewVT.getTypeForEVT(*DAG.getContext());
@@ -16547,6 +16566,8 @@ SDValue DAGCombiner::splitMergedValStore(StoreSDNode *ST) {
   if (!TLI.isMultiStoresCheaperThanBitsMerge(LowTy, HighTy))
     return SDValue();
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   // Start to split store.
   unsigned Alignment = ST->getAlignment();
   MachineMemOperand::Flags MMOFlags = ST->getMemOperand()->getFlags();
@@ -16564,11 +16585,11 @@ SDValue DAGCombiner::splitMergedValStore(StoreSDNode *ST) {
                              ST->getAlignment(), MMOFlags, AAInfo);
   Ptr =
       DAG.getNode(ISD::ADD, DL, Ptr.getValueType(), Ptr,
-                  DAG.getConstant(HalfValBitSize / 8, DL, Ptr.getValueType()));
+                  DAG.getConstant(HalfValBitSize / BitsPerUnit, DL, Ptr.getValueType()));
   // Higher value store.
   SDValue St1 =
       DAG.getStore(St0, DL, Hi, Ptr,
-                   ST->getPointerInfo().getWithOffset(HalfValBitSize / 8),
+                   ST->getPointerInfo().getWithOffset(HalfValBitSize / BitsPerUnit),
                    Alignment / 2, MMOFlags, AAInfo);
   return St1;
 }
@@ -16781,8 +16802,9 @@ SDValue DAGCombiner::scalarizeExtractedVectorLoad(SDNode *EVE, EVT InVecVT,
   MachinePointerInfo MPI;
   SDLoc DL(EVE);
   if (auto *ConstEltNo = dyn_cast<ConstantSDNode>(EltNo)) {
+    unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
     int Elt = ConstEltNo->getZExtValue();
-    unsigned PtrOff = VecEltVT.getSizeInBits() * Elt / 8;
+    unsigned PtrOff = VecEltVT.getSizeInBits() * Elt / BitsPerUnit;
     Offset = DAG.getConstant(PtrOff, DL, PtrType);
     MPI = OriginalLoad->getPointerInfo().getWithOffset(PtrOff);
   } else {
@@ -19592,10 +19614,12 @@ SDValue DAGCombiner::XformToShuffleWithZero(SDNode *N) {
                                                    Zero, Indices));
   };
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   // Determine maximum split level (byte level masking).
   int MaxSplit = 1;
-  if (RVT.getScalarSizeInBits() % 8 == 0)
-    MaxSplit = RVT.getScalarSizeInBits() / 8;
+  if (RVT.getScalarSizeInBits() % BitsPerUnit == 0)
+    MaxSplit = RVT.getScalarSizeInBits() / BitsPerUnit;
 
   for (int Split = 1; Split <= MaxSplit; ++Split)
     if (RVT.getScalarSizeInBits() % Split == 0)
@@ -20809,8 +20833,10 @@ bool DAGCombiner::parallelizeChainedStores(StoreSDNode *St) {
   if (BasePtr.getBase().isUndef())
     return false;
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   // Add ST's interval.
-  Intervals.insert(0, (St->getMemoryVT().getSizeInBits() + 7) / 8, Unit);
+  Intervals.insert(0, (St->getMemoryVT().getSizeInBits() + (BitsPerUnit - 1)) / BitsPerUnit, Unit);
 
   while (StoreSDNode *Chain = dyn_cast<StoreSDNode>(STChain->getChain())) {
     // If the chain has more than one use, then we can't reorder the mem ops.
@@ -20825,7 +20851,7 @@ bool DAGCombiner::parallelizeChainedStores(StoreSDNode *St) {
     int64_t Offset;
     if (!BasePtr.equalBaseIndex(Ptr, DAG, Offset))
       break;
-    int64_t Length = (Chain->getMemoryVT().getSizeInBits() + 7) / 8;
+    int64_t Length = (Chain->getMemoryVT().getSizeInBits() + (BitsPerUnit - 1)) / BitsPerUnit;
     // Make sure we don't overlap with other intervals by checking the ones to
     // the left or right before inserting.
     auto I = Intervals.find(Offset);

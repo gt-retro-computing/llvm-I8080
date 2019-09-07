@@ -1122,7 +1122,8 @@ LLVM_DUMP_METHOD void AllocaSlices::dump() const { print(dbgs()); }
 
 /// Walk the range of a partitioning looking for a common type to cover this
 /// sequence of slices.
-static Type *findCommonType(AllocaSlices::const_iterator B,
+static Type *findCommonType(const DataLayout &DL,
+                            AllocaSlices::const_iterator B,
                             AllocaSlices::const_iterator E,
                             uint64_t EndOffset) {
   Type *Ty = nullptr;
@@ -1150,8 +1151,9 @@ static Type *findCommonType(AllocaSlices::const_iterator B,
       // this for split integer operations where we want to use the type of the
       // entity causing the split. Also skip if the type is not a byte width
       // multiple.
-      if (UserITy->getBitWidth() % 8 != 0 ||
-          UserITy->getBitWidth() / 8 > (EndOffset - B->beginOffset()))
+      unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+      if (UserITy->getBitWidth() % BitsPerUnit != 0 ||
+          UserITy->getBitWidth() / BitsPerUnit > (EndOffset - B->beginOffset()))
         continue;
 
       // Track the largest bitwidth integer type used in this way in case there
@@ -1481,7 +1483,7 @@ static Value *getNaturalGEPRecursively(IRBuilderTy &IRB, const DataLayout &DL,
       // GEPs over non-multiple of 8 size vector elements are invalid.
       return nullptr;
     }
-    APInt ElementSize(Offset.getBitWidth(), ElementSizeInBits / 8);
+    APInt ElementSize(Offset.getBitWidth(), ElementSizeInBits / DL.getBitsPerMemoryUnit());
     APInt NumSkippedElements = Offset.sdiv(ElementSize);
     if (NumSkippedElements.ugt(VecTy->getNumElements()))
       return nullptr;
@@ -2325,7 +2327,7 @@ public:
                   : nullptr),
         VecTy(PromotableVecTy),
         ElementTy(VecTy ? VecTy->getElementType() : nullptr),
-        ElementSize(VecTy ? DL.getTypeSizeInBits(ElementTy) / 8 : 0),
+        ElementSize(VecTy ? DL.getTypeSizeInBits(ElementTy) / DL.getBitsPerMemoryUnit() : 0),
         PHIUsers(PHIUsers), SelectUsers(SelectUsers),
         IRB(NewAI.getContext(), ConstantFolder()) {
     if (VecTy) {
@@ -2815,7 +2817,7 @@ private:
       assert(NumElements <= VecTy->getNumElements() && "Too many elements!");
 
       Value *Splat =
-          getIntegerSplat(II.getValue(), DL.getTypeSizeInBits(ElementTy) / 8);
+          getIntegerSplat(II.getValue(), DL.getTypeSizeInBits(ElementTy) / DL.getBitsPerMemoryUnit());
       Splat = convertValue(DL, IRB, Splat, ElementTy);
       if (NumElements > 1)
         Splat = getVectorSplat(Splat, NumElements);
@@ -2848,7 +2850,7 @@ private:
       assert(NewBeginOffset == NewAllocaBeginOffset);
       assert(NewEndOffset == NewAllocaEndOffset);
 
-      V = getIntegerSplat(II.getValue(), DL.getTypeSizeInBits(ScalarTy) / 8);
+      V = getIntegerSplat(II.getValue(), DL.getTypeSizeInBits(ScalarTy) / DL.getBitsPerMemoryUnit());
       if (VectorType *AllocaVecTy = dyn_cast<VectorType>(AllocaTy))
         V = getVectorSplat(V, AllocaVecTy->getNumElements());
 
@@ -2990,7 +2992,7 @@ private:
     unsigned EndIndex = VecTy ? getIndex(NewEndOffset) : 0;
     unsigned NumElements = EndIndex - BeginIndex;
     IntegerType *SubIntTy =
-        IntTy ? Type::getIntNTy(IntTy->getContext(), Size * 8) : nullptr;
+        IntTy ? Type::getIntNTy(IntTy->getContext(), Size * DL.getBitsPerMemoryUnit()) : nullptr;
 
     // Reset the other pointer type to match the register type we're going to
     // use, but using the address space of the original other pointer.
@@ -3827,7 +3829,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
     SplitLoads.clear();
 
     IntegerType *Ty = cast<IntegerType>(LI->getType());
-    uint64_t LoadSize = Ty->getBitWidth() / 8;
+    uint64_t LoadSize = Ty->getBitWidth() / DL.getBitsPerMemoryUnit();
     assert(LoadSize > 0 && "Cannot have a zero-sized integer load!");
 
     auto &Offsets = SplitOffsetsMap[LI];
@@ -3950,7 +3952,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
   for (StoreInst *SI : Stores) {
     auto *LI = cast<LoadInst>(SI->getValueOperand());
     IntegerType *Ty = cast<IntegerType>(LI->getType());
-    uint64_t StoreSize = Ty->getBitWidth() / 8;
+    uint64_t StoreSize = Ty->getBitWidth() / DL.getBitsPerMemoryUnit();
     assert(StoreSize > 0 && "Cannot have a zero-sized integer store!");
 
     auto &Offsets = SplitOffsetsMap[SI];
@@ -4107,7 +4109,7 @@ AllocaInst *SROA::rewritePartition(AllocaInst &AI, AllocaSlices &AS,
   // or an i8 array of an appropriate size.
   Type *SliceTy = nullptr;
   const DataLayout &DL = AI.getModule()->getDataLayout();
-  if (Type *CommonUseTy = findCommonType(P.begin(), P.end(), P.endOffset()))
+  if (Type *CommonUseTy = findCommonType(DL, P.begin(), P.end(), P.endOffset()))
     if (DL.getTypeAllocSize(CommonUseTy) >= P.size())
       SliceTy = CommonUseTy;
   if (!SliceTy)

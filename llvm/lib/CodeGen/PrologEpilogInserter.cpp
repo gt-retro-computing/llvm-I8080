@@ -430,10 +430,10 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
              FixedSlot->Reg != Reg)
         ++FixedSlot;
 
-      unsigned Size = RegInfo->getSpillSize(*RC);
+      unsigned Size = RegInfo->getSpillSize(*RC, F.getDataLayout());
       if (FixedSlot == FixedSpillSlots + NumFixedSpillSlots) {
         // Nope, just spill it anywhere convenient.
-        unsigned Align = RegInfo->getSpillAlignment(*RC);
+        unsigned Align = RegInfo->getSpillAlignment(*RC, F.getDataLayout());
         unsigned StackAlign = TFI->getStackAlignment();
 
         // We may not be able to satisfy the desired alignment specification of

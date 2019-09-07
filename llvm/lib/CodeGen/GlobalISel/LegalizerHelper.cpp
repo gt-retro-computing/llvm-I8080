@@ -1993,11 +1993,14 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
         uint64_t LargeSplitSize = PowerOf2Floor(DstTy.getSizeInBits());
         uint64_t SmallSplitSize = DstTy.getSizeInBits() - LargeSplitSize;
 
+        const DataLayout &DL = MI.getMF()->getDataLayout();
+        unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
         MachineFunction &MF = MIRBuilder.getMF();
         MachineMemOperand *LargeMMO =
-            MF.getMachineMemOperand(&MMO, 0, LargeSplitSize / 8);
+            MF.getMachineMemOperand(&MMO, 0, LargeSplitSize / BitsPerUnit);
         MachineMemOperand *SmallMMO = MF.getMachineMemOperand(
-            &MMO, LargeSplitSize / 8, SmallSplitSize / 8);
+            &MMO, LargeSplitSize / BitsPerUnit, SmallSplitSize / BitsPerUnit);
 
         LLT PtrTy = MRI.getType(PtrReg);
         unsigned AnyExtSize = NextPowerOf2(DstTy.getSizeInBits());
@@ -2008,7 +2011,7 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
             MIRBuilder.buildLoad(LargeLdReg, PtrReg, *LargeMMO);
 
         auto OffsetCst =
-            MIRBuilder.buildConstant(LLT::scalar(64), LargeSplitSize / 8);
+            MIRBuilder.buildConstant(LLT::scalar(64), LargeSplitSize / BitsPerUnit);
         Register GEPReg = MRI.createGenericVirtualRegister(PtrTy);
         auto SmallPtr = MIRBuilder.buildGEP(GEPReg, PtrReg, OffsetCst.getReg(0));
         auto SmallLoad = MIRBuilder.buildLoad(SmallLdReg, SmallPtr.getReg(0),
@@ -2077,18 +2080,21 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
     auto ShiftAmt = MIRBuilder.buildConstant(ExtendTy, LargeSplitSize);
     auto SmallVal = MIRBuilder.buildLShr(ExtendTy, ExtVal, ShiftAmt);
 
+    const DataLayout &DL = MI.getMF()->getDataLayout();
+    unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
     // Generate the GEP and truncating stores.
     LLT PtrTy = MRI.getType(PtrReg);
     auto OffsetCst =
-        MIRBuilder.buildConstant(LLT::scalar(64), LargeSplitSize / 8);
+        MIRBuilder.buildConstant(LLT::scalar(64), LargeSplitSize / BitsPerUnit);
     Register GEPReg = MRI.createGenericVirtualRegister(PtrTy);
     auto SmallPtr = MIRBuilder.buildGEP(GEPReg, PtrReg, OffsetCst.getReg(0));
 
     MachineFunction &MF = MIRBuilder.getMF();
     MachineMemOperand *LargeMMO =
-        MF.getMachineMemOperand(&MMO, 0, LargeSplitSize / 8);
+        MF.getMachineMemOperand(&MMO, 0, LargeSplitSize / BitsPerUnit);
     MachineMemOperand *SmallMMO =
-        MF.getMachineMemOperand(&MMO, LargeSplitSize / 8, SmallSplitSize / 8);
+        MF.getMachineMemOperand(&MMO, LargeSplitSize / BitsPerUnit, SmallSplitSize / BitsPerUnit);
     MIRBuilder.buildStore(ExtVal.getReg(0), PtrReg, *LargeMMO);
     MIRBuilder.buildStore(SmallVal.getReg(0), SmallPtr.getReg(0), *SmallMMO);
     MI.eraseFromParent();
@@ -2764,11 +2770,13 @@ LegalizerHelper::reduceLoadStoreWidth(MachineInstr &MI, unsigned TypeIdx,
   auto splitTypePieces = [=](LLT PartTy, SmallVectorImpl<Register> &ValRegs,
                              unsigned Offset) -> unsigned {
     MachineFunction &MF = MIRBuilder.getMF();
+    unsigned BitsPerUnit = MF.getDataLayout().getBitsPerMemoryUnit();
+
     unsigned PartSize = PartTy.getSizeInBits();
     for (unsigned Idx = 0, E = NumParts; Idx != E && Offset < TotalSize;
          Offset += PartSize, ++Idx) {
-      unsigned ByteSize = PartSize / 8;
-      unsigned ByteOffset = Offset / 8;
+      unsigned ByteSize = PartSize / BitsPerUnit;
+      unsigned ByteOffset = Offset / BitsPerUnit;
       Register NewAddrReg;
 
       MIRBuilder.materializeGEP(NewAddrReg, AddrReg, OffsetTy, ByteOffset);

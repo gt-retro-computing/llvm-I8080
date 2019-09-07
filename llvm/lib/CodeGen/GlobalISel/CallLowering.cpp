@@ -356,8 +356,9 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
       }
     } else if (VA.isMemLoc()) {
       MVT VT = MVT::getVT(Args[i].Ty);
+      unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
       unsigned Size = VT == MVT::iPTR ? DL.getPointerSize()
-                                      : alignTo(VT.getSizeInBits(), 8) / 8;
+                                      : alignTo(VT.getSizeInBits(), BitsPerUnit) / BitsPerUnit;
       unsigned Offset = VA.getLocMemOffset();
       MachinePointerInfo MPO;
       Register StackAddr = Handler.getStackAddress(Size, Offset, MPO);

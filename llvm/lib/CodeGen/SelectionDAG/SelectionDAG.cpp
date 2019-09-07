@@ -5686,8 +5686,12 @@ static SDValue getMemsetStringVal(EVT VT, const SDLoc &dl, SelectionDAG &DAG,
       llvm_unreachable("Expected type!");
   }
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   assert(!VT.isVector() && "Can't handle vector type here!");
   unsigned NumVTBits = VT.getSizeInBits();
+
+  // this code is correct using 8 bits because ConstantDataArray stores bytes and we are constructing an APInt.
   unsigned NumVTBytes = NumVTBits / 8;
   unsigned NumBytes = std::min(NumVTBytes, unsigned(Slice.Length));
 
@@ -5828,6 +5832,8 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     }
   }
 
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
   MachineMemOperand::Flags MMOFlags =
       isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone;
   SmallVector<SDValue, 16> OutLoadChains;
@@ -5837,7 +5843,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
   uint64_t SrcOff = 0, DstOff = 0;
   for (unsigned i = 0; i != NumMemOps; ++i) {
     EVT VT = MemOps[i];
-    unsigned VTSize = VT.getSizeInBits() / 8;
+    unsigned VTSize = VT.getSizeInBits() / BitsPerUnit;
     SDValue Value, Store;
 
     if (VTSize > Size) {
@@ -6002,6 +6008,8 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     }
   }
 
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
   MachineMemOperand::Flags MMOFlags =
       isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone;
   uint64_t SrcOff = 0, DstOff = 0;
@@ -6011,7 +6019,7 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
   unsigned NumMemOps = MemOps.size();
   for (unsigned i = 0; i < NumMemOps; i++) {
     EVT VT = MemOps[i];
-    unsigned VTSize = VT.getSizeInBits() / 8;
+    unsigned VTSize = VT.getSizeInBits() / BitsPerUnit;
     SDValue Value;
 
     bool isDereferenceable =
@@ -6031,7 +6039,7 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
   OutChains.clear();
   for (unsigned i = 0; i < NumMemOps; i++) {
     EVT VT = MemOps[i];
-    unsigned VTSize = VT.getSizeInBits() / 8;
+    unsigned VTSize = VT.getSizeInBits() / BitsPerUnit;
     SDValue Store;
 
     Store = DAG.getStore(Chain, dl, LoadValues[i],
@@ -6114,9 +6122,11 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
       LargestVT = MemOps[i];
   SDValue MemSetValue = getMemsetValue(Src, LargestVT, DAG, dl);
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   for (unsigned i = 0; i < NumMemOps; i++) {
     EVT VT = MemOps[i];
-    unsigned VTSize = VT.getSizeInBits() / 8;
+    unsigned VTSize = VT.getSizeInBits() / BitsPerUnit;
     if (VTSize > Size) {
       // Issuing an unaligned load / store pair  that overlaps with the previous
       // pair. Adjust the offset accordingly.
@@ -6140,7 +6150,7 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
         DstPtrInfo.getWithOffset(DstOff), Align,
         isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone);
     OutChains.push_back(Store);
-    DstOff += VT.getSizeInBits() / 8;
+    DstOff += VT.getSizeInBits() / BitsPerUnit;
     Size -= VTSize;
   }
 
@@ -9226,7 +9236,7 @@ std::pair<SDValue, SDValue> SelectionDAG::UnrollVectorOverflowOp(
 
 bool SelectionDAG::areNonVolatileConsecutiveLoads(LoadSDNode *LD,
                                                   LoadSDNode *Base,
-                                                  unsigned Bytes,
+                                                  unsigned Units,
                                                   int Dist) const {
   if (LD->isVolatile() || Base->isVolatile())
     return false;
@@ -9234,8 +9244,10 @@ bool SelectionDAG::areNonVolatileConsecutiveLoads(LoadSDNode *LD,
     return false;
   if (LD->getChain() != Base->getChain())
     return false;
+
+  unsigned BitsPerUnit = getDataLayout().getBitsPerMemoryUnit();
   EVT VT = LD->getValueType(0);
-  if (VT.getSizeInBits() / 8 != Bytes)
+  if (VT.getSizeInBits() / BitsPerUnit != Units)
     return false;
 
   auto BaseLocDecomp = BaseIndexOffset::match(Base, *this);
@@ -9243,7 +9255,7 @@ bool SelectionDAG::areNonVolatileConsecutiveLoads(LoadSDNode *LD,
 
   int64_t Offset = 0;
   if (BaseLocDecomp.equalBaseIndex(LocDecomp, *this, Offset))
-    return (Dist * Bytes == Offset);
+    return (Dist * Units == Offset);
   return false;
 }
 

@@ -149,8 +149,10 @@ static void scalarizeMaskedLoad(CallInst *CI, bool &ModifiedDT) {
     return;
   }
 
+  const DataLayout &DL = CI->getModule()->getDataLayout();
+
   // Adjust alignment for the scalar instruction.
-  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / 8);
+  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / DL.getBitsPerMemoryUnit());
   // Bitcast %addr from i8* to EltTy*
   Type *NewPtrType =
       EltTy->getPointerTo(Ptr->getType()->getPointerAddressSpace());
@@ -285,8 +287,10 @@ static void scalarizeMaskedStore(CallInst *CI, bool &ModifiedDT) {
     return;
   }
 
+  const DataLayout &DL = CI->getModule()->getDataLayout();
+
   // Adjust alignment for the scalar instruction.
-  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / 8);
+  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / DL.getBitsPerMemoryUnit());
   // Bitcast %addr from i8* to EltTy*
   Type *NewPtrType =
       EltTy->getPointerTo(Ptr->getType()->getPointerAddressSpace());

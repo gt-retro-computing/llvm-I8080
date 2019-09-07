@@ -48,6 +48,7 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &DL) {
   StructSize = 0;
   IsPadded = false;
   NumElements = ST->getNumElements();
+  BitsPerUnit = DL.getBitsPerMemoryUnit();
 
   // Loop over each of the elements, placing them in memory.
   for (unsigned i = 0, e = NumElements; i != e; ++i) {
@@ -81,6 +82,9 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &DL) {
 /// getElementContainingOffset - Given a valid offset into the structure,
 /// return the structure index that contains it.
 unsigned StructLayout::getElementContainingOffset(uint64_t Offset) const {
+  assert(BitsPerUnit % 8 == 0 && "Assumption failed, cannot calculate offset from bytes");
+  Offset /= (BitsPerUnit / 8);
+
   const uint64_t *SI =
     std::upper_bound(&MemberOffsets[0], &MemberOffsets[NumElements], Offset);
   assert(SI != &MemberOffsets[0] && "Offset not in structure type!");
@@ -236,6 +240,16 @@ static unsigned getAddrSpace(StringRef R) {
 
 void DataLayout::parseSpecifier(StringRef Desc) {
   StringRepresentation = Desc;
+  BitsPerMemoryUnit = 8;
+  bool usedBitsPerUnit = false;
+
+  auto inMemUnits = [&](unsigned Bits) {
+    usedBitsPerUnit = true;
+    if (Bits % BitsPerMemoryUnit)
+      report_fatal_error("number of bits must be a memory unit (usually 8 bit) width multiple");
+    return Bits / BitsPerMemoryUnit;
+  };
+
   while (!Desc.empty()) {
     // Split at '-'.
     std::pair<StringRef, StringRef> Split = split(Desc, '-');
@@ -286,7 +300,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
         report_fatal_error(
             "Missing size specification for pointer in datalayout string");
       Split = split(Rest, ':');
-      unsigned PointerMemSize = inBytes(getInt(Tok));
+      unsigned PointerMemSize = inMemUnits(getInt(Tok));
       if (!PointerMemSize)
         report_fatal_error("Invalid pointer size of 0 bytes");
 
@@ -295,7 +309,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
         report_fatal_error(
             "Missing alignment specification for pointer in datalayout string");
       Split = split(Rest, ':');
-      unsigned PointerABIAlign = inBytes(getInt(Tok));
+      unsigned PointerABIAlign = inMemUnits(getInt(Tok));
       if (!isPowerOf2_64(PointerABIAlign))
         report_fatal_error(
             "Pointer ABI alignment must be a power of 2");
@@ -308,7 +322,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       unsigned PointerPrefAlign = PointerABIAlign;
       if (!Rest.empty()) {
         Split = split(Rest, ':');
-        PointerPrefAlign = inBytes(getInt(Tok));
+        PointerPrefAlign = inMemUnits(getInt(Tok));
         if (!isPowerOf2_64(PointerPrefAlign))
           report_fatal_error(
             "Pointer preferred alignment must be a power of 2");
@@ -316,7 +330,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
         // Now read the index. It is the second optional parameter here.
         if (!Rest.empty()) {
           Split = split(Rest, ':');
-          IndexSize = inBytes(getInt(Tok));
+          IndexSize = inMemUnits(getInt(Tok));
           if (!IndexSize)
             report_fatal_error("Invalid index size of 0 bytes");
         }
@@ -350,7 +364,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
         report_fatal_error(
             "Missing alignment specification in datalayout string");
       Split = split(Rest, ':');
-      unsigned ABIAlign = inBytes(getInt(Tok));
+      unsigned ABIAlign = inMemUnits(getInt(Tok));
       if (AlignType != AGGREGATE_ALIGN && !ABIAlign)
         report_fatal_error(
             "ABI alignment specification must be >0 for non-aggregate types");
@@ -359,7 +373,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       unsigned PrefAlign = ABIAlign;
       if (!Rest.empty()) {
         Split = split(Rest, ':');
-        PrefAlign = inBytes(getInt(Tok));
+        PrefAlign = inMemUnits(getInt(Tok));
       }
 
       setAlignment(AlignType, ABIAlign, PrefAlign, Size);
@@ -379,7 +393,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       }
       break;
     case 'S': { // Stack natural alignment.
-      uint64_t Alignment = inBytes(getInt(Tok));
+      uint64_t Alignment = inMemUnits(getInt(Tok));
       if (Alignment != 0 && !llvm::isPowerOf2_64(Alignment))
         report_fatal_error("Alignment is neither 0 nor a power of 2");
       StackNaturalAlign = MaybeAlign(Alignment);
@@ -389,6 +403,11 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       uint64_t Bits = getInt(Tok);
       if (!llvm::isPowerOf2_64(Bits))
         report_fatal_error("Bits per memory is not a power of 2");
+
+      if (usedBitsPerUnit) {
+        report_fatal_error("b[num] must be specified before any other specifiers that rely on it");
+      }
+
       BitsPerMemoryUnit = Bits;
       break;
     }
@@ -405,7 +424,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
                            "datalayout string");
       }
       Tok = Tok.substr(1);
-      uint64_t Alignment = inBytes(getInt(Tok));
+      uint64_t Alignment = inMemUnits(getInt(Tok));
       if (Alignment != 0 && !llvm::isPowerOf2_64(Alignment))
         report_fatal_error("Alignment is neither 0 nor a power of 2");
       FunctionPtrAlign = MaybeAlign(Alignment);

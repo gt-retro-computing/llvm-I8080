@@ -272,16 +272,16 @@ public:
     return getRegClassInfo(RC).RegSize;
   }
 
-  /// Return the size in bytes of the stack slot allocated to hold a spilled
+  /// Return the size in memory units of the stack slot allocated to hold a spilled
   /// copy of a register from class RC.
-  unsigned getSpillSize(const TargetRegisterClass &RC) const {
-    return getRegClassInfo(RC).SpillSize / 8;
+  unsigned getSpillSize(const TargetRegisterClass &RC, const DataLayout &DL) const {
+    return getRegClassInfo(RC).SpillSize / DL.getBitsPerMemoryUnit();
   }
 
-  /// Return the minimum required alignment in bytes for a spill slot for
+  /// Return the minimum required alignment in memory units for a spill slot for
   /// a register of this class.
-  unsigned getSpillAlignment(const TargetRegisterClass &RC) const {
-    return getRegClassInfo(RC).SpillAlignment / 8;
+  unsigned getSpillAlignment(const TargetRegisterClass &RC, const DataLayout &DL) const {
+    return getRegClassInfo(RC).SpillAlignment / DL.getBitsPerMemoryUnit();
   }
 
   /// Return true if the given TargetRegisterClass has the ValueType T.

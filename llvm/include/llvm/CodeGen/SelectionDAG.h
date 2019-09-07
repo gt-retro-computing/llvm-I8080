@@ -1617,7 +1617,7 @@ public:
   /// 'Bytes' bytes from a location that is 'Dist' units away from the
   /// location that the 'Base' load is loading from.
   bool areNonVolatileConsecutiveLoads(LoadSDNode *LD, LoadSDNode *Base,
-                                      unsigned Bytes, int Dist) const;
+                                      unsigned Units, int Dist) const;
 
   /// Infer alignment of a load / store address. Return 0 if
   /// it cannot be inferred.
