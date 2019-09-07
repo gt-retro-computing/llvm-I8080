@@ -15,7 +15,7 @@ class LLVM_LIBRARY_VISIBILITY LC2200TargetInfo : public TargetInfo {
   static const TargetInfo::GCCRegAlias GCCRegAliases[];
   static const char *const GCCRegNames[];
 public:
-  LC2200TargetInfo(const llvm::Triple &Triple, const TargetOptions &) : TargetInfo(Triple) {
+  LC2200TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts) : TargetInfo(Triple) {
     resetDataLayout("e" // Little Endian
                     "-m:e"
                     "-b32" // Byte Size ??? Like mim accessibility
@@ -45,6 +45,8 @@ public:
   }
 
   const char *getClobbers() const override { return ""; }
+
+  void setSupportedOpenCLOpts() override;
 };
 }
 }

@@ -43,5 +43,6 @@ ArrayRef<TargetInfo::GCCRegAlias> LC2200TargetInfo::getGCCRegAliases() const {
 
 
 void LC2200TargetInfo::getTargetDefines(const clang::LangOptions &Opts, clang::MacroBuilder &Builder) const {
-
 }
+
+

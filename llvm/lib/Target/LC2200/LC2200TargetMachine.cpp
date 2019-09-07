@@ -32,7 +32,6 @@ LC2200TargetMachine::LC2200TargetMachine(const llvm::Target &T, const llvm::Trip
                 TT, CPU, FS, Options, RM.getValueOr(Reloc::Model::Static),
                 CM.getValueOr(CodeModel::Model::Tiny), OL
         ), TLOF(std::make_unique<TargetLoweringObjectFileELF>()), DefaultSubtarget(TT, CPU, FS, *this) {
-    std::cout << "Create Triple: "  << TT.str() << "\n";
     initAsmInfo();
 }
 

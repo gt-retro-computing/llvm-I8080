@@ -94,19 +94,6 @@ void LC2200FrameLowering::adjustReg(MachineBasicBlock &MBB,
             .setMIFlag(Flag);
   } else if (isInt<32>(Val)) {
     llvm_unreachable("lol can't do yet");
-//    unsigned Opc = RISCV::ADD;
-//    bool isSub = Val < 0;
-//    if (isSub) {
-//      Val = -Val;
-//      Opc = RISCV::SUB;
-//    }
-//
-//    Register ScratchReg = MRI.createVirtualRegister(&RISCV::GPRRegClass);
-//    TII->movImm32(MBB, MBBI, DL, ScratchReg, Val, Flag);
-//    BuildMI(MBB, MBBI, DL, TII->get(Opc), DestReg)
-//            .addReg(SrcReg)
-//            .addReg(ScratchReg, RegState::Kill)
-//            .setMIFlag(Flag);
   } else {
     report_fatal_error("adjustReg cannot yet handle adjustments >32 bits");
   }
