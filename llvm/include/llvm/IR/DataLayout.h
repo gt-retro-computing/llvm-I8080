@@ -124,6 +124,10 @@ private:
   MaybeAlign StackNaturalAlign;
   unsigned ProgramAddrSpace;
 
+  /// the number of bits per unit of memory.
+  /// The default is 8 (8 bits = 1 byte = 1 memory cell) so this doesn't usually need to be set.
+  unsigned BitsPerMemoryUnit;
+
   MaybeAlign FunctionPtrAlign;
   FunctionPtrAlignType TheFunctionPtrAlignType;
 
@@ -211,6 +215,7 @@ public:
     AllocaAddrSpace = DL.AllocaAddrSpace;
     StackNaturalAlign = DL.StackNaturalAlign;
     FunctionPtrAlign = DL.FunctionPtrAlign;
+    BitsPerMemoryUnit = DL.BitsPerMemoryUnit;
     TheFunctionPtrAlignType = DL.TheFunctionPtrAlignType;
     ProgramAddrSpace = DL.ProgramAddrSpace;
     ManglingMode = DL.ManglingMode;
@@ -362,6 +367,10 @@ public:
 
   // Index size used for address calculation.
   unsigned getIndexSize(unsigned AS) const;
+
+  unsigned getBitsPerMemoryUnit() const {
+    return BitsPerMemoryUnit;
+  }
 
   /// Return the address spaces containing non-integral pointers.  Pointers in
   /// this address space don't have a well-defined bitwise representation.
