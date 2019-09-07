@@ -6693,7 +6693,7 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
 
 template <typename T> static bool isRecordWithAttr(QualType Type) {
   if (auto *RD = Type->getAsCXXRecordDecl())
-    return RD->getCanonicalDecl()->hasAttr<T>();
+    return RD->hasAttr<T>();
   return false;
 }
 
@@ -6775,6 +6775,10 @@ static bool shouldTrackFirstArgument(const FunctionDecl *FD) {
 static void handleGslAnnotatedTypes(IndirectLocalPath &Path, Expr *Call,
                                     LocalVisitor Visit) {
   auto VisitPointerArg = [&](const Decl *D, Expr *Arg) {
+    // We are not interested in the temporary base objects of gsl Pointers:
+    //   Temp().ptr; // Here ptr might not dangle.
+    if (isa<MemberExpr>(Arg->IgnoreImpCasts()))
+      return;
     Path.push_back({IndirectLocalPathEntry::GslPointerInit, Arg, D});
     if (Arg->isGLValue())
       visitLocalsRetainedByReferenceBinding(Path, Arg, RK_ReferenceBinding,
@@ -6806,7 +6810,7 @@ static void handleGslAnnotatedTypes(IndirectLocalPath &Path, Expr *Call,
 
   if (auto *CCE = dyn_cast<CXXConstructExpr>(Call)) {
     const auto *Ctor = CCE->getConstructor();
-    const CXXRecordDecl *RD = Ctor->getParent()->getCanonicalDecl();
+    const CXXRecordDecl *RD = Ctor->getParent();
     if (CCE->getNumArgs() > 0 && RD->hasAttr<PointerAttr>())
       VisitPointerArg(Ctor->getParamDecl(0), CCE->getArgs()[0]);
   }
@@ -7294,6 +7298,8 @@ static SourceRange nextPathEntryRange(const IndirectLocalPath &Path, unsigned I,
 static bool pathOnlyInitializesGslPointer(IndirectLocalPath &Path) {
   for (auto It = Path.rbegin(), End = Path.rend(); It != End; ++It) {
     if (It->Kind == IndirectLocalPathEntry::VarInit)
+      continue;
+    if (It->Kind == IndirectLocalPathEntry::AddressOf)
       continue;
     return It->Kind == IndirectLocalPathEntry::GslPointerInit;
   }

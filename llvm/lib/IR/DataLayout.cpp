@@ -184,6 +184,7 @@ void DataLayout::reset(StringRef Desc) {
   AllocaAddrSpace = 0;
   StackNaturalAlign.reset();
   ProgramAddrSpace = 0;
+  BitsPerMemoryUnit = 8;
   FunctionPtrAlign.reset();
   TheFunctionPtrAlignType = FunctionPtrAlignType::Independent;
   ManglingMode = MM_None;
@@ -384,6 +385,13 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       StackNaturalAlign = MaybeAlign(Alignment);
       break;
     }
+    case 'b': { // Bits per unit of memory
+      uint64_t Bits = getInt(Tok);
+      if (!llvm::isPowerOf2_64(Bits))
+        report_fatal_error("Bits per memory is not a power of 2");
+      BitsPerMemoryUnit = Bits;
+      break;
+    }
     case 'F': {
       switch (Tok.front()) {
       case 'i':
@@ -457,6 +465,7 @@ bool DataLayout::operator==(const DataLayout &Other) const {
              StackNaturalAlign == Other.StackNaturalAlign &&
              ProgramAddrSpace == Other.ProgramAddrSpace &&
              FunctionPtrAlign == Other.FunctionPtrAlign &&
+             BitsPerMemoryUnit == Other.BitsPerMemoryUnit &&
              TheFunctionPtrAlignType == Other.TheFunctionPtrAlignType &&
              ManglingMode == Other.ManglingMode &&
              LegalIntWidths == Other.LegalIntWidths &&
