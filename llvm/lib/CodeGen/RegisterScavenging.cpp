@@ -464,8 +464,8 @@ RegScavenger::spill(Register Reg, const TargetRegisterClass &RC, int SPAdj,
   // the requirements of the class RC.
   const MachineFunction &MF = *Before->getMF();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-  unsigned NeedSize = TRI->getSpillSize(RC);
-  unsigned NeedAlign = TRI->getSpillAlignment(RC);
+  unsigned NeedSize = TRI->getSpillSize(RC, MF.getDataLayout());
+  unsigned NeedAlign = TRI->getSpillAlignment(RC, MF.getDataLayout());
 
   unsigned SI = Scavenged.size(), Diff = std::numeric_limits<unsigned>::max();
   int FIB = MFI.getObjectIndexBegin(), FIE = MFI.getObjectIndexEnd();

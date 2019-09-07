@@ -116,7 +116,7 @@ bool UnrolledInstAnalyzer::visitLoad(LoadInst &I) {
   if (CDS->getElementType() != I.getType())
     return false;
 
-  unsigned ElemSize = CDS->getElementType()->getPrimitiveSizeInBits() / 8U;
+  unsigned ElemSize = CDS->getElementType()->getPrimitiveSizeInBits() / SE.getDataLayout().getBitsPerMemoryUnit();
   if (SimplifiedAddrOp->getValue().getActiveBits() > 64)
     return false;
   int64_t SimplifiedAddrOpV = SimplifiedAddrOp->getSExtValue();

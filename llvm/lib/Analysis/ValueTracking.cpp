@@ -3513,8 +3513,8 @@ bool llvm::getConstantDataArrayInfo(const Value *V,
       Array = nullptr;
     } else {
       const DataLayout &DL = GV->getParent()->getDataLayout();
-      uint64_t SizeInBytes = DL.getTypeStoreSize(GVTy);
-      uint64_t Length = SizeInBytes / (ElementSize / 8);
+      uint64_t SizeInMemoryUnits = DL.getTypeStoreSize(GVTy);
+      uint64_t Length = SizeInMemoryUnits / (ElementSize / DL.getBitsPerMemoryUnit());
       if (Length <= Offset)
         return false;
 

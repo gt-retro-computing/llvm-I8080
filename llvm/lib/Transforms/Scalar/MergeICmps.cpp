@@ -420,10 +420,11 @@ class BCECmpChain {
 private:
   static bool IsContiguous(const BCECmpBlock &First,
                            const BCECmpBlock &Second) {
+    unsigned BitsPerUnit = First.BB->getModule()->getDataLayout().getBitsPerMemoryUnit();
     return First.Lhs().BaseId == Second.Lhs().BaseId &&
            First.Rhs().BaseId == Second.Rhs().BaseId &&
-           First.Lhs().Offset + First.SizeBits() / 8 == Second.Lhs().Offset &&
-           First.Rhs().Offset + First.SizeBits() / 8 == Second.Rhs().Offset;
+           First.Lhs().Offset + First.SizeBits() / BitsPerUnit == Second.Lhs().Offset &&
+           First.Rhs().Offset + First.SizeBits() / BitsPerUnit == Second.Rhs().Offset;
   }
 
   PHINode &Phi_;
@@ -539,11 +540,12 @@ void BCECmpChain::dump() const {
   errs() << " edge [color=black];\n";
   for (size_t I = 0; I < Comparisons_.size(); ++I) {
     const auto &Comparison = Comparisons_[I];
+    unsigned BitsPerUnit = Comparison.BB->getModule()->getDataLayout().getBitsPerMemoryUnit();
     errs() << " \"" << I << "\" [label=\"%"
            << Comparison.Lhs().Base()->getName() << " + "
            << Comparison.Lhs().Offset << " == %"
            << Comparison.Rhs().Base()->getName() << " + "
-           << Comparison.Rhs().Offset << " (" << (Comparison.SizeBits() / 8)
+           << Comparison.Rhs().Offset << " (" << (Comparison.SizeBits() / BitsPerUnit)
            << " bytes)\"];\n";
     const Value *const Val = Phi_.getIncomingValueForBlock(Comparison.BB);
     if (I > 0) errs() << " \"" << (I - 1) << "\" -> \"" << I << "\";\n";
@@ -651,7 +653,7 @@ static BasicBlock *mergeComparisons(ArrayRef<BCECmpBlock> Comparisons,
     const auto &DL = Phi.getModule()->getDataLayout();
     Value *const MemCmpCall = emitMemCmp(
         Lhs, Rhs,
-        ConstantInt::get(DL.getIntPtrType(Context), TotalSizeBits / 8), Builder,
+        ConstantInt::get(DL.getIntPtrType(Context), TotalSizeBits / DL.getBitsPerMemoryUnit()), Builder,
         DL, &TLI);
     IsEqual = Builder.CreateICmpEQ(
         MemCmpCall, ConstantInt::get(Type::getInt32Ty(Context), 0));

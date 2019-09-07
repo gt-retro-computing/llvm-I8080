@@ -186,9 +186,11 @@ static int analyzeLoadFromClobberingWrite(Type *LoadTy, Value *LoadPtr,
   // must have gotten confused.
   uint64_t LoadSize = DL.getTypeSizeInBits(LoadTy);
 
-  if ((WriteSizeInBits & 7) | (LoadSize & 7))
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
+  if ((WriteSizeInBits % BitsPerUnit != 0) || (LoadSize % BitsPerUnit != 0))
     return -1;
-  uint64_t StoreSize = WriteSizeInBits / 8; // Convert to bytes.
+  uint64_t StoreSize = WriteSizeInBits / BitsPerUnit; // Convert to memory units.
   LoadSize /= 8;
 
   bool isAAFailure = false;
@@ -355,28 +357,30 @@ static T *getStoreValueForLoadHelper(T *SrcVal, unsigned Offset, Type *LoadTy,
     return SrcVal;
   }
 
-  uint64_t StoreSize = (DL.getTypeSizeInBits(SrcVal->getType()) + 7) / 8;
-  uint64_t LoadSize = (DL.getTypeSizeInBits(LoadTy) + 7) / 8;
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+
+  uint64_t StoreSize = (DL.getTypeSizeInBits(SrcVal->getType()) + (BitsPerUnit - 1)) / BitsPerUnit;
+  uint64_t LoadSize = (DL.getTypeSizeInBits(LoadTy) + (BitsPerUnit - 1)) / BitsPerUnit;
   // Compute which bits of the stored value are being used by the load.  Convert
   // to an integer type to start with.
   if (SrcVal->getType()->isPtrOrPtrVectorTy())
     SrcVal = Helper.CreatePtrToInt(SrcVal, DL.getIntPtrType(SrcVal->getType()));
   if (!SrcVal->getType()->isIntegerTy())
-    SrcVal = Helper.CreateBitCast(SrcVal, IntegerType::get(Ctx, StoreSize * 8));
+    SrcVal = Helper.CreateBitCast(SrcVal, IntegerType::get(Ctx, StoreSize * BitsPerUnit));
 
   // Shift the bits to the least significant depending on endianness.
   unsigned ShiftAmt;
   if (DL.isLittleEndian())
-    ShiftAmt = Offset * 8;
+    ShiftAmt = Offset * BitsPerUnit;
   else
-    ShiftAmt = (StoreSize - LoadSize - Offset) * 8;
+    ShiftAmt = (StoreSize - LoadSize - Offset) * BitsPerUnit;
   if (ShiftAmt)
     SrcVal = Helper.CreateLShr(SrcVal,
                                ConstantInt::get(SrcVal->getType(), ShiftAmt));
 
   if (LoadSize != StoreSize)
     SrcVal = Helper.CreateTruncOrBitCast(SrcVal,
-                                         IntegerType::get(Ctx, LoadSize * 8));
+                                         IntegerType::get(Ctx, LoadSize * BitsPerUnit));
   return SrcVal;
 }
 
@@ -464,7 +468,8 @@ T *getMemInstValueForLoadHelper(MemIntrinsic *SrcInst, unsigned Offset,
                                 Type *LoadTy, HelperClass &Helper,
                                 const DataLayout &DL) {
   LLVMContext &Ctx = LoadTy->getContext();
-  uint64_t LoadSize = DL.getTypeSizeInBits(LoadTy) / 8;
+  unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
+  uint64_t LoadSize = DL.getTypeSizeInBits(LoadTy) / BitsPerUnit;
 
   // We know that this method is only called when the mem transfer fully
   // provides the bits for the load.
@@ -474,7 +479,7 @@ T *getMemInstValueForLoadHelper(MemIntrinsic *SrcInst, unsigned Offset,
     T *Val = cast<T>(MSI->getValue());
     if (LoadSize != 1)
       Val =
-          Helper.CreateZExtOrBitCast(Val, IntegerType::get(Ctx, LoadSize * 8));
+          Helper.CreateZExtOrBitCast(Val, IntegerType::get(Ctx, LoadSize * BitsPerUnit));
     T *OneElt = Val;
 
     // Splat the value out to the right number of bits.
@@ -482,14 +487,14 @@ T *getMemInstValueForLoadHelper(MemIntrinsic *SrcInst, unsigned Offset,
       // If we can double the number of bytes set, do it.
       if (NumBytesSet * 2 <= LoadSize) {
         T *ShVal = Helper.CreateShl(
-            Val, ConstantInt::get(Val->getType(), NumBytesSet * 8));
+            Val, ConstantInt::get(Val->getType(), NumBytesSet * BitsPerUnit));
         Val = Helper.CreateOr(Val, ShVal);
         NumBytesSet <<= 1;
         continue;
       }
 
       // Otherwise insert one byte at a time.
-      T *ShVal = Helper.CreateShl(Val, ConstantInt::get(Val->getType(), 1 * 8));
+      T *ShVal = Helper.CreateShl(Val, ConstantInt::get(Val->getType(), 1 * BitsPerUnit));
       Val = Helper.CreateOr(OneElt, ShVal);
       ++NumBytesSet;
     }

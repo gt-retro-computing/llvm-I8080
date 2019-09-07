@@ -365,8 +365,9 @@ void RISCVFrameLowering::processFunctionBeforeFrameFinalized(
   // still needs an emergency spill slot for branch relaxation. This case
   // would currently be missed.
   if (!isInt<11>(MFI.estimateStackSize(MF))) {
+    const DataLayout &DL = MF.getDataLayout();
     int RegScavFI = MFI.CreateStackObject(
-        RegInfo->getSpillSize(*RC), RegInfo->getSpillAlignment(*RC), false);
+            RegInfo->getSpillSize(*RC, DL), RegInfo->getSpillAlignment(*RC, DL), false);
     RS->addScavengingFrameIndex(RegScavFI);
   }
 }

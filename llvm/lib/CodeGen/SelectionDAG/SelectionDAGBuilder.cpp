@@ -2484,8 +2484,9 @@ static SDValue getLoadStackGuard(SelectionDAG &DAG, const SDLoc &DL,
     MachinePointerInfo MPInfo(Global);
     auto Flags = MachineMemOperand::MOLoad | MachineMemOperand::MOInvariant |
                  MachineMemOperand::MODereferenceable;
+    unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
     MachineMemOperand *MemRef = MF.getMachineMemOperand(
-        MPInfo, Flags, PtrTy.getSizeInBits() / 8, DAG.getEVTAlignment(PtrTy));
+        MPInfo, Flags, PtrTy.getSizeInBits() / BitsPerUnit, DAG.getEVTAlignment(PtrTy));
     DAG.setNodeMemRefs(Node, {MemRef});
   }
   if (PtrTy != PtrMemTy)
@@ -4634,8 +4635,10 @@ void SelectionDAGBuilder::visitAtomicLoad(const LoadInst &I) {
   EVT VT = TLI.getValueType(DAG.getDataLayout(), I.getType());
   EVT MemVT = TLI.getMemValueType(DAG.getDataLayout(), I.getType());
 
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
   if (!TLI.supportsUnalignedAtomics() &&
-      I.getAlignment() < MemVT.getSizeInBits() / 8)
+      I.getAlignment() < MemVT.getSizeInBits() / BitsPerUnit)
     report_fatal_error("Cannot generate unaligned atomic load");
 
   auto Flags = MachineMemOperand::MOLoad;
@@ -4682,7 +4685,9 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
   EVT MemVT =
       TLI.getMemValueType(DAG.getDataLayout(), I.getValueOperand()->getType());
 
-  if (I.getAlignment() < MemVT.getSizeInBits() / 8)
+  unsigned BitsPerUnit = DAG.getDataLayout().getBitsPerMemoryUnit();
+
+  if (I.getAlignment() < MemVT.getSizeInBits() / BitsPerUnit)
     report_fatal_error("Cannot generate unaligned atomic store");
 
   auto Flags = MachineMemOperand::MOStore;
@@ -8968,6 +8973,7 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
   ComputeValueVTs(*this, DL, CLI.RetTy, RetTys, &Offsets);
 
   if (CLI.IsPostTypeLegalization) {
+    unsigned BitsPerUnit = DL.getBitsPerMemoryUnit();
     // If we are lowering a libcall after legalization, split the return type.
     SmallVector<EVT, 4> OldRetTys;
     SmallVector<uint64_t, 4> OldOffsets;
@@ -8979,7 +8985,7 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
       uint64_t Offset = OldOffsets[i];
       MVT RegisterVT = getRegisterType(CLI.RetTy->getContext(), RetVT);
       unsigned NumRegs = getNumRegisters(CLI.RetTy->getContext(), RetVT);
-      unsigned RegisterVTByteSZ = RegisterVT.getSizeInBits() / 8;
+      unsigned RegisterVTByteSZ = RegisterVT.getSizeInBits() / BitsPerUnit;
       RetTys.append(NumRegs, RegisterVT);
       for (unsigned j = 0; j != NumRegs; ++j)
         Offsets.push_back(Offset + j * RegisterVTByteSZ);

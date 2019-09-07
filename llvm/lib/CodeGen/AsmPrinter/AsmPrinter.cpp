@@ -2461,16 +2461,18 @@ static void emitGlobalConstantFP(APFloat APF, Type *ET, AsmPrinter &AP) {
     AP.OutStreamer->GetCommentOS() << ' ' << StrVal << '\n';
   }
 
+  const DataLayout &DL = AP.getDataLayout();
+
   // Now iterate through the APInt chunks, emitting them in endian-correct
   // order, possibly with a smaller chunk at beginning/end (e.g. for x87 80-bit
   // floats).
-  unsigned NumBytes = API.getBitWidth() / 8;
+  unsigned NumBytes = API.getBitWidth() / DL.getBitsPerMemoryUnit();
   unsigned TrailingBytes = NumBytes % sizeof(uint64_t);
   const uint64_t *p = API.getRawData();
 
   // PPC's long double has odd notions of endianness compared to how LLVM
   // handles it: p[0] goes first for *big* endian on PPC.
-  if (AP.getDataLayout().isBigEndian() && !ET->isPPC_FP128Ty()) {
+  if (DL.isBigEndian() && !ET->isPPC_FP128Ty()) {
     int Chunk = API.getNumWords() - 1;
 
     if (TrailingBytes)
@@ -2488,7 +2490,6 @@ static void emitGlobalConstantFP(APFloat APF, Type *ET, AsmPrinter &AP) {
   }
 
   // Emit the tail padding for the long double.
-  const DataLayout &DL = AP.getDataLayout();
   AP.OutStreamer->EmitZeros(DL.getTypeAllocSize(ET) - DL.getTypeStoreSize(ET));
 }
 

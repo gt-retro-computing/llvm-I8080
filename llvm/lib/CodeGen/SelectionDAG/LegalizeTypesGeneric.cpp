@@ -267,7 +267,7 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
                    LD->getMemOperand()->getFlags(), AAInfo);
 
   // Increment the pointer to the other half.
-  unsigned IncrementSize = NVT.getSizeInBits() / 8;
+  unsigned IncrementSize = NVT.getSizeInBits() / DAG.getDataLayout().getBitsPerMemoryUnit();
   Ptr = DAG.getNode(ISD::ADD, dl, Ptr.getValueType(), Ptr,
                     DAG.getConstant(IncrementSize, dl, Ptr.getValueType()));
   Hi = DAG.getLoad(NVT, dl, Chain, Ptr,
@@ -473,7 +473,7 @@ SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
   AAMDNodes AAInfo = St->getAAInfo();
 
   assert(NVT.isByteSized() && "Expanded type not byte sized!");
-  unsigned IncrementSize = NVT.getSizeInBits() / 8;
+  unsigned IncrementSize = NVT.getSizeInBits() / DAG.getDataLayout().getBitsPerMemoryUnit();
 
   SDValue Lo, Hi;
   GetExpandedOp(St->getValue(), Lo, Hi);

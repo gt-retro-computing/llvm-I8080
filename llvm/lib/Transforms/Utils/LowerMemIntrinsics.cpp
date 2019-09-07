@@ -14,12 +14,12 @@
 
 using namespace llvm;
 
-static unsigned getLoopOperandSizeInBytes(Type *Type) {
+static unsigned getLoopOperandSizeInBytes(const DataLayout &DL, Type *Type) {
   if (VectorType *VTy = dyn_cast<VectorType>(Type)) {
-    return VTy->getBitWidth() / 8;
+    return VTy->getBitWidth() / DL.getBitsPerMemoryUnit();
   }
 
-  return Type->getPrimitiveSizeInBits() / 8;
+  return Type->getPrimitiveSizeInBits() / DL.getBitsPerMemoryUnit();
 }
 
 void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
@@ -35,12 +35,13 @@ void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
   BasicBlock *PostLoopBB = nullptr;
   Function *ParentFunc = PreLoopBB->getParent();
   LLVMContext &Ctx = PreLoopBB->getContext();
+  const DataLayout &DL = PreLoopBB->getModule()->getDataLayout();
 
   Type *TypeOfCopyLen = CopyLen->getType();
   Type *LoopOpType =
       TTI.getMemcpyLoopLoweringType(Ctx, CopyLen, SrcAlign, DestAlign);
 
-  unsigned LoopOpSize = getLoopOperandSizeInBytes(LoopOpType);
+  unsigned LoopOpSize = getLoopOperandSizeInBytes(DL, LoopOpType);
   uint64_t LoopEndCount = CopyLen->getZExtValue() / LoopOpSize;
 
   unsigned SrcAS = cast<PointerType>(SrcAddr->getType())->getAddressSpace();
@@ -103,7 +104,7 @@ void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
 
     for (auto OpTy : RemainingOps) {
       // Calaculate the new index
-      unsigned OperandSize = getLoopOperandSizeInBytes(OpTy);
+      unsigned OperandSize = getLoopOperandSizeInBytes(DL, OpTy);
       uint64_t GepIndex = BytesCopied / OperandSize;
       assert(GepIndex * OperandSize == BytesCopied &&
              "Division should have no Remainder!");
@@ -144,10 +145,11 @@ void llvm::createMemCpyLoopUnknownSize(Instruction *InsertBefore,
 
   Function *ParentFunc = PreLoopBB->getParent();
   LLVMContext &Ctx = PreLoopBB->getContext();
+  const DataLayout &DL = PreLoopBB->getModule()->getDataLayout();
 
   Type *LoopOpType =
       TTI.getMemcpyLoopLoweringType(Ctx, CopyLen, SrcAlign, DestAlign);
-  unsigned LoopOpSize = getLoopOperandSizeInBytes(LoopOpType);
+  unsigned LoopOpSize = getLoopOperandSizeInBytes(DL, LoopOpType);
 
   IRBuilder<> PLBuilder(PreLoopBB->getTerminator());
 

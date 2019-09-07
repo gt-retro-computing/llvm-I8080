@@ -286,7 +286,7 @@ unsigned MemoryDependenceResults::getLoadLoadClobberFullWidthSize(
 
   // This is the size of the load to try.  Start with the next larger power of
   // two.
-  unsigned NewLoadByteSize = LI->getType()->getPrimitiveSizeInBits() / 8U;
+  unsigned NewLoadByteSize = LI->getType()->getPrimitiveSizeInBits() / DL.getBitsPerMemoryUnit();
   NewLoadByteSize = NextPowerOf2(NewLoadByteSize);
 
   while (true) {

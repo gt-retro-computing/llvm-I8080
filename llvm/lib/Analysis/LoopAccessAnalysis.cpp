@@ -182,7 +182,7 @@ const SCEV *llvm::replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
 ///     N = (TripCount > 0) ? RoundDown(TripCount -1 , VF) : 0
 /// Start and End points are calculated in the following way:
 /// Start = UMIN(A, B) ; End = UMAX(A, B) + SizeOfElt,
-/// where SizeOfElt is the size of single memory access in bytes.
+/// where SizeOfElt is the size of single memory access in memory units.
 ///
 /// There is no conflict when the intervals are disjoint:
 /// NoConflict = (P2.Start >= P1.End) || (P1.Start >= P2.End)
@@ -222,7 +222,7 @@ void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
     }
     // Add the size of the pointed element to ScEnd.
     unsigned EltSize =
-      Ptr->getType()->getPointerElementType()->getScalarSizeInBits() / 8;
+      Ptr->getType()->getPointerElementType()->getScalarSizeInBits() / SE->getDataLayout().getBitsPerMemoryUnit();
     const SCEV *EltSizeSCEV = SE->getConstant(ScEnd->getType(), EltSize);
     ScEnd = SE->getAddExpr(ScEnd, EltSizeSCEV);
   }

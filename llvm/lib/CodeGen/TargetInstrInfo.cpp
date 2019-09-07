@@ -380,27 +380,30 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
                                         unsigned &Offset,
                                         const MachineFunction &MF) const {
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  const DataLayout &DL = MF.getDataLayout();
+  unsigned int BitsPerUnit = DL.getBitsPerMemoryUnit();
+
   if (!SubIdx) {
-    Size = TRI->getSpillSize(*RC);
+    Size = TRI->getSpillSize(*RC, DL);
     Offset = 0;
     return true;
   }
   unsigned BitSize = TRI->getSubRegIdxSize(SubIdx);
   // Convert bit size to byte size.
-  if (BitSize % 8)
+  if (BitSize % BitsPerUnit)
     return false;
 
   int BitOffset = TRI->getSubRegIdxOffset(SubIdx);
-  if (BitOffset < 0 || BitOffset % 8)
+  if (BitOffset < 0 || BitOffset % BitsPerUnit)
     return false;
 
-  Size = BitSize /= 8;
-  Offset = (unsigned)BitOffset / 8;
+  Size = BitSize / BitsPerUnit;
+  Offset = (unsigned)BitOffset / BitsPerUnit;
 
-  assert(TRI->getSpillSize(*RC) >= (Offset + Size) && "bad subregister range");
+  assert(TRI->getSpillSize(*RC, DL) >= (Offset + Size) && "bad subregister range");
 
   if (!MF.getDataLayout().isLittleEndian()) {
-    Offset = TRI->getSpillSize(*RC) - (Offset + Size);
+    Offset = TRI->getSpillSize(*RC, DL) - (Offset + Size);
   }
   return true;
 }
@@ -551,13 +554,15 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
   if (Flags & MachineMemOperand::MOStore) {
     MemSize = MFI.getObjectSize(FI);
   } else {
+    const DataLayout &DL = MF.getDataLayout();
+
     for (unsigned OpIdx : Ops) {
       int64_t OpSize = MFI.getObjectSize(FI);
 
       if (auto SubReg = MI.getOperand(OpIdx).getSubReg()) {
         unsigned SubRegSize = TRI->getSubRegIdxSize(SubReg);
-        if (SubRegSize > 0 && !(SubRegSize % 8))
-          OpSize = SubRegSize / 8;
+        if (SubRegSize > 0 && !(SubRegSize % DL.getBitsPerMemoryUnit()))
+          OpSize = SubRegSize / DL.getBitsPerMemoryUnit();
       }
 
       MemSize = std::max(MemSize, OpSize);

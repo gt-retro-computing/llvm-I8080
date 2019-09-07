@@ -879,17 +879,19 @@ bool IRTranslator::translateLoad(const User &U, MachineIRBuilder &MIRBuilder) {
     return true;
   }
 
+  unsigned BitsPerUnit = DL->getBitsPerMemoryUnit();
+
   const MDNode *Ranges =
       Regs.size() == 1 ? LI.getMetadata(LLVMContext::MD_range) : nullptr;
   for (unsigned i = 0; i < Regs.size(); ++i) {
     Register Addr;
-    MIRBuilder.materializeGEP(Addr, Base, OffsetTy, Offsets[i] / 8);
+    MIRBuilder.materializeGEP(Addr, Base, OffsetTy, Offsets[i] / BitsPerUnit);
 
-    MachinePointerInfo Ptr(LI.getPointerOperand(), Offsets[i] / 8);
+    MachinePointerInfo Ptr(LI.getPointerOperand(), Offsets[i] / BitsPerUnit);
     unsigned BaseAlign = getMemOpAlignment(LI);
     auto MMO = MF->getMachineMemOperand(
-        Ptr, Flags, (MRI->getType(Regs[i]).getSizeInBits() + 7) / 8,
-        MinAlign(BaseAlign, Offsets[i] / 8), AAMDNodes(), Ranges,
+        Ptr, Flags, (MRI->getType(Regs[i]).getSizeInBits() + (BitsPerUnit - 1)) / BitsPerUnit,
+        MinAlign(BaseAlign, Offsets[i] / BitsPerUnit), AAMDNodes(), Ranges,
         LI.getSyncScopeID(), LI.getOrdering());
     MIRBuilder.buildLoad(Regs[i], Addr, *MMO);
   }
@@ -922,15 +924,17 @@ bool IRTranslator::translateStore(const User &U, MachineIRBuilder &MIRBuilder) {
     return true;
   }
 
+  unsigned BitsPerUnit = DL->getBitsPerMemoryUnit();
+
   for (unsigned i = 0; i < Vals.size(); ++i) {
     Register Addr;
-    MIRBuilder.materializeGEP(Addr, Base, OffsetTy, Offsets[i] / 8);
+    MIRBuilder.materializeGEP(Addr, Base, OffsetTy, Offsets[i] / BitsPerUnit);
 
-    MachinePointerInfo Ptr(SI.getPointerOperand(), Offsets[i] / 8);
+    MachinePointerInfo Ptr(SI.getPointerOperand(), Offsets[i] / BitsPerUnit);
     unsigned BaseAlign = getMemOpAlignment(SI);
     auto MMO = MF->getMachineMemOperand(
-        Ptr, Flags, (MRI->getType(Vals[i]).getSizeInBits() + 7) / 8,
-        MinAlign(BaseAlign, Offsets[i] / 8), AAMDNodes(), nullptr,
+        Ptr, Flags, (MRI->getType(Vals[i]).getSizeInBits() + (BitsPerUnit - 1)) / BitsPerUnit,
+        MinAlign(BaseAlign, Offsets[i] / BitsPerUnit), AAMDNodes(), nullptr,
         SI.getSyncScopeID(), SI.getOrdering());
     MIRBuilder.buildStore(Vals[i], Addr, *MMO);
   }
@@ -1171,7 +1175,8 @@ void IRTranslator::getStackGuard(Register DstReg,
   auto Flags = MachineMemOperand::MOLoad | MachineMemOperand::MOInvariant |
                MachineMemOperand::MODereferenceable;
   MachineMemOperand *MemRef =
-      MF->getMachineMemOperand(MPInfo, Flags, DL->getPointerSizeInBits() / 8,
+      MF->getMachineMemOperand(MPInfo, Flags,
+          DL->getPointerSizeInBits() / DL->getBitsPerMemoryUnit(),
                                DL->getPointerABIAlignment(0));
   MIB.setMemRefs({MemRef});
 }
@@ -1352,7 +1357,7 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
   case Intrinsic::vastart: {
     auto &TLI = *MF->getSubtarget().getTargetLowering();
     Value *Ptr = CI.getArgOperand(0);
-    unsigned ListSize = TLI.getVaListSizeInBits(*DL) / 8;
+    unsigned ListSize = TLI.getVaListSizeInBits(*DL) / DL->getBitsPerMemoryUnit();
 
     // FIXME: Get alignment
     MIRBuilder.buildInstr(TargetOpcode::G_VASTART)
@@ -1454,12 +1459,14 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     int FI = getOrCreateFrameIndex(*Slot);
     MF->getFrameInfo().setStackProtectorIndex(FI);
 
+    unsigned BitsPerUnit = DL->getBitsPerMemoryUnit();
+
     MIRBuilder.buildStore(
         GuardVal, getOrCreateVReg(*Slot),
         *MF->getMachineMemOperand(MachinePointerInfo::getFixedStack(*MF, FI),
                                   MachineMemOperand::MOStore |
                                       MachineMemOperand::MOVolatile,
-                                  PtrTy.getSizeInBits() / 8, 8));
+                                  PtrTy.getSizeInBits() / BitsPerUnit, 8));
     return true;
   }
   case Intrinsic::stacksave: {
