@@ -43,6 +43,7 @@ class RTypeInstr<bits<4> opcode, string opcodestr, list<dag> pattern> : InstLC22
   let Inst{23-20} = sr1;
   let Inst{3-0} = sr2;
   let Inst{19-4} = 0; // padding
+  let isCommutable = 1;
 }
 
 class SKPTypeInstr<bits<4> opcode, bits<4> mode, string opcodestr, list<dag> pattern> : InstLC2200<(outs), (ins GRRegs:$sr1, GRRegs:$sr2), opcode, opcodestr, "$sr1, $sr2", []> {

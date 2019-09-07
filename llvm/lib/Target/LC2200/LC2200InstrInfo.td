@@ -224,15 +224,12 @@ def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, 0, GRRegs:$rs1)>;
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
-// PseudoCALL is a pseudo instruction which will eventually expand to auipc
-// and jalr while encoding. This is desirable, as an auipc+jalr pair with
-// R_RISCV_CALL and R_RISCV_RELAX relocations can be be relaxed by the linker
-// if the offset fits in a signed 21-bit immediate.
 // Define AsmString to print "call" when compile with -S flag.
 // Define isCodeGenOnly = 0 to support parsing assembly "call" instruction.
-let isCall = 1, Defs = [ra, at], isCodeGenOnly = 1 in
 def PseudoCALL : Pseudo<(outs), (ins i32imm:$func), []> {
-    let AsmString = "call\t$func";
+    let AsmString = "";
+    let isCall = 1;
+    let Defs = [ra, at];
 }
 
 // PseudoRET

@@ -31,7 +31,7 @@ def CC_LC2200 : CallingConv<[
   // Promote i16 arguments to i32.
   CCIfType<[i16], CCPromoteToType<i32>>,
 
-  // The first 5 integer arguments are passed in integer registers.
+  // The first 3 integer arguments are passed in integer registers.
   CCIfType<[i32], CCAssignToReg<[a0, a1, a2]>>,
 
   // Integer values get stored in stack slots that are 4 bytes in
