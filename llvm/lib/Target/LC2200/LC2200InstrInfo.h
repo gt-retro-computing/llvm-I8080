@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
+
 #include "LC2200GenInstrInfo.inc"
 
 namespace llvm {
@@ -47,7 +48,7 @@ public:
 
   // Generates instructions to conditionally execute the next instruction only
   // if the comparison (a CC b) was true. Returns number of instructions added
-  unsigned resolveComparison(MachineBasicBlock *MBB, const DebugLoc &DL,
+  unsigned resolveComparison(MachineBasicBlock &MBB, MachineBasicBlock::iterator I, const DebugLoc &DL,
                              ISD::CondCode ConditionCode, MachineOperand &a,
                              MachineOperand &b) const;
 

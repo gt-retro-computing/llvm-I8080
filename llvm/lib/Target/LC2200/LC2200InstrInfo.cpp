@@ -53,40 +53,41 @@ void LC2200InstrInfo::loadRegFromStackSlot(
   BuildMI(MBB, I, DL, get(Opcode), DstReg).addFrameIndex(FI).addImm(0);
 }
 
-unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock *MBB,
+unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock &MBB,
+                                            MachineBasicBlock::iterator I,
                                             const DebugLoc &DL,
                                             ISD::CondCode ConditionCode,
                                             MachineOperand &a,
                                             MachineOperand &b) const {
   unsigned bytesAdded;
   // Recursive rewrite rules :^)))
-  // a =  b  ==> !(a != b)
-  // a >  b  ==> b < a
-  // a >= b  ==> skplt a, b; jmp dst
-  // a <  b  ==> !(a >= b)
-  // a <= b  ==> b >= a
+  // a =  b  ==> !(a != b) ==> skpe a, b; jmp 1; jmp dst
+  // a >  b  ==> b < a     ==> skplt b, a; jmp 1; jmp dst
+  // a >= b  ==>               skplt a, b; jmp dst
+  // a <  b  ==> !(a >= b) ==> skplt a, b; jmp 1; jmp dst
+  // a <= b  ==> b >= a    ==>
   // a != b  ==> skpe a, b; jmp dst
   switch (ConditionCode) {
   case ISD::CondCode::SETEQ:
-    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETNE, a, b) + 1;
-    BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
+    bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETNE, a, b) + 1;
+    BuildMI(MBB, I, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETGT:
-    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETLT, b, a);
+    bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETLT, b, a);
     break;
   case ISD::CondCode::SETGE:
-    BuildMI(MBB, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
+    BuildMI(MBB, I, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
     bytesAdded = 1;
     break;
   case ISD::CondCode::SETLT:
-    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETGE, a, b) + 1;
-    BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(1);
+    bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETGE, a, b) + 1;
+    BuildMI(MBB, I, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETLE:
-    bytesAdded = resolveComparison(MBB, DL, ISD::CondCode::SETGE, b, a);
+    bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETGE, b, a);
     break;
   case ISD::CondCode::SETNE:
-    BuildMI(MBB, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
+    BuildMI(MBB, I, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
     bytesAdded = 1;
     break;
   default:
@@ -98,23 +99,28 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock *MBB,
 
 bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   const DebugLoc DL = MI.getDebugLoc();
-  MachineBasicBlock *MBB = MI.getParent();
+  MachineBasicBlock &MBB = *MI.getParent();
   switch (MI.getOpcode()) {
   default:
     return false;
 
   case LC2200::CMP_SKIP: {
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
-    resolveComparison(MBB, DL, ConditionCode, MI.getOperand(1),
+    resolveComparison(MBB, MachineBasicBlock::instr_iterator(MI), DL, ConditionCode, MI.getOperand(1),
                       MI.getOperand(2));
     break;
   }
 
   case LC2200::SELECT_MOVE: {
-    auto TrueValue = MI.getOperand(0).getReg();
-    auto FalseValue = MI.getOperand(1).getReg();
-    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(FalseValue);
-    BuildMI(MBB, DL, get(LC2200::COPY)).addReg(TrueValue);
+    auto Dst = MI.getOperand(0).getReg();
+    auto TrueValue = MI.getOperand(1).getReg();
+    auto FalseValue = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(2);
+    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dst).addReg(LC2200::zero).addReg(FalseValue);
+    BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(1);
+    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dst).addReg(LC2200::zero).addReg(TrueValue);
+//    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dest).addReg(LC2200::zero).addReg(FalseValue);
+//    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dest).addReg(LC2200::zero).addReg(TrueValue);
     break;
   }
 
@@ -122,10 +128,10 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineOperand &op = MI.getOperand(0);
     if (op.isMBB()) {
       MachineBasicBlock *dst = op.getMBB();
-      BuildMI(MBB, DL, get(LC2200::GOTO)).addMBB(dst);
+      BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addMBB(dst);
     } else {
       int64_t dst = op.getImm();
-      BuildMI(MBB, DL, get(LC2200::GOTO)).addImm(dst);
+      BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(dst);
     }
     break;
   }
@@ -135,8 +141,8 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     if (!op.isGlobal()) {
       llvm_unreachable("PseudoCall requires a global address to call to");
     }
-    BuildMI(*MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
-    BuildMI(*MBB, MI, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
+    BuildMI(MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+    BuildMI(MBB, MI, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
     break;
   }
 
@@ -145,7 +151,7 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   //}
   }
 
-  MBB->erase(MI);
+  MBB.erase(MI);
   return true;
 }
 
@@ -203,7 +209,8 @@ unsigned LC2200InstrInfo::insertBranch(
   auto ConditionCode = (ISD::CondCode)Cond[0].getImm();
   auto a = Cond[1];
   auto b = Cond[2];
-  unsigned Count = resolveComparison(&MBB, DL, ConditionCode, a, b);
+  // TODO Might not work
+  unsigned Count = resolveComparison(MBB, MBB.end(), DL, ConditionCode, a, b);
   if (BytesAdded)
     *BytesAdded += (int)Count * 4;
 

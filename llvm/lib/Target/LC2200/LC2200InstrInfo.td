@@ -253,6 +253,7 @@ let Defs = [sp, ra], Uses = [sp] in {
 def CMP_SKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
                      [(lc2200_cmp_skip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
   let hasSideEffects = 1;
+  let isBranch = 1;
 }
 
 // JMP
