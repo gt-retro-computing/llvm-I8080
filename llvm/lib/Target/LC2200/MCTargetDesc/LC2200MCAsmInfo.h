@@ -11,8 +11,9 @@ namespace llvm {
 	class LC2200MCAsmInfo : public MCAsmInfoELF {
 	virtual void anchor();
 	public:
-	 explicit LC2200MCAsmInfo(const Triple &TT);
-	};
+	  explicit LC2200MCAsmInfo(const Triple &TT);
+
+  };
 } // namespace llvm
 
 #endif 

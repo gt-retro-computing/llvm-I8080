@@ -103,11 +103,16 @@ private:
                          const SmallVectorImpl<ISD::OutputArg> &Outs,
                          bool IsRet, CallLoweringInfo *CLI) const;
 
+  // copied from LegalizeDAG. We emit our own libcalls not directly supported by LLVM.
+  SDValue ExpandLibCall(const char *LibcallName, SDValue Op, bool isSigned, SelectionDAG &DAG) const;
+
   SDValue lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBrCc(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBr(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSelectCc(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerAnd(SDValue Op, SelectionDAG &DAG) const; // can't believe this god damn method exist -.-
+  SDValue lowerOr(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerXor(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // end namespace llvm

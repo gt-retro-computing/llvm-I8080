@@ -18,7 +18,32 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
+  ISD::CondCode illegalCCs[] = {
+      ISD::CondCode::SETULT, ISD::CondCode::SETUGT, /*ISD::CondCode::SETUGE,*/ ISD::CondCode::SETULE,
+      ISD::CondCode::SETLT, ISD::CondCode::SETGT, /*ISD::CondCode::SETGE,*/ ISD::CondCode::SETLE,
+  };
+
+  for (ISD::CondCode cc : illegalCCs) {
+    setCondCodeAction(cc, MVT::i32, Expand);
+  }
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
+
+  setOperationAction(ISD::SUB, MVT::i32, Expand);
+
   setOperationAction(ISD::SHL, MVT::i32, Custom);
+  setOperationAction(ISD::SRL, MVT::i32, Custom);
+
+  setOperationAction(ISD::MUL, MVT::i32, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::SDIV, MVT::i32, Expand);
+  setOperationAction(ISD::UDIV, MVT::i32, Expand);
+  setOperationAction(ISD::SREM, MVT::i32, Expand);
+  setOperationAction(ISD::SDIVREM, MVT::i32, Expand);
+  setOperationAction(ISD::UREM, MVT::i32, Expand);
+
 
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Custom);
@@ -28,6 +53,8 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
   setOperationAction(ISD::AND, MVT::i32, Custom);
+  setOperationAction(ISD::OR, MVT::i32, Custom);
+  setOperationAction(ISD::XOR, MVT::i32, Custom);
 
   setOperationAction(ISD::SETCC, MVT::i32, Expand);
   setOperationAction(ISD::SETCC, MVT::Other, Expand);
@@ -662,17 +689,80 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     return lowerSelectCc(Op, DAG);
   case ISD::AND:
     return lowerAnd(Op, DAG);
+  case ISD::OR:
+    return lowerOr(Op, DAG);
+  case ISD::XOR:
+    return lowerXor(Op, DAG);
+
+  case ISD::SRL:
+    return ExpandLibCall("__srlu", Op, false, DAG);
   }
 }
 
-SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op,
-                                             SelectionDAG &DAG) const {
+SDValue LC2200TargetLowering::ExpandLibCall(const char *LibcallName, SDValue Op, bool isSigned, SelectionDAG &DAG) const {
+  SDNode *Node = Op.getNode();
+
+  TargetLowering::ArgListTy Args;
+  TargetLowering::ArgListEntry Entry;
+  for (const SDValue &Op : Node->op_values()) {
+    EVT ArgVT = Op.getValueType();
+    Type *ArgTy = ArgVT.getTypeForEVT(*DAG.getContext());
+    Entry.Node = Op;
+    Entry.Ty = ArgTy;
+    Entry.IsSExt = shouldSignExtendTypeInLibCall(ArgVT, isSigned);
+    Entry.IsZExt = !shouldSignExtendTypeInLibCall(ArgVT, isSigned);
+    Args.push_back(Entry);
+  }
+  SDValue Callee = DAG.getExternalSymbol(LibcallName, getPointerTy(DAG.getDataLayout()));
+
+  EVT RetVT = Node->getValueType(0);
+  Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
+
+  // By default, the input chain to this libcall is the entry node of the
+  // function. If the libcall is going to be emitted as a tail call then
+  // TLI.isUsedByReturnOnly will change it to the right chain if the return
+  // node which is being folded has a non-entry input chain.
+  SDValue InChain = DAG.getEntryNode();
+
+  // isTailCall may be true since the callee does not reference caller stack
+  // frame. Check if it's in the right position and that the return types match.
+  SDValue TCChain = InChain;
+  const Function &F = DAG.getMachineFunction().getFunction();
+  bool isTailCall =
+      isInTailCallPosition(DAG, Node, TCChain) &&
+      (RetTy == F.getReturnType() || F.getReturnType()->isVoidTy());
+  if (isTailCall)
+    InChain = TCChain;
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  bool signExtend = shouldSignExtendTypeInLibCall(RetVT, isSigned);
+  CLI.setDebugLoc(SDLoc(Node))
+     .setChain(InChain)
+     .setLibCallee(CallingConv::C, RetTy, Callee, std::move(Args))
+     .setTailCall(isTailCall)
+     .setSExtResult(signExtend)
+     .setZExtResult(!signExtend)
+     .setIsPostTypeLegalization(true);
+
+  std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
+
+  if (!CallInfo.second.getNode()) {
+    LLVM_DEBUG(dbgs() << "Created tailcall: "; DAG.getRoot().dump(&DAG));
+    // It's a tailcall, return the chain (which is the DAG root).
+    return DAG.getRoot();
+  }
+
+  LLVM_DEBUG(dbgs() << "Created libcall: "; CallInfo.first.dump(&DAG));
+  return CallInfo.first;
+}
+
+SDValue LC2200TargetLowering::lowerShiftLeft(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   SDValue Vl = Op.getOperand(0);
   SDValue ShiftAmt = Op.getOperand(1);
 
   if (ShiftAmt.getOpcode() != ISD::Constant) {
-    llvm_unreachable("cannot lower non constant shifts");
+    return ExpandLibCall("__shlu", Op, false, DAG);
   }
 
   // fold constant shift into repeated ADDs
@@ -736,6 +826,10 @@ SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op,
   return SelectMove;
 }
 
+static SDValue notValue(SelectionDAG &DAG, const SDLoc &DL, EVT VT, SDValue Value) {
+  return DAG.getNode(LC2200ISD::NAND, DL, VT, Value, Value);
+}
+
 SDValue LC2200TargetLowering::lowerAnd(SDValue Op, SelectionDAG &DAG) const {
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -743,8 +837,36 @@ SDValue LC2200TargetLowering::lowerAnd(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   // A AND B = (A NAND B) NAND (A NAND B)
   SDValue Nand = DAG.getNode(LC2200ISD::NAND, DL, VT, LHS, RHS);
-  SDValue And = DAG.getNode(LC2200ISD::NAND, DL, VT, Nand, Nand);
+  SDValue And = notValue(DAG, DL, VT, Nand);
   return And;
+}
+
+SDValue LC2200TargetLowering::lowerOr(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  EVT VT = LHS.getValueType();
+  SDLoc DL(Op);
+  // A OR B = (NOT A) NAND (NOT B) = (A NAND A) NAND (B NAND B)
+  SDValue NotA = notValue(DAG, DL, VT, LHS);
+  SDValue NotB = notValue(DAG, DL, VT, RHS);
+  SDValue Or = DAG.getNode(LC2200ISD::NAND, DL, VT, NotA, NotB);
+  return Or;
+}
+
+SDValue LC2200TargetLowering::lowerXor(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+
+  EVT VT = LHS.getValueType();
+  SDLoc DL(Op);
+  // A XOR B = ((((a NAND b) NAND a) NAND ((a NAND b) NAND b)))
+  SDValue NandAB = DAG.getNode(LC2200ISD::NAND, DL, VT, LHS, RHS);
+
+  SDValue NandABNandA = DAG.getNode(LC2200ISD::NAND, DL, VT, NandAB, LHS);
+  SDValue NandABNandB = DAG.getNode(LC2200ISD::NAND, DL, VT, NandAB, RHS);
+
+  SDValue Xor = DAG.getNode(LC2200ISD::NAND, DL, VT, NandABNandA, NandABNandB);
+  return Xor;
 }
 
 const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {

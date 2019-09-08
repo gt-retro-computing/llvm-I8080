@@ -6,6 +6,8 @@
 #include "LC2200InstrInfo.h"
 #include "MCTargetDesc/LC2200MCTargetDesc.h"
 
+#define DEBUG_TYPE "lc2200-instr-info"
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "LC2200GenInstrInfo.inc"
 
@@ -69,12 +71,14 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock &MBB,
   // a != b  ==> skpe a, b; jmp dst
   switch (ConditionCode) {
   case ISD::CondCode::SETEQ:
+  case ISD::CondCode::SETUEQ:
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETNE, a, b) + 1;
     BuildMI(MBB, I, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETGT:
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETLT, b, a);
     break;
+  case ISD::CondCode::SETUGE: // using this for unordered might be mathematically incorrect
   case ISD::CondCode::SETGE:
     BuildMI(MBB, I, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
     bytesAdded = 1;
@@ -87,10 +91,12 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock &MBB,
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETGE, b, a);
     break;
   case ISD::CondCode::SETNE:
+  case ISD::CondCode::SETUNE:
     BuildMI(MBB, I, DL, get(LC2200::SKPE)).addReg(a.getReg()).addReg(b.getReg());
     bytesAdded = 1;
     break;
   default:
+    LLVM_DEBUG(dbgs() << "Got cond code: " << ConditionCode << "\n");
     llvm_unreachable("dude weed lmao: how did we get such a condition code in "
                      "this pseudo instruction?! are we fLoATiNg?");
   }
@@ -106,8 +112,7 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   case LC2200::CMP_SKIP: {
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
-    resolveComparison(MBB, MachineBasicBlock::instr_iterator(MI), DL, ConditionCode, MI.getOperand(1),
-                      MI.getOperand(2));
+    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2));
     break;
   }
 
@@ -138,10 +143,8 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   case LC2200::PseudoCALL: {
     MachineOperand &op = MI.getOperand(0);
-    if (!op.isGlobal()) {
-      llvm_unreachable("PseudoCall requires a global address to call to");
-    }
-    BuildMI(MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).addGlobalAddress(op.getGlobal());
+
+    BuildMI(MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).add(op);
     BuildMI(MBB, MI, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
     break;
   }
@@ -215,14 +218,14 @@ unsigned LC2200InstrInfo::insertBranch(
     *BytesAdded += (int)Count * 4;
 
   // True branch instruction
-  BuildMI(&MBB, DL, get(LC2200::GOTO)).addMBB(TBB);
+  BuildMI(MBB, MBB.end(), DL, get(LC2200::GOTO)).addMBB(TBB);
   if (BytesAdded)
     *BytesAdded += 4;
   Count++;
 
   if (FBB) {
     // Two-way Conditional branch. Insert the second branch.
-    BuildMI(&MBB, DL, get(LC2200::GOTO)).addMBB(FBB);
+    BuildMI(MBB, MBB.end(), DL, get(LC2200::GOTO)).addMBB(FBB);
     if (BytesAdded)
       *BytesAdded += 4;
     Count++;

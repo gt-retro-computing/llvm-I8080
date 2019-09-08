@@ -46,7 +46,6 @@ public:
 
   const char *getClobbers() const override { return ""; }
 
-  void setSupportedOpenCLOpts() override;
 };
 }
 }
