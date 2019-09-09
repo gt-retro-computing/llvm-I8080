@@ -18,15 +18,6 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
-  ISD::CondCode illegalCCs[] = {
-      ISD::CondCode::SETULT, ISD::CondCode::SETUGT, /*ISD::CondCode::SETUGE,*/ ISD::CondCode::SETULE,
-      ISD::CondCode::SETLT, ISD::CondCode::SETGT, /*ISD::CondCode::SETGE,*/ ISD::CondCode::SETLE,
-  };
-
-  for (ISD::CondCode cc : illegalCCs) {
-    setCondCodeAction(cc, MVT::i32, Expand);
-  }
-
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
 
