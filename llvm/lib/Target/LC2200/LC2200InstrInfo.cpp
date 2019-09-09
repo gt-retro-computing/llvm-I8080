@@ -76,21 +76,21 @@ unsigned LC2200InstrInfo::resolveComparison(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETGT:
-  case ISD::CondCode::SETUGT: // using this for unordered might be mathematically incorrect
+//  case ISD::CondCode::SETUGT: // using this for unordered might be mathematically incorrect
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETLT, b, a);
     break;
-  case ISD::CondCode::SETUGE: // using this for unordered might be mathematically incorrect
+//  case ISD::CondCode::SETUGE: // using this for unordered might be mathematically incorrect
   case ISD::CondCode::SETGE:
     BuildMI(MBB, I, DL, get(LC2200::SKPLT)).addReg(a.getReg()).addReg(b.getReg());
     bytesAdded = 1;
     break;
   case ISD::CondCode::SETLT:
-  case ISD::CondCode::SETULT: // using this for unordered might be mathematically incorrect
+//  case ISD::CondCode::SETULT: // using this for unordered might be mathematically incorrect
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETGE, a, b) + 1;
     BuildMI(MBB, I, DL, get(LC2200::GOTO)).addImm(1);
     break;
   case ISD::CondCode::SETLE:
-  case ISD::CondCode::SETULE: // using this for unordered might be mathematically incorrect
+//  case ISD::CondCode::SETULE: // using this for unordered might be mathematically incorrect
     bytesAdded = resolveComparison(MBB, I, DL, ISD::CondCode::SETGE, b, a);
     break;
   case ISD::CondCode::SETNE:
@@ -308,7 +308,8 @@ static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
 ///
 /// The CFG information in MBB.Predecessors and MBB.Successors must be valid
 /// before calling this function.
-bool LC2200InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+bool LC2200InstrInfo::
+analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
                                     SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const {
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
 
