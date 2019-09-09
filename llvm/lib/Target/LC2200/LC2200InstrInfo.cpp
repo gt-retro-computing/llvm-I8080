@@ -261,7 +261,7 @@ unsigned LC2200InstrInfo::insertBranch(
 }
 
 static bool getAnalyzableBrOpc(unsigned Opc) {
-  return Opc == LC2200::JMP || Opc == LC2200::CMP_JMP;
+  return Opc == LC2200::JMP || Opc == LC2200::CMP_JMP || Opc == LC2200::GOTO;
 }
 
 static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
@@ -354,7 +354,7 @@ bool LC2200InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&
   }
 
   // If there is only one terminator instruction, process it.
-  if (!SecondLastOpc || (SecondLastOpc != LC2200::JMP && SecondLastOpc != LC2200::CMP_JMP)) {
+  if (!SecondLastOpc || (SecondLastOpc != LC2200::JMP && SecondLastOpc != LC2200::CMP_JMP && SecondLastOpc != LC2200::GOTO)) {
     // Unconditional branch.
     if (LastInst->isUnconditionalBranch()) {
       TBB = LastInst->getOperand(0).getMBB();
