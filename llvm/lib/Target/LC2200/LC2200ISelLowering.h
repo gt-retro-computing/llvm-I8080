@@ -60,7 +60,9 @@ enum NodeType : unsigned {
   CALL,
   JMP,
   CMP_SKIP,
+  CMP_JMP,
   SELECT_MOVE,
+  CMP_SELECT_MOVE,
   NAND
 };
 } // namespace LC2200ISD
@@ -113,6 +115,7 @@ private:
   SDValue lowerAnd(SDValue Op, SelectionDAG &DAG) const; // can't believe this god damn method exist -.-
   SDValue lowerOr(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerXor(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // end namespace llvm

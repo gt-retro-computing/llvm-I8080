@@ -21,6 +21,16 @@ LC2200TargetLowering::LC2200TargetLowering(const LC2200TargetMachine &TM,
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
 
+//  ISD::NodeType IllegalNodes[] = {ISD::SRA, ISD::ROTL, ISD::ROTR, ISD::FSHL, ISD::FSHR};
+//
+//  for (ISD::NodeType node : IllegalNodes) {
+//    setOperationAction(node, MVT::i32, Expand);
+//  }
+
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
+  setOperationAction(ISD::BRCOND, MVT::i32, Expand);
+
   setOperationAction(ISD::SUB, MVT::i32, Expand);
 
   setOperationAction(ISD::SHL, MVT::i32, Custom);
@@ -684,10 +694,32 @@ SDValue LC2200TargetLowering::LowerOperation(SDValue Op,
     return lowerOr(Op, DAG);
   case ISD::XOR:
     return lowerXor(Op, DAG);
+  case ISD::GlobalAddress:
+    return lowerGlobalAddress(Op, DAG);
 
   case ISD::SRL:
     return ExpandLibCall("__srlu", Op, false, DAG);
   }
+}
+
+SDValue LC2200TargetLowering::lowerGlobalAddress(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  EVT Ty = Op.getValueType();
+  GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
+  int64_t Offset = N->getOffset();
+  MVT XLenVT = MVT::i32;
+
+  const GlobalValue *GV = N->getGlobal();
+  // bool IsLocal = getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV);
+  // SDValue Addr = getAddr(N, DAG, IsLocal);
+
+  // In order to maximise the opportunity for common subexpression elimination,
+  // emit a separate ADD node for the global address offset instead of folding
+  // it in the global address node. Later peephole optimisations may choose to
+  // fold it back in when profitable.
+
+  return DAG.getTargetGlobalAddress(GV, DL, MVT::i32, Offset);
 }
 
 SDValue LC2200TargetLowering::ExpandLibCall(const char *LibcallName, SDValue Op, bool isSigned, SelectionDAG &DAG) const {
@@ -787,11 +819,10 @@ SDValue LC2200TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
 
   SDLoc DL(Op);
-  SDValue Cmp = DAG.getNode(LC2200ISD::CMP_SKIP, DL, MVT::Glue,
-                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
-  SDValue Jmp = DAG.getNode(LC2200ISD::JMP, DL, MVT::Other, Chain, Dest, Cmp);
+  SDValue Cmp = DAG.getNode(LC2200ISD::CMP_JMP, DL, MVT::Glue, Chain,
+                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, Dest);
 
-  return Jmp;
+  return Cmp;
 }
 
 SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op,
@@ -810,10 +841,8 @@ SDValue LC2200TargetLowering::lowerSelectCc(SDValue Op,
     llvm_unreachable("mismatched types of select_cc true and false nodes");
   }
 
-  SDValue Cmp = DAG.getNode(LC2200ISD::CMP_SKIP, DL, MVT::Glue,
-                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS);
-  SDValue SelectMove = DAG.getNode(LC2200ISD::SELECT_MOVE, DL, TrueType,
-                                   TrueValue, FalseValue, Cmp);
+  SDValue SelectMove = DAG.getNode(LC2200ISD::CMP_SELECT_MOVE, DL, TrueType,
+                                   DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, TrueValue, FalseValue);
   return SelectMove;
 }
 
@@ -870,10 +899,16 @@ const char *LC2200TargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "LC2200ISD::CALL";
   case LC2200ISD::JMP:
     return "LC2200ISD::JMP";
+  case LC2200ISD::NAND:
+    return "LC2200ISD::NAND";
   case LC2200ISD::CMP_SKIP:
     return "LC2200ISD::CMP_SKIP";
+  case LC2200ISD::CMP_JMP:
+    return "LC2200ISD::CMP_JMP";
   case LC2200ISD::SELECT_MOVE:
     return "LC2200ISD::SELECT_MOVE";
+  case LC2200ISD::CMP_SELECT_MOVE:
+    return "LC2200ISD::CMP_SELECT_MOVE";
   }
   return nullptr;
 }

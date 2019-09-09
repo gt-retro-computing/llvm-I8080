@@ -118,11 +118,34 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2));
     break;
   }
-
+  case LC2200::CMP_JMP: {
+    auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
+    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2));
+    BuildMI(MBB, MI, DL, get(LC2200::GOTO)).add(MI.getOperand(3));
+    break;
+  }
   case LC2200::SELECT_MOVE: {
     auto Dst = MI.getOperand(0).getReg();
     auto TrueValue = MI.getOperand(1).getReg();
     auto FalseValue = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(2);
+    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dst).addReg(LC2200::zero).addReg(FalseValue);
+    BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(1);
+    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dst).addReg(LC2200::zero).addReg(TrueValue);
+//    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dest).addReg(LC2200::zero).addReg(FalseValue);
+//    BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dest).addReg(LC2200::zero).addReg(TrueValue);
+    break;
+  }
+  case LC2200::CMP_SELECT_MOVE: {
+    auto Dst = MI.getOperand(0).getReg();
+
+    auto ConditionCode = ISD::CondCode(MI.getOperand(1).getImm());
+
+    auto TrueValue = MI.getOperand(4).getReg();
+    auto FalseValue = MI.getOperand(5).getReg();
+
+    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(2), MI.getOperand(3));
+
     BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(2);
     BuildMI(MBB, MI, DL, get(LC2200::ADD)).addReg(Dst).addReg(LC2200::zero).addReg(FalseValue);
     BuildMI(MBB, MI, DL, get(LC2200::GOTO)).addImm(1);
@@ -235,4 +258,167 @@ unsigned LC2200InstrInfo::insertBranch(
   }
 
   return Count;
+}
+
+static bool getAnalyzableBrOpc(unsigned Opc) {
+  return Opc == LC2200::JMP || Opc == LC2200::CMP_JMP;
+}
+
+static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
+                                  MachineBasicBlock *&BB,
+                                  SmallVectorImpl<MachineOperand> &Cond) {
+  assert(getAnalyzableBrOpc(Opc) && "Not an analyzable branch");
+  int NumOp = Inst->getNumExplicitOperands();
+
+  // for both int and fp branches, the last explicit operand is the
+  // MBB.
+  BB = Inst->getOperand(NumOp-1).getMBB();
+  // Cond.push_back(MachineOperand::CreateImm(Opc));
+
+  for (int i = 0; i < NumOp-1; i++)
+    Cond.push_back(Inst->getOperand(i));
+}
+
+/// Copied From TargetInstrInfo.h:
+///
+/// Analyze the branching code at the end of MBB, returning
+/// true if it cannot be understood (e.g. it's a switch dispatch or isn't
+/// implemented for a target).  Upon success, this returns false and returns
+/// with the following information in various cases:
+///
+/// 1. If this block ends with no branches (it just falls through to its succ)
+///    just return false, leaving TBB/FBB null.
+/// 2. If this block ends with only an unconditional branch, it sets TBB to be
+///    the destination block.
+/// 3. If this block ends with a conditional branch and it falls through to a
+///    successor block, it sets TBB to be the branch destination block and a
+///    list of operands that evaluate the condition. These operands can be
+///    passed to other TargetInstrInfo methods to create new branches.
+/// 4. If this block ends with a conditional branch followed by an
+///    unconditional branch, it returns the 'true' destination in TBB, the
+///    'false' destination in FBB, and a list of operands that evaluate the
+///    condition.  These operands can be passed to other TargetInstrInfo
+///    methods to create new branches.
+///
+/// Note that removeBranch and insertBranch must be implemented to support
+/// cases where this method returns success.
+///
+/// If AllowModify is true, then this routine is allowed to modify the basic
+/// block (e.g. delete instructions after the unconditional branch).
+///
+/// The CFG information in MBB.Predecessors and MBB.Successors must be valid
+/// before calling this function.
+bool LC2200InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+                                    SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const {
+  MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
+
+  // Skip all the debug instructions.
+  while (I != REnd && I->isDebugInstr())
+    ++I;
+
+  if (I == REnd || !isUnpredicatedTerminator(*I)) {
+    // This block ends with no branches (it just falls through to its succ).
+    // Leave TBB/FBB null.
+    TBB = FBB = nullptr;
+    return false;
+  }
+
+  SmallVector<MachineInstr *, 4> BranchInstrs;
+
+  MachineInstr *LastInst = &*I;
+  unsigned LastOpc = LastInst->getOpcode();
+  BranchInstrs.push_back(LastInst);
+
+
+  // Not an analyzable branch (e.g., indirect jump).
+  if (!getAnalyzableBrOpc(LastOpc))
+    return true;
+
+  // Get the second to last instruction in the block.
+  unsigned SecondLastOpc = 0;
+  MachineInstr *SecondLastInst = nullptr;
+
+  // Skip past any debug instruction to see if the second last actual
+  // is a branch.
+  ++I;
+  while (I != REnd && I->isDebugInstr())
+    ++I;
+
+  if (I != REnd) {
+    SecondLastInst = &*I;
+    SecondLastOpc = SecondLastInst->getOpcode();
+
+    // Not an analyzable branch (must be an indirect jump).
+    if (isUnpredicatedTerminator(*SecondLastInst) && !getAnalyzableBrOpc(SecondLastOpc))
+      return true;
+  }
+
+  // If there is only one terminator instruction, process it.
+  if (!SecondLastOpc || (SecondLastOpc != LC2200::JMP && SecondLastOpc != LC2200::CMP_JMP)) {
+    // Unconditional branch.
+    if (LastInst->isUnconditionalBranch()) {
+      TBB = LastInst->getOperand(0).getMBB();
+      return false;
+    }
+
+    // Conditional branch
+    AnalyzeCondBr(LastInst, LastOpc, TBB, Cond);
+    return false;
+  }
+
+  // If we reached here, there are two branches.
+  // If there are three terminators, we don't know what sort of block this is.
+  if (++I != REnd && isUnpredicatedTerminator(*I))
+    return true;
+
+  BranchInstrs.insert(BranchInstrs.begin(), SecondLastInst);
+
+  // If second to last instruction is an unconditional branch,
+  // analyze it and remove the last instruction.
+  if (SecondLastInst->isUnconditionalBranch()) {
+    if (!AllowModify) {
+      return true;
+    }
+
+    TBB = SecondLastInst->getOperand(0).getMBB();
+    LastInst->eraseFromParent();
+    BranchInstrs.pop_back();
+    return false;
+  }
+
+  // Conditional branch followed by an unconditional branch.
+  // The last one must be unconditional.
+  if (!LastInst->isUnconditionalBranch())
+    return true;
+
+  AnalyzeCondBr(SecondLastInst, SecondLastOpc, TBB, Cond);
+  FBB = LastInst->getOperand(0).getMBB();
+
+  return false;
+}
+
+unsigned LC2200InstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                     int *BytesRemoved) const {
+  assert(!BytesRemoved && "code size not handled");
+
+  MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
+  unsigned removed = 0;
+
+  // Up to 2 branches are removed.
+  // Note that indirect branches are not removed.
+  while (I != REnd && removed < 2) {
+    // Skip past debug instructions.
+    if (I->isDebugInstr()) {
+      ++I;
+      continue;
+    }
+    if (!getAnalyzableBrOpc(I->getOpcode()))
+      break;
+    // Remove the branch.
+    I->eraseFromParent();
+    I = MBB.rbegin();
+    ++removed;
+  }
+
+  return removed;
 }

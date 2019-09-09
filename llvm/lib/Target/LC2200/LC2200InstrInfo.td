@@ -25,9 +25,16 @@ def SDT_LC2200Call        : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
 
 def SDT_LC2200Jmp         : SDTypeProfile<0, 1, [SDTCisVT<0, OtherVT>]>;
 
+// [cc, lhs, rhs]
 def SDT_LC2200CmpSkip     : SDTypeProfile<0, 3, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
+// [cc, lhs, rhs, dest]
+def SDT_LC2200CmpJmp     : SDTypeProfile<0, 4, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+
 def SDT_LC2200SelectMove  : SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+
+// out <- [cc, lhs, rhs, trueval, falseval]
+def SDT_LC2200CmpSelectMove  : SDTypeProfile<1, 5, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
 def SDT_LC2200Nand        : SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
@@ -54,12 +61,23 @@ def lc2200_ret            : SDNode<"LC2200ISD::RET", SDTNone,
 // Operands: [CC, A, B]
 def lc2200_cmp_skip       : SDNode<"LC2200ISD::CMP_SKIP", SDT_LC2200CmpSkip, [SDNPOutGlue]>;
 
+// Implements a conditional jump: generates skips/goto to
+// conditionally execute the immediately following instruction
+// Paired with a following JMP, it forms a BR_CC node.
+// Operands: [CC, A, B]
+def lc2200_cmp_jmp       : SDNode<"LC2200ISD::CMP_JMP", SDT_LC2200CmpJmp, [SDNPHasChain, SDNPOptInGlue]>;
+
 // Implements a selectable move: generates two sequential
 // moves to the destination, first from the False source, then
 // from the True source. Paired with a preceding CMP_SKIP, it forms
 // a SELECT_CC.
 // Operands: [T, F]
 def lc2200_select_move    : SDNode<"LC2200ISD::SELECT_MOVE", SDT_LC2200SelectMove, [SDNPInGlue]>;
+
+
+// out <- [cc, lhs, rhs, trueval, falseval]
+def lc2200_cmp_select_move    : SDNode<"LC2200ISD::CMP_SELECT_MOVE", SDT_LC2200CmpSelectMove, []>;
+
 
 // Implements a direct unconditional branch
 // Operands: [Dst]
@@ -129,7 +147,12 @@ def GOTO: ITypeInstr<0b0101, (outs), (ins b_target:$offset),
         let Inst{23-20} = 0;
         let Inst{19-0} = offset;
         let isBranch = 1;
-        let isBarrier = 1;
+
+        // this should be set to 1 but it causes the second GOTO in this construction to be optimized out:
+        //    SPLT ....
+        //    GOTO %bb.1
+        //    GOTO %bb.2
+        // let isBarrier = 1;
         let isTerminator = 1;
     }
 
@@ -254,7 +277,20 @@ def CMP_SKIP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b),
                      [(lc2200_cmp_skip (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b))]> {
   let hasSideEffects = 1;
   let isBranch = 1;
+  let isCompare    = 1;
 }
+
+// CMP_JMP
+def CMP_JMP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b, b_target:$dst),
+                     [(lc2200_cmp_jmp (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b), bb:$dst)]> {
+  let hasSideEffects = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let isCompare    = 1;
+}
+
+// 9 == the CC for not equal
+def : Pat<(brcond GRRegs:$a, bb:$dst), (CMP_JMP 9, $a, zero, bb:$dst)>;
 
 // JMP
 def JMP : Pseudo<(outs), (ins b_target:$dst),
@@ -264,6 +300,11 @@ def JMP : Pseudo<(outs), (ins b_target:$dst),
   let isTerminator = 1;
   let isBranch = 1;
 }
+
+// CMP_SELECT_MOVE
+def CMP_SELECT_MOVE : Pseudo<(outs GRRegs:$dst), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b, GRRegs:$src1, GRRegs:$src2),
+                         [(set (i32 GRRegs:$dst), (lc2200_cmp_select_move (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 GRRegs:$b), (i32 GRRegs:$src1), (i32 GRRegs:$src2)))]>;
+
 
 // SELECT_MOVE
 def SELECT_MOVE : Pseudo<(outs GRRegs:$dst), (ins GRRegs:$src1, GRRegs:$src2),

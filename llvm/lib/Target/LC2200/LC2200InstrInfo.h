@@ -81,6 +81,15 @@ public:
     // DUDE RISC LMAO
     return 4U;
   }
+
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                            MachineBasicBlock *&FBB,
+                            SmallVectorImpl<MachineOperand> &Cond,
+                            bool AllowModify = false) const override;
+
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
+
 };
 } // namespace llvm
 #endif
