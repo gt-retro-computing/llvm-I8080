@@ -170,13 +170,6 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   if (hasFramePointer) {
     BuildMI(MBB, MBBI, DL, TII->get(LC2200::SW)).addReg(LC2200::fp).addReg(LC2200::sp).addImm(StackSize - 1);
     BuildMI(MBB, MBBI, DL, TII->get(LC2200::ADD)).addReg(LC2200::fp).addReg(LC2200::sp).addReg(LC2200::zero);
-
-    // Emit ".cfi_def_cfa $fp, 0"
-    unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
-            nullptr, RI->getDwarfRegNum(FPReg, true), 0));
-    BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
-            .addCFIIndex(CFIIndex);
-
     // Realign Stack
     const LC2200RegisterInfo *RI = STI.getRegisterInfo();
     if (RI->needsStackRealignment(MF)) {
@@ -233,12 +226,6 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
             .addReg(LC2200::zero);
   }
 
-  if (hasFramePointer) {
-    // To find the instruction restoring FP from stack.
-    BuildMI(MBB, LastFrameDestroy, DL, TII->get(LC2200::LW)).addReg(LC2200::fp).addReg(LC2200::fp)
-            .addImm(StackSize - 1);
-  }
-
   // Add CFI directives for callee-saved registers.
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
   // Iterate over list of callee-saved registers and emit .cfi_restore
@@ -251,7 +238,14 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
             .addCFIIndex(CFIIndex);
   }
 
-  // Deallocate stack
+  // Restore FramePointer if it was setup.
+  if (hasFramePointer) {
+    // To find the instruction restoring FP from stack.
+    BuildMI(MBB, LastFrameDestroy, DL, TII->get(LC2200::LW)).addReg(LC2200::fp).addReg(LC2200::fp)
+            .addImm(StackSize - 1);
+  }
+
+  // Deallocate stack (aka restore SP)
   adjustReg(MBB, MBBI, DL, SPReg, SPReg, StackSize, MachineInstr::FrameDestroy);
 
   // After restoring $sp, we need to adjust CFA to $(sp + 0)
