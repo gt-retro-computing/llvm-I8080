@@ -150,6 +150,11 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   // save it to the stack. We need to skip over the storing of callee-saved
   // registers as the frame pointer must be modified after it has been saved
   // to the stack, not before.
+
+  if (hasFramePointer) {
+    BuildMI(MBB, MBBI, DL, TII->get(LC2200::SW)).addReg(LC2200::fp).addReg(LC2200::sp).addImm(StackSize - 1);
+  }
+
   // FIXME: assumes exactly one instruction is used to save each callee-saved
   // register.
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
@@ -168,7 +173,6 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
 
   // Generate new FP.
   if (hasFramePointer) {
-    BuildMI(MBB, MBBI, DL, TII->get(LC2200::SW)).addReg(LC2200::fp).addReg(LC2200::sp).addImm(StackSize - 1);
     BuildMI(MBB, MBBI, DL, TII->get(LC2200::ADD)).addReg(LC2200::fp).addReg(LC2200::sp).addReg(LC2200::zero);
     // Realign Stack
     const LC2200RegisterInfo *RI = STI.getRegisterInfo();
@@ -241,7 +245,7 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
   // Restore FramePointer if it was setup.
   if (hasFramePointer) {
     // To find the instruction restoring FP from stack.
-    BuildMI(MBB, LastFrameDestroy, DL, TII->get(LC2200::LW)).addReg(LC2200::fp).addReg(LC2200::fp)
+    BuildMI(MBB, MBBI, DL, TII->get(LC2200::LW)).addReg(LC2200::fp).addReg(LC2200::fp)
             .addImm(StackSize - 1);
   }
 
