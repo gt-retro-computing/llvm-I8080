@@ -525,9 +525,6 @@ LC2200TargetLowering::LowerCall(CallLoweringInfo &CLI,
     SDValue ArgValue = OutVals[i];
     ISD::ArgFlagsTy Flags = Outs[i].Flags;
 
-    // IsF64OnRV32DSoftABI && VA.isMemLoc() is handled below in the same way
-    // as any other MemLoc.
-
     // Promote the value if needed.
     // For now, only handle fully promoted and indirect arguments.
     if (VA.getLocInfo() == CCValAssign::Indirect) {

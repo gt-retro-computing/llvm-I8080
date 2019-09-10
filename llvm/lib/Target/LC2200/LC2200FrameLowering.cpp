@@ -77,10 +77,10 @@ void LC2200FrameLowering::determineFrameLayout(MachineFunction &MF) const {
 }
 
 void LC2200FrameLowering::adjustReg(MachineBasicBlock &MBB,
-                                   MachineBasicBlock::iterator MBBI,
-                                   const DebugLoc &DL, Register DestReg,
-                                   Register SrcReg, int64_t Val,
-                                   MachineInstr::MIFlag Flag) const {
+                                    MachineBasicBlock::iterator MBBI,
+                                    const DebugLoc &DL, Register DestReg,
+                                    Register SrcReg, int64_t Val,
+                                    MachineInstr::MIFlag Flag) const {
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
   const LC2200InstrInfo *TII = STI.getInstrInfo();
 
@@ -102,6 +102,8 @@ void LC2200FrameLowering::adjustReg(MachineBasicBlock &MBB,
 void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
   assert(&MF.front() == &MBB && "Shrink-wrapping not yet supported");
+
+  bool hasFramePointer = hasFP(MF);
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
   // auto *RVFI = MF.getInfo<LC2200MachineFunctionInfo>();
@@ -128,6 +130,8 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   // FIXME (note copied from Lanai): This appears to be overallocating.  Needs
   // investigation. Get the number of bytes to allocate from the FrameInfo.
   uint64_t StackSize = MFI.getStackSize();
+
+  if (hasFramePointer) StackSize++;
 
   // Early exit if there is no need to allocate on the stack
   if (StackSize == 0 && !MFI.adjustsStack())
@@ -163,10 +167,9 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   // Generate new FP.
-  if (hasFP(MF)) {
-//    adjustReg(MBB, MBBI, DL, FPReg, SPReg,
-//              StackSize - RVFI->getVarArgsSaveSize(), MachineInstr::FrameSetup);
-    adjustReg(MBB, MBBI, DL, FPReg, SPReg, StackSize, MachineInstr::FrameSetup);
+  if (hasFramePointer) {
+    BuildMI(MBB, MBBI, DL, TII->get(LC2200::SW)).addReg(LC2200::fp).addReg(LC2200::sp).addImm(StackSize - 1);
+    BuildMI(MBB, MBBI, DL, TII->get(LC2200::ADD)).addReg(LC2200::fp).addReg(LC2200::sp).addReg(LC2200::zero);
 
     // Emit ".cfi_def_cfa $fp, 0"
     unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
@@ -202,6 +205,8 @@ void LC2200FrameLowering::emitPrologue(MachineFunction &MF,
 
 void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
+  bool hasFramePointer = hasFP(MF);
+
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   const LC2200RegisterInfo *RI = STI.getRegisterInfo();
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -217,36 +222,21 @@ void LC2200FrameLowering::emitEpilogue(MachineFunction &MF,
   auto LastFrameDestroy = std::prev(MBBI, MFI.getCalleeSavedInfo().size());
 
   uint64_t StackSize = MFI.getStackSize();
-
-  uint64_t FPOffset = StackSize;// - RVFI->getVarArgsSaveSize();
+  if (hasFramePointer) StackSize++;
 
   // Restore the stack pointer using the value of the frame pointer. Only
   // necessary if the stack pointer was modified, meaning the stack size is
   // unknown.
   if (RI->needsStackRealignment(MF) || MFI.hasVarSizedObjects()) {
     assert(hasFP(MF) && "frame pointer should not have been eliminated");
-    adjustReg(MBB, LastFrameDestroy, DL, SPReg, FPReg, -FPOffset,
-              MachineInstr::FrameDestroy);
+    BuildMI(MBB, LastFrameDestroy, DL, TII->get(LC2200::ADD)).addReg(LC2200::sp).addReg(LC2200::fp)
+            .addReg(LC2200::zero);
   }
 
-  if (hasFP(MF)) {
+  if (hasFramePointer) {
     // To find the instruction restoring FP from stack.
-    for (auto &I = LastFrameDestroy; I != MBBI; ++I) {
-      if (I->mayLoad() && I->getOperand(0).isReg()) {
-        Register DestReg = I->getOperand(0).getReg();
-        if (DestReg == FPReg) {
-          // If there is frame pointer, after restoring $fp registers, we
-          // need adjust CFA to ($sp - FPOffset).
-          // Emit ".cfi_def_cfa $sp, -FPOffset"
-          unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
-                  nullptr, RI->getDwarfRegNum(SPReg, true), -FPOffset));
-          BuildMI(MBB, std::next(I), DL,
-                  TII->get(TargetOpcode::CFI_INSTRUCTION))
-                  .addCFIIndex(CFIIndex);
-          break;
-        }
-      }
-    }
+    BuildMI(MBB, LastFrameDestroy, DL, TII->get(LC2200::LW)).addReg(LC2200::fp).addReg(LC2200::fp)
+            .addImm(StackSize - 1);
   }
 
   // Add CFI directives for callee-saved registers.

@@ -169,9 +169,12 @@ bool LC2200InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   case LC2200::PseudoCALL: {
     MachineOperand &op = MI.getOperand(0);
-
+    BuildMI(MBB, MI, DL, get(LC2200::ADDI)).addReg(LC2200::sp).addReg(LC2200::sp).addImm(-1);
+    BuildMI(MBB, MI, DL, get(LC2200::SW)).addReg(LC2200::ra).addReg(LC2200::sp).addImm(0);
     BuildMI(MBB, MI, DL, get(LC2200::LEA)).addReg(LC2200::at).add(op);
     BuildMI(MBB, MI, DL, get(LC2200::JALR)).addReg(LC2200::ra).addReg(LC2200::at);
+    BuildMI(MBB, MI, DL, get(LC2200::LW)).addReg(LC2200::ra).addReg(LC2200::sp).addImm(0);
+    BuildMI(MBB, MI, DL, get(LC2200::ADDI)).addReg(LC2200::sp).addReg(LC2200::sp).addImm(1);
     break;
   }
 
