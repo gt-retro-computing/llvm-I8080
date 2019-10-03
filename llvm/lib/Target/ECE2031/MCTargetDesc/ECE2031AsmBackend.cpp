@@ -48,12 +48,12 @@ void ECE2031AsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
   exit(-1);
 }
 
-std::unique_ptr<MCObjectTargetWriter> ECE2031AsmBackend::createObjectTargetWriter() const {
-  if (OSType == Triple::OSType::UnknownOS) {
-    return createECE2031ELFObjectWriter(0);
-  }
-  llvm_unreachable("Can not process the specified OS");
-}
+//std::unique_ptr<MCObjectTargetWriter> ECE2031AsmBackend::createObjectTargetWriter() const {
+//  if (OSType == Triple::OSType::UnknownOS) {
+//    return createECE2031ELFObjectWriter(0);
+//  }
+//  llvm_unreachable("Can not process the specified OS");
+//}
 
 unsigned int ECE2031AsmBackend::getNumFixupKinds() const {
   return ECE2031::Fixups::NumTargetFixupKinds;

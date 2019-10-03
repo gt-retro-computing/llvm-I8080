@@ -65,12 +65,12 @@ createECE2031MCInstPrinter(const Triple &T, unsigned SyntaxVariant,
   return new ECE2031InstPrinter(MAI, MII, MRI);
 }
 
-static MCStreamer* createECE2031ELFStreamer(const Triple &T, MCContext &Ctx,
-        std::unique_ptr<MCAsmBackend> &&MAB,
-        std::unique_ptr<MCObjectWriter> &&OW,
-        std::unique_ptr<MCCodeEmitter> &&Emitter, bool RelaxAll) {
-    return createELFStreamer(Ctx, std::move(MAB), std::move(OW), std::move(Emitter), RelaxAll);
-}
+//static MCStreamer* createECE2031ELFStreamer(const Triple &T, MCContext &Ctx,
+//        std::unique_ptr<MCAsmBackend> &&MAB,
+//        std::unique_ptr<MCObjectWriter> &&OW,
+//        std::unique_ptr<MCCodeEmitter> &&Emitter, bool RelaxAll) {
+//    return createELFStreamer(Ctx, std::move(MAB), std::move(OW), std::move(Emitter), RelaxAll);
+//}
 
 //static MCStreamer *
 //createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
@@ -111,15 +111,15 @@ createECE2031MCSubtargetInfoImpl);
 TargetRegistry::RegisterMCInstPrinter(TheECE2031Target,
                                         createECE2031MCInstPrinter);
 // Register the ASM Backend.
-TargetRegistry::RegisterMCAsmBackend(TheECE2031Target,
-createECE2031AsmBackend);
+//TargetRegistry::RegisterMCAsmBackend(TheECE2031Target,
+//createECE2031AsmBackend);
 
 // Register the assembly streamer.
 //TargetRegistry::RegisterAsmStreamer(TheECE2031Target,
 //createMCAsmStreamer);
 
-// Register the object streamer.
-TargetRegistry::RegisterELFStreamer(TheECE2031Target, createECE2031ELFStreamer);
+//// Register the object streamer.
+//TargetRegistry::RegisterELFStreamer(TheECE2031Target, createECE2031ELFStreamer);
 // Register the MCCodeEmitter
 TargetRegistry::RegisterMCCodeEmitter(TheECE2031Target, createECE2031MCCodeEmitter);
 }

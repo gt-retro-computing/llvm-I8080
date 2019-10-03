@@ -1,6 +1,5 @@
 add_llvm_library(LLVMECE2031Desc
         ECE2031AsmBackend.cpp
-        ECE2031ELFObjectWriter.cpp
         ECE2031HexObjectWriter.cpp
         ECE2031HexStreamer.cpp
         ECE2031MCTargetDesc.cpp
