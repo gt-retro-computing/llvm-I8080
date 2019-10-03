@@ -1,0 +1,6 @@
+[component_0]
+type = Library
+name = ECE2031AsmPrinter
+parent = ECE2031
+required_libraries = MC Support
+add_to_library_groups = ECE2031
