@@ -59,19 +59,19 @@ def cc_val : Operand<i32>, ImmLeaf<i32, [{}]> {
 //   let PrintMethod = "printCondCode";
 }
 
-// def memsrc : Operand<i16> {
-//   let MIOperandInfo = (ops GRRegs, i16imm);
-//   let PrintMethod = "printAddrModeMemSrc";
-//   let EncoderMethod = "getMemSrcValue";
-// }
-
-def ECE2031imm20 : Operand<i32>, ImmLeaf<i32, [{return isInt<20>(Imm);}]> {
+def ECE2031imm10 : Operand<i16>, ImmLeaf<i16, [{return isInt<10>(Imm);}]> {
   let MCOperandPredicate = [{
     int64_t Imm;
     if (MCOp.evaluateAsConstantImm(Imm))
-      return isInt<20>(Imm);
+      return isInt<10>(Imm);
     return MCOp.isBareSymbolRef();
   }];
+}
+
+def ECE2031address : ECE2031imm10 {
+  let MIOperandInfo = (ops GRRegs, i16imm);
+  let PrintMethod = "printAddrModeMemSrc";
+  let EncoderMethod = "getMemSrcValue";
 }
 
 //===----------------------------------------------------------------------===//
