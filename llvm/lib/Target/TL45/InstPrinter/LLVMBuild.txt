@@ -1,0 +1,6 @@
+[component_0]
+type = Library
+name = TL45AsmPrinter
+parent = TL45
+required_libraries = MC Support
+add_to_library_groups = TL45

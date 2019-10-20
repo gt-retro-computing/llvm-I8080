@@ -82,6 +82,7 @@ public:
     nvptx,          // NVPTX: 32-bit
     nvptx64,        // NVPTX: 64-bit
     lc2200,
+    tl45,
     le32,           // le32: generic little-endian 32-bit CPU (PNaCl)
     le64,           // le64: generic little-endian 64-bit CPU (PNaCl)
     amdil,          // AMDIL

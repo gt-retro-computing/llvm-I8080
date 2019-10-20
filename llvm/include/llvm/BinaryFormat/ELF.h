@@ -312,6 +312,7 @@ enum {
   EM_LANAI = 244,         // Lanai 32-bit processor
   EM_BPF = 247,           // Linux kernel bpf virtual machine
   EM_LC2200,
+  EM_TL45,
   EM_IMSAI_8080           // IMSAI-8080
 };
 

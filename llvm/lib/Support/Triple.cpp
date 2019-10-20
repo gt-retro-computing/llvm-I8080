@@ -71,6 +71,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case renderscript32: return "renderscript32";
   case renderscript64: return "renderscript64";
   case lc2200:         return "lc2200";
+  case tl45:           return "tl45";
   case i8080:          return "i8080";
   }
 
@@ -147,6 +148,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case riscv32:
   case riscv64:     return "riscv";
   case lc2200:      return "lc2200";
+  case tl45:        return "tl45";
   case i8080:       return "i8080";
   }
 }
@@ -320,6 +322,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("renderscript32", renderscript32)
     .Case("renderscript64", renderscript64)
     .Case("lc2200", lc2200)
+    .Case("tl45", tl45)
     .Case("i8080", i8080)
     .Default(UnknownArch);
 }
@@ -450,6 +453,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("renderscript32", Triple::renderscript32)
     .Case("renderscript64", Triple::renderscript64)
     .Case("lc2200", Triple::lc2200)
+    .Case("tl45", Triple::tl45)
     .Default(Triple::UnknownArch);
 
   // Some architectures require special parsing logic just to compute the
@@ -709,6 +713,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::thumbeb:
   case Triple::xcore:
   case Triple::lc2200: //TODO: LC2200? ELF?
+  case Triple::tl45:
     return Triple::ELF;
 
   case Triple::ppc:
@@ -1271,6 +1276,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::wasm32:
   case llvm::Triple::renderscript32:
   case llvm::Triple::lc2200:
+  case llvm::Triple::tl45:
     return 32;
 
   case llvm::Triple::aarch64:
@@ -1353,6 +1359,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::wasm32:
   case Triple::renderscript32:
   case Triple::lc2200:
+  case Triple::tl45:
     // Already 32-bit.
     break;
 
@@ -1392,6 +1399,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::sparcel:
   case Triple::shave:
   case Triple::lc2200:
+  case Triple::tl45:
     T.setArch(UnknownArch);
     break;
 
@@ -1474,6 +1482,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::renderscript32:
   case Triple::renderscript64:
   case Triple::lc2200:
+  case Triple::tl45:
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.
@@ -1566,6 +1575,7 @@ bool Triple::isLittleEndian() const {
   case Triple::renderscript32:
   case Triple::renderscript64:
   case Triple::lc2200:
+  case Triple::tl45:
     return true;
   default:
     return false;
