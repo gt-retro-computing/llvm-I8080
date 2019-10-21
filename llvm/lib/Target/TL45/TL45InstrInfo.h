@@ -16,6 +16,7 @@
 
 #include "TL45RegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 
 #define GET_INSTRINFO_HEADER
 

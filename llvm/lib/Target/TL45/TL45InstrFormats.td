@@ -112,6 +112,18 @@ class RITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL4
   // let isCommutable = 1;
 }
 
+class RIOutTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$dr, TL45imm16:$imm), opcode, opcodestr, "$dr, $imm", pattern> {
+  bits<4> dr;
+  bits<16> imm;
+  bits<3> mode = 0b100;
+
+  let Inst{26-24} = mode;
+  let Inst{23-20} = dr;
+  let Inst{19-16} = 0b0000;
+  let Inst{15-0} = imm;
+  // let isCommutable = 1;
+}
+
 
 class ITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins TL45imm16:$imm), opcode, opcodestr, "$imm", pattern> {
   bits<4> dr;
@@ -135,6 +147,7 @@ class JRTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> patt
   let Inst{15-12} = dst;
   let Inst{11-0} = 0; // padding
   // let isCommutable = 1;
+  let isIndirectBranch = 1;
 }
 
 class JITypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins b_target:$imm), opcode, opcodestr, "$imm", pattern> {

@@ -57,21 +57,25 @@ def tl45_cmp_jmp       : SDNode<"TL45ISD::CMP_JMP", SDT_TL45CmpJmp, [SDNPHasChai
 
 //  -debug-only=asm-matcher
 
-let Defs = [eflags] in {
-  defm ADD : ALUTypeInstr<0x1, "add", add>;
+let Defs = [eflags], isAsCheapAsAMove = 1 in {
+  let isAdd = 1, isCommutable = 1 in
+    defm ADD : ALUTypeInstr<0x1, "add", add>;
   defm SUB : ALUTypeInstr<0x2, "sub", sub>;
   // defm MUL : ALUTypeInstr<0x3, "mul", mul>;
-  defm OR : ALUTypeInstr<0x6, "or", or>;
-  defm XOR : ALUTypeInstr<0x7, "xor", xor>;
-  defm AND : ALUTypeInstr<0x8, "and", and>;
 
-  let mode = 0b001 in
+  let isCommutable = 1 in {
+    defm OR : ALUTypeInstr<0x6, "or", or>;
+    defm XOR : ALUTypeInstr<0x7, "xor", xor>;
+    defm AND : ALUTypeInstr<0x8, "and", and>;
+  }
+
+  let mode = 0b001, isCompare = 1 in
     def CMP : RRTypeInstr<0x5, "cmp", []>;
-  let mode = 0b101 in
+  let mode = 0b101, isCompare = 1 in
     def CMPI : RITypeInstr<0x5, "cmpi", []>;
 }
 
-let mode = 0b001 in {
+let mode = 0b001, isAsCheapAsAMove = 1 in {
   def XCHG : RRTypeInstr<0x4, "xchg", []>;
 
   let Defs = [eflags] in
@@ -79,17 +83,20 @@ let mode = 0b001 in {
 }
 
 def IN : RITypeInstr<0x10, "in", []>;
-def OUT : RITypeInstr<0x11, "out", []>;
+def OUT : RIOutTypeInstr<0x11, "out", []>;
 
 let mode = 0b001 in {
-  def LW : RRITypeInstr<0x16, "lw", [
-    (set (i32 GRRegs:$dr), (load (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
-  ]>;
+  let mayLoad = 1 in
+    def LW : RRITypeInstr<0x16, "lw", [
+      (set (i32 GRRegs:$dr), (load (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
+    ]>;
+
   // yes it's backward for SW. MEM[$sr1+imm] = $dr
-  def SW : RRIStoreTypeInstr<0x17, "sw", [
-    (store i32:$dr, (add (i32 GRRegs:$sr1), TL45imm16:$imm)),
-    (store i32:$dr, (i32 GRRegs:$sr1))
-  ]>;
+  let mayStore = 1 in
+    def SW : RRIStoreTypeInstr<0x17, "sw", [
+      (store i32:$dr, (add (i32 GRRegs:$sr1), TL45imm16:$imm)),
+      (store i32:$dr, (i32 GRRegs:$sr1))
+    ]>;
 }
 
 def PUSH : RRITypeInstr<0x14, "push", [], "$dr">;
@@ -122,9 +129,12 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 
 let isTerminator = 1, isBarrier = 1, isReturn = 1 in
   def RET : NoneTypeInstr<0xE, "ret", [(tl45_ret)]>;
-def HALT : NoneTypeInstr<0x0, "halt", []>;
 
-def CALL : ITypeInstr<0xD, "call", [(tl45_call TL45imm16:$imm)]>;
+let isBarrier = 1, hasSideEffects = 1 in
+  def HALT : NoneTypeInstr<0x0, "halt", []>;
+
+let isCall = 1 in
+  def CALL : ITypeInstr<0xD, "call", [(tl45_call TL45imm16:$imm)]>;
 
 
 /*  Various Patterns and Pseudo */
@@ -211,6 +221,11 @@ def : BccPat<setge, JGEI>;
 def : BccPat<setult, JBI>;
 def : BccPat<setuge, JNBI>;
 */
+
+
+def : Pat<(int_tl45_out i32:$a, TL45imm16:$b), (OUT i32:$a, TL45imm16:$b)>;
+def : Pat<(int_tl45_in TL45imm16:$b), (IN TL45imm16:$b)>;
+
 
 /*
 

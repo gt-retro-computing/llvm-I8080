@@ -1267,3 +1267,5 @@ include "llvm/IR/IntrinsicsBPF.td"
 include "llvm/IR/IntrinsicsSystemZ.td"
 include "llvm/IR/IntrinsicsWebAssembly.td"
 include "llvm/IR/IntrinsicsRISCV.td"
+include "llvm/IR/IntrinsicsTL45.td"
+

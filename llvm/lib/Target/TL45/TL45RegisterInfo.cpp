@@ -91,9 +91,9 @@ void TL45RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II, int S
       FrameReg = TL45::bp;
     }
     else {
-      if ((MI.getNumOperands()> OpNo+2) && MI.getOperand(OpNo+2).isReg())
-        FrameReg = MI.getOperand(OpNo+2).getReg();
-      else
+//      if ((MI.getNumOperands()> OpNo+2) && MI.getOperand(OpNo+2).isReg() && MI.getOperand(OpNo+2).getReg().id() != TL45::eflags)
+//        FrameReg = MI.getOperand(OpNo+2).getReg();
+//      else
         FrameReg = TL45::sp;
     }
   }
