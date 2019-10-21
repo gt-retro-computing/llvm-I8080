@@ -83,20 +83,24 @@ void TL45RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II, int S
   // getFrameRegister() returns.
   unsigned FrameReg;
 
-  if (FrameIndex >= MinCSFI && FrameIndex <= MaxCSFI)
-    FrameReg = TL45::sp;
-  else {
-    const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
-    if (TFI->hasFP(MF)) {
-      FrameReg = TL45::bp;
-    }
-    else {
-//      if ((MI.getNumOperands()> OpNo+2) && MI.getOperand(OpNo+2).isReg() && MI.getOperand(OpNo+2).getReg().id() != TL45::eflags)
-//        FrameReg = MI.getOperand(OpNo+2).getReg();
-//      else
-        FrameReg = TL45::sp;
-    }
-  }
+  FrameReg = TL45::sp;
+// TODO not sure precisely what this code is supposed to do and in its current state,
+// causes bugs when working with the stack.
+
+//  if (FrameIndex >= MinCSFI && FrameIndex <= MaxCSFI)
+//    FrameReg = TL45::sp;
+//  else {
+//    const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+//    if (TFI->hasFP(MF)) {
+//      FrameReg = TL45::bp;
+//    }
+//    else {
+// //      if ((MI.getNumOperands()> OpNo+2) && MI.getOperand(OpNo+2).isReg() && MI.getOperand(OpNo+2).getReg().id() != TL45::eflags)
+// //        FrameReg = MI.getOperand(OpNo+2).getReg();
+// //      else
+//        FrameReg = TL45::sp;
+//    }
+//  }
   // Calculate final offset.
   // - There is no need to change the offset if the frame object
   //   is one of the

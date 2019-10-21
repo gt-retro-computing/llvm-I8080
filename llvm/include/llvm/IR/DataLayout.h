@@ -487,7 +487,7 @@ public:
   /// This is the amount that alloca reserves for this type. For example,
   /// returns 96 or 128 for x86_fp80, depending on alignment.
   uint64_t getTypeAllocSizeInBits(Type *Ty) const {
-    return 8 * getTypeAllocSize(Ty);
+    return BitsPerMemoryUnit * getTypeAllocSize(Ty);
   }
 
   /// Returns the minimum ABI-required alignment for the specified type.
@@ -570,9 +570,11 @@ class StructLayout {
   unsigned StructAlignment;
   unsigned IsPadded : 1;
   unsigned NumElements : 31;
-  uint64_t MemberOffsets[1]; // variable sized array!
-
   unsigned BitsPerUnit;
+  uint64_t MemberOffsets[1]; // variable sized array!
+  // MemberOffsets must be the last member of StructLayout because StructLayout
+  // is specially allocated with extra space "after" to turn MemberOffsets into
+  // a variable size array.
 
 public:
   uint64_t getSizeInBytes() const { return StructSize; }

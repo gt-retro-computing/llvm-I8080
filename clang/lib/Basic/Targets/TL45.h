@@ -26,7 +26,25 @@ public:
                     "-a:32:32" // Address 32bits 32bits aligned
                     "-n32" // Native Int 32
     );
+
+    PointerWidth = PointerAlign = 32;
+    BoolWidth = BoolAlign = 32;
+    CharWidth = CharAlign = 32;
+    ShortWidth = ShortAlign = 32;
+    IntWidth = IntAlign = 32;
   }
+
+  unsigned getCharWidth() const { return 8; } // FIXME
+  unsigned getCharAlign() const { return 8; } // FIXME
+
+  /// Return the size of 'signed short' and 'unsigned short' for this
+  /// target, in bits.
+  unsigned getShortWidth() const { return 16; } // FIXME
+
+  /// Return the alignment of 'signed short' and 'unsigned short' for
+  /// this target.
+  unsigned getShortAlign() const { return 16; } // FIXME
+
   ArrayRef<const char *> getGCCRegNames() const override;
 
   ArrayRef<GCCRegAlias> getGCCRegAliases() const override;
@@ -34,14 +52,14 @@ public:
   ArrayRef<Builtin::Info> getTargetBuiltins() const override;
 
   void getTargetDefines(const LangOptions &Opts,
-          MacroBuilder &Builder) const override;
+                        MacroBuilder &Builder) const override;
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
     return TargetInfo::VoidPtrBuiltinVaList;
   }
 
   bool validateAsmConstraint(const char *&Name,
-          TargetInfo::ConstraintInfo &info) const override {
+                             TargetInfo::ConstraintInfo &info) const override {
     return false;
   }
 
