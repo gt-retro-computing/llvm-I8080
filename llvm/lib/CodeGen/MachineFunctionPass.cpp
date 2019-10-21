@@ -72,9 +72,6 @@ bool MachineFunctionPass::runOnFunction(Function &F) {
 
   bool RV = runOnMachineFunction(MF);
 
-  dbgs() << "Pass: " << getPassName() << "\n";
-  MF.dump();
-
   if (ShouldEmitSizeRemarks) {
     // We wanted size remarks. Check if there was a change to the number of
     // MachineInstrs in the module. Emit a remark if there was a change.
