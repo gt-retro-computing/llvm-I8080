@@ -885,6 +885,49 @@ SDValue TL45TargetLowering::lowerXor(SDValue Op, SelectionDAG &DAG) const {
   return Xor;
 }
 
+std::pair<unsigned, const TargetRegisterClass *>
+TL45TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                                  StringRef Constraint,
+                                                  MVT VT) const {
+  // First, see if this is a constraint that directly corresponds to a
+  // TL45 register class.
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      return std::make_pair(0U, &TL45::GRRegsRegClass);
+    default:
+      break;
+    }
+  }
+
+  // Clang will correctly decode the usage of register name aliases into their
+  // official names. However, other frontends like `rustc` do not. This allows
+  // users of these frontends to use the ABI names for registers in LLVM-style
+  // register constraints.
+  Register XRegFromAlias = StringSwitch<Register>(Constraint.lower())
+      .Cases("{zero}", "{r0}", TL45::r0)
+      .Case("{r1}", TL45::r1)
+      .Case("{r2}", TL45::r2)
+      .Case("{r3}", TL45::r3)
+      .Case("{r4}", TL45::r4)
+      .Case("{r5}", TL45::r5)
+      .Case("{r6}", TL45::r6)
+      .Case("{r7}", TL45::r7)
+      .Case("{r8}", TL45::r8)
+      .Case("{r9}", TL45::r9)
+      .Case("{r10}", TL45::r10)
+      .Case("{r11}", TL45::r11)
+      .Case("{r12}", TL45::r12)
+      .Case("{r13}", TL45::r13)
+      .Cases("{bp}","{r14}", TL45::bp)
+      .Cases("{sp}", "{r15}", TL45::sp)
+      .Default(TL45::NoRegister);
+  if (XRegFromAlias != TL45::NoRegister)
+    return std::make_pair(XRegFromAlias, &TL45::GRRegsRegClass);
+
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 const char *TL45TargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch ((TL45ISD::NodeType)Opcode) {
   case TL45ISD::FIRST_NUMBER:

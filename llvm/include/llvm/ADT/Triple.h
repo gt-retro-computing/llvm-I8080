@@ -230,6 +230,7 @@ public:
     MachO,
     Wasm,
     XCOFF,
+    HEX,
   };
 
 private:

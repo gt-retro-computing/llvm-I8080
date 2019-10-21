@@ -8204,6 +8204,7 @@ void SelectionDAGBuilder::visitInlineAsm(ImmutableCallSite CS) {
         // C_RegisterClass, and a target-defined fashion for
         // C_Immediate/C_Other). Find a register that we can use.
         if (OpInfo.AssignedRegs.Regs.empty()) {
+
           emitInlineAsmError(
               CS, "couldn't allocate output register for constraint '" +
                       Twine(OpInfo.ConstraintCode) + "'");

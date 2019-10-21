@@ -189,6 +189,16 @@ namespace clang {
     };
   }
 
+  /// MIPS builtins
+  namespace TL45 {
+    enum {
+      LastTIBuiltin = clang::Builtin::FirstTSBuiltin-1,
+#define BUILTIN(ID, TYPE, ATTRS) BI##ID,
+#include "clang/Basic/BuiltinsTL45.def"
+      LastTSBuiltin
+    };
+  }
+
   /// WebAssembly builtins
   namespace WebAssembly {
     enum {

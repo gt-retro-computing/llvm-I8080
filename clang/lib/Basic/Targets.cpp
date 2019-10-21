@@ -34,6 +34,7 @@
 #include "Targets/Sparc.h"
 #include "Targets/SystemZ.h"
 #include "Targets/TCE.h"
+#include "Targets/TL45.h"
 #include "Targets/WebAssembly.h"
 #include "Targets/X86.h"
 #include "Targets/XCore.h"
@@ -605,6 +606,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   case llvm::Triple::lc2200:
     printf("LC2200 target Clang Selected \n");
     return new LC2200TargetInfo(Triple, Opts);
+  case llvm::Triple::tl45:
+    return new TL45TargetInfo(Triple, Opts);
 //      return new
   }
 }

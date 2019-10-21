@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/MC/MCStreamer.h"
+#include "InstPrinter/TL45InstPrinter.h"
 
 using namespace llvm;
 
@@ -21,6 +22,9 @@ public:
 
   bool emitPseudoExpansionLowering(MCStreamer &OutStreamer,
                                    const MachineInstr *MI);
+
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                       const char *ExtraCode, raw_ostream &OS) override;
 
 };
 }
@@ -75,6 +79,48 @@ static bool LowerTL45MachineOperandToMCOperand(const MachineOperand &MO,
       MCOp = lowerSymbolOperand(MO, AP.GetCPISymbol(MO.getIndex()), AP);
       break;
   }
+  return true;
+}
+
+// adapted from RISCV target.
+bool TL45AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                      const char *ExtraCode, raw_ostream &OS) {
+  // First try the generic code, which knows about modifiers like 'c' and 'n'.
+  if (!AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS))
+    return false;
+
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  if (ExtraCode && ExtraCode[0]) {
+    if (ExtraCode[1] != 0)
+      return true; // Unknown modifier.
+
+    switch (ExtraCode[0]) {
+    default:
+      return true; // Unknown modifier.
+    case 'z':      // Print zero register if zero, regular printing otherwise.
+      if (MO.isImm() && MO.getImm() == 0) {
+        OS << TL45InstPrinter::getRegisterName(TL45::r0);
+        return false;
+      }
+      break;
+    case 'i': // Literal 'i' if operand is not a register.
+      if (!MO.isReg())
+        OS << 'i';
+      return false;
+    }
+  }
+
+  switch (MO.getType()) {
+  case MachineOperand::MO_Immediate:
+    OS << MO.getImm();
+    return false;
+  case MachineOperand::MO_Register:
+    OS << TL45InstPrinter::getRegisterName(MO.getReg());
+    return false;
+  default:
+    break;
+  }
+
   return true;
 }
 

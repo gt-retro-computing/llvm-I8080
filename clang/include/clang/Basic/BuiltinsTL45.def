@@ -1,0 +1,21 @@
+//===-- BuiltinsTl45.def - TL45 Builtin function database --------*- C++ -*-==//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file defines the TL45-specific builtin function database. Users of
+// this file must define the BUILTIN macro to make use of this information.
+//
+//===----------------------------------------------------------------------===//
+
+// The format of this database matches clang/Basic/Builtins.def.
+// See: http://lists.llvm.org/pipermail/llvm-dev/2018-September/126446.html
+
+BUILTIN(__builtin_tl45_out, "viIi", "nc")
+BUILTIN(__builtin_tl45_in, "iIi", "nc")
+
+
+#undef BUILTIN
