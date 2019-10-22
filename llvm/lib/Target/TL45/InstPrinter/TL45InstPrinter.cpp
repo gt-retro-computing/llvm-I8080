@@ -43,6 +43,7 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
 
   const MCSymbolRefExpr *SRE;
   const MCBinaryExpr *BinExp;
+  const MCConstantExpr *constExpr;
   switch (Expr->getKind()) {
     case MCExpr::ExprKind::SymbolRef:
       SRE = dyn_cast<MCSymbolRefExpr>(Expr);
@@ -59,6 +60,7 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
         default: llvm_unreachable("unsupported operation");
       }
       printExpr(BinExp->getRHS(), OS);
+      break;
     case MCExpr::ExprKind ::Constant:
       OS << dyn_cast<MCConstantExpr>(Expr)->getValue();
       break;
