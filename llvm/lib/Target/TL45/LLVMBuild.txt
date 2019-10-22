@@ -18,6 +18,7 @@
 [common]
 subdirectories =
  AsmParser
+ Disassembler
  InstPrinter
  MCTargetDesc
  TargetInfo

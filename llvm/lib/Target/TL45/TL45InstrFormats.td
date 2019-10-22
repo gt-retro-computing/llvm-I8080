@@ -21,6 +21,12 @@ class InstTL45<dag outs, dag ins, bits<5> binOpcode, string opcodestr, string ar
   let Pattern = pattern;
   let Size = 4; //???
   let Inst{31-27} = binOpcode;
+
+  // SoftFail is a field the disassembler can use to provide a way for
+  // instructions to not match without killing the whole decode process. It is
+  // mainly used for ARM, but Tablegen expects this field to exist or it fails
+  // to build the decode table.
+  field bits<32> SoftFail = 0;
 }
 
 

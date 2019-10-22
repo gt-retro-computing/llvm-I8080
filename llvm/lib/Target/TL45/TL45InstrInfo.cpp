@@ -13,7 +13,7 @@
 
 using namespace llvm;
 
-TL45InstrInfo::TL45InstrInfo() : TL45GenInstrInfo(), RI() {}
+TL45InstrInfo::TL45InstrInfo() : TL45GenInstrInfo(TL45::ADJCALLSTACKDOWN, TL45::ADJCALLSTACKUP, -1, TL45::RET), RI() {}
 
 void TL45InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                           MachineBasicBlock::iterator I,

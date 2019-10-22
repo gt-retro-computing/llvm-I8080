@@ -286,3 +286,33 @@ int TL45FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
   assert(offset % 4 == 0 && "4-byte addressibility");
   return offset / 4;
 }
+
+
+// Eliminate ADJCALLSTACKDOWN, ADJCALLSTACKUP pseudo instructions.
+MachineBasicBlock::iterator TL45FrameLowering::eliminateCallFramePseudoInstr(
+    MachineFunction &MF, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator MI) const {
+  Register SPReg = TL45::sp;
+  DebugLoc DL = MI->getDebugLoc();
+
+  if (!hasReservedCallFrame(MF)) {
+    // If space has not been reserved for a call frame, ADJCALLSTACKDOWN and
+    // ADJCALLSTACKUP must be converted to instructions manipulating the stack
+    // pointer. This is necessary when there is a variable length stack
+    // allocation (e.g. alloca), which means it's not possible to allocate
+    // space for outgoing arguments from within the function prologue.
+    int64_t Amount = MI->getOperand(0).getImm();
+
+    if (Amount != 0) {
+      // Ensure the stack remains aligned after adjustment.
+      Amount = alignSPAdjust(Amount);
+
+      if (MI->getOpcode() == TL45::ADJCALLSTACKDOWN)
+        Amount = -Amount;
+
+      adjustReg(MBB, MI, DL, SPReg, SPReg, Amount, MachineInstr::NoFlags);
+    }
+  }
+
+  return MBB.erase(MI);
+}

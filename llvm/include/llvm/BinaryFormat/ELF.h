@@ -770,6 +770,11 @@ enum {
 #include "ELFRelocs/MSP430.def"
 };
 
+// ELF Relocation types for TL45
+enum {
+#include "ELFRelocs/TL45.def"
+};
+
 #undef ELF_RELOC
 
 // Section header.
