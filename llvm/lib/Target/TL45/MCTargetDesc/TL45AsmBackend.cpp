@@ -148,8 +148,8 @@ const MCFixupKindInfo &TL45AsmBackend::getFixupKindInfo(MCFixupKind Kind) const 
       // TL45FixupKinds.h.
       //
       // name                      offset bits  flags
-      { "fixup_tl45_hi16_i", 16,     16,  0 },
-      { "fixup_tl45_lo16_i", 16,     16,  0 },
+      { "fixup_tl45_hi16_i",  0,     16,  0 },
+      { "fixup_tl45_lo16_i",  0,     16,  0 },
       { "fixup_tl45_32",      0,     32,  0 },
   };
   static_assert((array_lengthof(Infos)) == TL45::NumTargetFixupKinds,

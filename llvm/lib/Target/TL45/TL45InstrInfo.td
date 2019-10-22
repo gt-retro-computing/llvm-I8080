@@ -69,9 +69,9 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
     defm AND : ALUTypeInstr<0x8, "and", and>;
   }
 
-  let mode = 0b001, isCompare = 1 in
+  let mode = 0b001, isCompare = 1, isTerminator = 1 in
     def CMP : RRTypeInstr<0x5, "cmp", []>;
-  let mode = 0b101, isCompare = 1 in
+  let mode = 0b101, isCompare = 1, isTerminator = 1 in
     def CMPI : RITypeInstr<0x5, "cmpi", []>;
 }
 
@@ -125,7 +125,7 @@ let Uses = [eflags], isBranch = 1, isTerminator = 1 in {
 }
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-  defm JMP : JTypeInstr<0xC, 0xF, "jmp">;
+  defm JMP : JTypeInstr<0xC, 0xF, "jmp", [(br bb:$imm)]>;
 
 let isTerminator = 1, isBarrier = 1, isReturn = 1 in
   def RET : NoneTypeInstr<0xE, "ret", [(tl45_ret)]>;
@@ -167,8 +167,10 @@ def : Pat<(IsOrAdd (i32 AddrFI:$Rs), TL45imm16:$imm12),
 multiclass LdPat<PatFrag LoadOp, InstTL45 Inst> {
   def : Pat<(LoadOp GRRegs:$rs1), (Inst GRRegs:$rs1, 0)>;
   def : Pat<(LoadOp AddrFI:$rs1), (Inst AddrFI:$rs1, 0)>;
+
   def : Pat<(LoadOp (add GRRegs:$rs1, TL45imm16:$imm12)),
             (Inst GRRegs:$rs1, TL45imm16:$imm12)>;
+
   def : Pat<(LoadOp (add AddrFI:$rs1, TL45imm16:$imm12)),
             (Inst AddrFI:$rs1, TL45imm16:$imm12)>;
   def : Pat<(LoadOp (IsOrAdd AddrFI:$rs1, TL45imm16:$imm12)),

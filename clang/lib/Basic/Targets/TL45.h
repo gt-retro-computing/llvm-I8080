@@ -26,6 +26,7 @@ public:
                     "-a:32:32" // Address 32bits 32bits aligned
                     "-n32" // Native Int 32
     );
+    
 
     PointerWidth = PointerAlign = 32;
     BoolWidth = BoolAlign = 32;

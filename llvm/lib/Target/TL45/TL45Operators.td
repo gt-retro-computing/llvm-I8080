@@ -30,6 +30,11 @@ def TL45imm16 : Operand<i32>, ImmLeaf<i32, [{return isInt<16>(Imm);}]> {
   }];
 }
 
+def jmptarget : Operand<OtherVT> {
+  let EncoderMethod = "getJumpTargetOpValue";
+  // let ParserMatchClass = MipsJumpTargetAsmOperand;
+}
+
 //===----------------------------------------------------------------------===//
 // Operand Definitions.
 //===----------------------------------------------------------------------===//

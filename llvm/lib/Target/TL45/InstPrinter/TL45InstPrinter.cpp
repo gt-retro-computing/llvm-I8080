@@ -54,8 +54,8 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
       assert(BinExp && "Failed to cast a binexp to MCBinaryExpr");
       printExpr(BinExp->getLHS(), OS);
       switch (BinExp -> getOpcode()) {
-        case MCBinaryExpr::Opcode ::Add: OS << "+"; break;
-        case MCBinaryExpr::Opcode ::Sub: OS << "-"; break;
+        case MCBinaryExpr::Opcode ::Add: OS << " + "; break;
+        case MCBinaryExpr::Opcode ::Sub: OS << " - "; break;
         default: llvm_unreachable("unsupported operation");
       }
       printExpr(BinExp->getRHS(), OS);

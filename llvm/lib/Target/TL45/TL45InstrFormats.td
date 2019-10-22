@@ -156,7 +156,7 @@ class JRTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> patt
   let isIndirectBranch = 1;
 }
 
-class JITypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins b_target:$imm), opcode, opcodestr, "$imm", pattern> {
+class JITypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins jmptarget:$imm), opcode, opcodestr, "$imm", pattern> {
   bits<16> imm;
   bits<3> mode = 0b100;
 
@@ -167,9 +167,9 @@ class JITypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> patt
   // let isCommutable = 1;
 }
 
-multiclass JTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr> {
+multiclass JTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern=[]> {
     def "" : JRTypeInstr<opcode, flag, opcodestr, []>;
-    def "I" : JITypeInstr<opcode, flag, !strconcat(opcodestr, "i"), [(br bb:$imm)]>;
+    def "I" : JITypeInstr<opcode, flag, !strconcat(opcodestr, "i"), pattern>;
 }
 
 class NoneTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins), opcode, opcodestr, "", pattern> {

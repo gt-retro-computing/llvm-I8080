@@ -103,6 +103,8 @@ void TL45FrameLowering::emitPrologue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
   assert(&MF.front() == &MBB && "Shrink-wrapping not yet supported");
 
+  bool hasFramePointer = hasFP(MF);
+
   MachineFrameInfo &MFI = MF.getFrameInfo();
   // auto *RVFI = MF.getInfo<TL45MachineFunctionInfo>();
   const TL45RegisterInfo *RI = STI.getRegisterInfo();
@@ -128,6 +130,8 @@ void TL45FrameLowering::emitPrologue(MachineFunction &MF,
   // FIXME (note copied from Lanai): This appears to be overallocating.  Needs
   // investigation. Get the number of bytes to allocate from the FrameInfo.
   uint64_t StackSize = MFI.getStackSize();
+
+  if (hasFramePointer) StackSize++;
 
   // Early exit if there is no need to allocate on the stack
   if (StackSize == 0 && !MFI.adjustsStack())
@@ -163,10 +167,13 @@ void TL45FrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   // Generate new FP.
-  if (hasFP(MF)) {
+  if (hasFramePointer) {
+    BuildMI(MBB, MBBI, DL, TII->get(TL45::SW)).addReg(TL45::bp).addReg(TL45::sp).addImm(StackSize - 1);
+    BuildMI(MBB, MBBI, DL, TII->get(TL45::ADD)).addReg(TL45::bp).addReg(TL45::sp).addReg(TL45::r0);
+
 //    adjustReg(MBB, MBBI, DL, FPReg, SPReg,
 //              StackSize - RVFI->getVarArgsSaveSize(), MachineInstr::FrameSetup);
-    adjustReg(MBB, MBBI, DL, FPReg, SPReg, StackSize, MachineInstr::FrameSetup);
+//    adjustReg(MBB, MBBI, DL, FPReg, SPReg, StackSize, MachineInstr::FrameSetup);
 
     // Emit ".cfi_def_cfa $fp, 0"
     unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
@@ -202,6 +209,8 @@ void TL45FrameLowering::emitPrologue(MachineFunction &MF,
 
 void TL45FrameLowering::emitEpilogue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
+  bool hasFramePointer = hasFP(MF);
+
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   const TL45RegisterInfo *RI = STI.getRegisterInfo();
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -218,6 +227,8 @@ void TL45FrameLowering::emitEpilogue(MachineFunction &MF,
 
   uint64_t StackSize = MFI.getStackSize();
 
+  if (hasFramePointer) StackSize++;
+
   uint64_t FPOffset = StackSize;// - RVFI->getVarArgsSaveSize();
 
   // Restore the stack pointer using the value of the frame pointer. Only
@@ -225,28 +236,34 @@ void TL45FrameLowering::emitEpilogue(MachineFunction &MF,
   // unknown.
   if (RI->needsStackRealignment(MF) || MFI.hasVarSizedObjects()) {
     assert(hasFP(MF) && "frame pointer should not have been eliminated");
-    adjustReg(MBB, LastFrameDestroy, DL, SPReg, FPReg, -FPOffset,
-              MachineInstr::FrameDestroy);
+//    adjustReg(MBB, LastFrameDestroy, DL, SPReg, FPReg, -FPOffset,
+//              MachineInstr::FrameDestroy);
+
+    BuildMI(MBB, LastFrameDestroy, DL, TII->get(TL45::ADD)).addReg(TL45::sp).addReg(TL45::bp).addReg(TL45::r0);
   }
 
-  if (hasFP(MF)) {
+  if (hasFramePointer) {
     // To find the instruction restoring FP from stack.
-    for (auto &I = LastFrameDestroy; I != MBBI; ++I) {
-      if (I->mayLoad() && I->getOperand(0).isReg()) {
-        Register DestReg = I->getOperand(0).getReg();
-        if (DestReg == FPReg) {
-          // If there is frame pointer, after restoring $fp registers, we
-          // need adjust CFA to ($sp - FPOffset).
-          // Emit ".cfi_def_cfa $sp, -FPOffset"
-          unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
-                  nullptr, RI->getDwarfRegNum(SPReg, true), -FPOffset));
-          BuildMI(MBB, std::next(I), DL,
-                  TII->get(TargetOpcode::CFI_INSTRUCTION))
-                  .addCFIIndex(CFIIndex);
-          break;
-        }
-      }
-    }
+//    for (auto &I = LastFrameDestroy; I != MBBI; ++I) {
+//      if (I->mayLoad() && I->getOperand(0).isReg()) {
+//        Register DestReg = I->getOperand(0).getReg();
+//        if (DestReg == FPReg) {
+//          // If there is frame pointer, after restoring $fp registers, we
+//          // need adjust CFA to ($sp - FPOffset).
+//          // Emit ".cfi_def_cfa $sp, -FPOffset"
+//          unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfa(
+//                  nullptr, RI->getDwarfRegNum(SPReg, true), -FPOffset));
+//          BuildMI(MBB, std::next(I), DL,
+//                  TII->get(TargetOpcode::CFI_INSTRUCTION))
+//                  .addCFIIndex(CFIIndex);
+//          break;
+//        }
+//      }
+//    }
+
+    // BP is a linked list!!!
+    BuildMI(MBB, LastFrameDestroy, DL, TII->get(TL45::LW)).addReg(TL45::bp).addReg(TL45::bp).addImm(0);
+
   }
 
   // Add CFI directives for callee-saved registers.

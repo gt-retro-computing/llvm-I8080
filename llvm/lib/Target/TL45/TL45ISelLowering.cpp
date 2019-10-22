@@ -49,7 +49,7 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Custom);
 
-  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+//  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
   setOperationAction(ISD::BasicBlock, MVT::Other, Expand);
 
@@ -698,6 +698,34 @@ SDValue TL45TargetLowering::LowerOperation(SDValue Op,
   }
 }
 
+static SDValue getTargetNode(GlobalAddressSDNode *N, SDLoc DL, EVT Ty,
+                             SelectionDAG &DAG, unsigned Flags) {
+  return DAG.getTargetGlobalAddress(N->getGlobal(), DL, Ty, 0, Flags);
+}
+
+static SDValue getTargetNode(BlockAddressSDNode *N, SDLoc DL, EVT Ty,
+                             SelectionDAG &DAG, unsigned Flags) {
+  return DAG.getTargetBlockAddress(N->getBlockAddress(), Ty, N->getOffset(),
+                                   Flags);
+}
+
+static SDValue getTargetNode(ConstantPoolSDNode *N, SDLoc DL, EVT Ty,
+                             SelectionDAG &DAG, unsigned Flags) {
+  return DAG.getTargetConstantPool(N->getConstVal(), Ty, N->getAlignment(),
+                                   N->getOffset(), Flags);
+}
+
+template <class NodeTy>
+SDValue TL45TargetLowering::getAddr(NodeTy *N, SelectionDAG &DAG,
+                                     bool IsLocal) const {
+  SDLoc DL(N);
+  EVT Ty = getPointerTy(DAG.getDataLayout());
+  SDValue r0 = DAG.getRegister(TL45::r0, MVT::i32);
+
+  SDValue Addr = getTargetNode(N, DL, Ty, DAG, 0);
+  return SDValue(DAG.getMachineNode(TL45::ADDI, DL, Ty, r0, Addr), 0);
+}
+
 SDValue TL45TargetLowering::lowerGlobalAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
   SDLoc DL(Op);
@@ -707,15 +735,17 @@ SDValue TL45TargetLowering::lowerGlobalAddress(SDValue Op,
   MVT XLenVT = MVT::i32;
 
   const GlobalValue *GV = N->getGlobal();
-  // bool IsLocal = getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV);
-  // SDValue Addr = getAddr(N, DAG, IsLocal);
+  bool IsLocal = getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV);
+  SDValue Addr = getAddr(N, DAG, IsLocal);
 
   // In order to maximise the opportunity for common subexpression elimination,
   // emit a separate ADD node for the global address offset instead of folding
   // it in the global address node. Later peephole optimisations may choose to
   // fold it back in when profitable.
 
-  return DAG.getTargetGlobalAddress(GV, DL, MVT::i32, Offset);
+  SDValue root = DAG.getNode(ISD::ADD, DL, MVT::i32, Addr, DAG.getConstant(Offset, DL, MVT::i32));
+
+  return root;
 }
 
 SDValue TL45TargetLowering::ExpandLibCall(const char *LibcallName, SDValue Op, bool isSigned, SelectionDAG &DAG) const {
