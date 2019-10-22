@@ -33,25 +33,45 @@ void TL45InstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 }
 
 void TL45InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
-                                  StringRef Annot, const MCSubtargetInfo &STI) {
+                                StringRef Annot, const MCSubtargetInfo &STI) {
   printInstruction(MI, O);
   printAnnotation(O, Annot);
 }
 
 namespace TL45 {
 static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
-  const MCSymbolRefExpr *SRE;
 
-  SRE = dyn_cast<MCSymbolRefExpr>(Expr);
-  assert(SRE && "Unexpected MCExpr type.");
-  const MCSymbolRefExpr::VariantKind Kind = SRE->getKind();
-  OS << SRE->getSymbol();
+  const MCSymbolRefExpr *SRE;
+  const MCBinaryExpr *BinExp;
+  switch (Expr->getKind()) {
+    case MCExpr::ExprKind::SymbolRef:
+      SRE = dyn_cast<MCSymbolRefExpr>(Expr);
+      assert(SRE && "Unexpected MCExpr type.");
+      OS << SRE->getSymbol();
+      break;
+    case MCExpr::ExprKind ::Binary:
+      BinExp = dyn_cast<MCBinaryExpr>(Expr);
+      assert(BinExp && "Failed to cast a binexp to MCBinaryExpr");
+      printExpr(BinExp->getLHS(), OS);
+      switch (BinExp -> getOpcode()) {
+        case MCBinaryExpr::Opcode ::Add: OS << "+"; break;
+        case MCBinaryExpr::Opcode ::Sub: OS << "-"; break;
+        default: llvm_unreachable("unsupported operation");
+      }
+      printExpr(BinExp->getRHS(), OS);
+    case MCExpr::ExprKind ::Constant:
+      OS << dyn_cast<MCConstantExpr>(Expr)->getValue();
+      break;
+    default:
+      Expr->dump();
+      llvm_unreachable("Can't print this MCExpr");
+  }
 //  if SRE->getSymbol().
 }
 }
 
 void TL45InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
-                                     raw_ostream &O) {
+                                   raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
     printRegName(O, Op.getReg());
