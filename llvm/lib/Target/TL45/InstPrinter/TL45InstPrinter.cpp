@@ -43,7 +43,6 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
 
   const MCSymbolRefExpr *SRE;
   const MCBinaryExpr *BinExp;
-  const MCConstantExpr *constExpr;
   switch (Expr->getKind()) {
     case MCExpr::ExprKind::SymbolRef:
       SRE = dyn_cast<MCSymbolRefExpr>(Expr);

@@ -7,11 +7,7 @@ void TL45MCAsmInfo::anchor() {}
 
 TL45MCAsmInfo::TL45MCAsmInfo(const Triple &TT) {
     //TODO: Assembly formatting
-//	SupportsDebugInformation = false;
-//	Data16bitsDirective = 0;
-//	Data32bitsDirective = "\t.fill\t";
-//	Data64bitsDirective = 0;
-//	ZeroDirective = "\t.fill 0\t";
+	Data32bitsDirective = "\tDW\t";
   CommentString = ";";
 //	AscizDirective = 0;
 //	HiddenVisibilityAttr = MCSA_Invalid;
@@ -19,16 +15,13 @@ TL45MCAsmInfo::TL45MCAsmInfo(const Triple &TT) {
 //	ProtectedVisibilityAttr = MCSA_Invalid;
 
   // compatibility with non-LLVM LC2200 assemblers
-  PrivateGlobalPrefix = "_l";
-  PrivateLabelPrefix = "_l";
-
-//  GlobalDirective = "\t! globl\t";
+  PrivateGlobalPrefix = "_lpg";
+  PrivateLabelPrefix = "_lp";
+  LinkerPrivateGlobalPrefix = "_llp";
 
   UsesNonexecutableStackSection = false;
   HasDotTypeDotSizeDirective = false;
   HasSingleParameterDotFile = false;
   NeedsLocalForSize = false;
   HasIdentDirective = false;
-
-
 }
