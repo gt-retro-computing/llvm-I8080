@@ -13908,12 +13908,23 @@ Decl *Sema::ActOnStartLinkageSpecification(Scope *S, SourceLocation ExternLoc,
   }
 
   StringRef Lang = Lit->getString();
+
+  // filter out null bytes. this can happen
+  // when CHAR_WIDTH is not 8. "C\x00+\x00+\x00"
+  std::string s;
+  for (auto c : Lang) {
+    if (c != 0) {
+      s += c;
+    }
+  }
+
   LinkageSpecDecl::LanguageIDs Language;
-  if (Lang == "C")
+  if (s == "C")
     Language = LinkageSpecDecl::lang_c;
-  else if (Lang == "C++")
+  else if (s == "C++")
     Language = LinkageSpecDecl::lang_cxx;
   else {
+    llvm::outs() << Lang << "\n";
     Diag(LangStr->getExprLoc(), diag::err_language_linkage_spec_unknown)
       << LangStr->getSourceRange();
     return nullptr;

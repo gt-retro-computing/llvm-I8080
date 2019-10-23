@@ -26,6 +26,10 @@ def SDT_Call        : SDTypeProfile<0, -1, [SDTCisVT<0, i32>]>;
 // [cc, lhs, rhs, dest]
 def SDT_TL45CmpJmp     : SDTypeProfile<0, 4, [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
 
+def SDT_TL45SelectCC : SDTypeProfile<1, 5, [SDTCisSameAs<1, 2>,
+                                             SDTCisSameAs<0, 4>,
+                                             SDTCisSameAs<4, 5>]>;
+
 //===----------------------------------------------------------------------===//
 // Selection DAG Nodes
 //===----------------------------------------------------------------------===//
@@ -41,6 +45,9 @@ def tl45_call           : SDNode<"TL45ISD::CALL", SDT_Call,
 
 def tl45_ret            : SDNode<"TL45ISD::RET", SDTNone,
                                    [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
+def tl45_selectcc  : SDNode<"TL45ISD::SELECT_CC", SDT_TL45SelectCC,
+                             [SDNPInGlue]>;
 
 
 // Implements a conditional jump: generates skips/goto to
@@ -134,7 +141,11 @@ let isBarrier = 1, hasSideEffects = 1 in
   def HALT : NoneTypeInstr<0x0, "halt", []>;
 
 let isCall = 1 in
-  def CALL : ITypeInstr<0xD, "call", [(tl45_call TL45imm16:$imm)]>;
+  def CALL : CallTypeInstr<0xD, "call", [(tl45_call GRRegs:$base, TL45imm16:$imm)]>;
+
+
+// let isCall = 1 in
+//   def CALLI : CallITypeInstr<0xD, "calli", [(tl45_call TL45imm16:$imm)]>;
 
 
 /*  Various Patterns and Pseudo */
@@ -186,8 +197,12 @@ let isReturn = 1, isBarrier = 1, isTerminator = 1 in {
 }
 */
 
-def : Pat<(tl45_call tglobaladdr:$func), (CALL tglobaladdr:$func)>;
-def : Pat<(tl45_call texternalsym:$func), (CALL texternalsym:$func)>;
+def : Pat<(tl45_call tglobaladdr:$func), (CALL r0, tglobaladdr:$func)>;
+def : Pat<(tl45_call texternalsym:$func), (CALL r0, texternalsym:$func)>;
+
+def : Pat<(tl45_call texternalsym:$func), (CALL r0, texternalsym:$func)>;
+
+def : Pat<(tl45_call GRRegs:$func), (CALL GRRegs:$func, 0)>;
 
 // ADJCALLSTACKDOWN/UP
 let Defs = [sp], Uses = [sp] in {
@@ -196,6 +211,7 @@ let Defs = [sp], Uses = [sp] in {
   def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
                                 [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
+// 01101
 
 // CMP_JMP
 def CMP_JMP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b, b_target:$dst),
@@ -242,3 +258,12 @@ def : Pat<(int_tl45_in TL45imm16:$b), (IN TL45imm16:$b)>;
 */
 
 
+let usesCustomInserter = 1 in
+  class SelectCC_rrirr<RegisterClass valty, RegisterClass cmpty>
+    : Pseudo<(outs valty:$dst),
+             (ins cmpty:$lhs, cmpty:$rhs, TL45imm16:$imm,
+              valty:$truev, valty:$falsev),
+             [(set valty:$dst, (tl45_selectcc cmpty:$lhs, cmpty:$rhs,
+              (i32 imm:$imm), valty:$truev, valty:$falsev))]>;
+
+def Select_GRRegs_Using_CC_GRRegs : SelectCC_rrirr<GRRegs, GRRegs>;

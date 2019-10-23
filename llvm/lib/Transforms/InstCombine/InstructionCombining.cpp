@@ -1123,7 +1123,8 @@ Type *InstCombiner::FindElementAtOffset(PointerType *PtrTy, int64_t Offset,
 
     if (StructType *STy = dyn_cast<StructType>(Ty)) {
       const StructLayout *SL = DL.getStructLayout(STy);
-      assert(Offset < (int64_t)SL->getSizeInBytes() &&
+      // FIXME possibly not correct
+      assert(Offset < (int64_t)(SL->getSizeInBytes() * DL.getBitsPerMemoryUnit() / 8) &&
              "Offset must stay within the indexed type");
 
       unsigned Elt = SL->getElementContainingOffset(Offset);

@@ -184,25 +184,17 @@ void TL45FrameLowering::emitPrologue(MachineFunction &MF,
     // Realign Stack
     const TL45RegisterInfo *RI = STI.getRegisterInfo();
     if (RI->needsStackRealignment(MF)) {
-      llvm_unreachable("cannot realign");
-//      unsigned MaxAlignment = MFI.getMaxAlignment();
-//
-//      const TL45InstrInfo *TII = STI.getInstrInfo();
-//      if (isInt<12>(-(int)MaxAlignment)) {
-//        BuildMI(MBB, MBBI, DL, TII->get(RISCV::ANDI), SPReg)
-//                .addReg(SPReg)
-//                .addImm(-(int)MaxAlignment);
-//      } else {
-//        unsigned ShiftAmount = countTrailingZeros(MaxAlignment);
-//        Register VR =
-//                MF.getRegInfo().createVirtualRegister(&RISCV::GPRRegClass);
-//        BuildMI(MBB, MBBI, DL, TII->get(RISCV::SRLI), VR)
-//                .addReg(SPReg)
-//                .addImm(ShiftAmount);
-//        BuildMI(MBB, MBBI, DL, TII->get(RISCV::SLLI), SPReg)
-//                .addReg(VR)
-//                .addImm(ShiftAmount);
-//      }
+      // llvm_unreachable("cannot realign");
+      unsigned MaxAlignment = MFI.getMaxAlignment();
+
+      const TL45InstrInfo *TII = STI.getInstrInfo();
+      if (isInt<12>(-(int)MaxAlignment)) {
+        BuildMI(MBB, MBBI, DL, TII->get(TL45::ANDI), SPReg)
+                .addReg(SPReg)
+                .addImm(-(int)MaxAlignment);
+      } else {
+         llvm_unreachable("cannot realign");
+      }
     }
   }
 }

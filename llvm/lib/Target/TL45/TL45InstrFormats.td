@@ -143,6 +143,54 @@ class ITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45
   // let isCommutable = 1;
 }
 
+class CallTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$base, TL45imm16:$imm), opcode, opcodestr, "$base, $imm", pattern> {
+  bits<4> base;
+  bits<16> imm;
+  bits<3> mode = 0b000;
+
+  // the encoding of register sp
+  bits<4> dr = 0b1111;
+
+  let isCall = 1;
+  let Inst{26-24} = mode;
+  let Inst{23-20} = dr;
+  let Inst{19-16} = base;
+  let Inst{15-0} = imm;
+  // let isCommutable = 1;
+}
+
+class CallRTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$base), opcode, opcodestr, "$base", pattern> {
+  bits<4> base;
+  bits<16> imm = 0;
+  bits<3> mode = 0b000;
+
+  // the encoding of register sp
+  bits<4> dr = 0b1111;
+
+  let isCall = 1;
+  let Inst{26-24} = mode;
+  let Inst{23-20} = dr;
+  let Inst{19-16} = base;
+  let Inst{15-0} = imm;
+  // let isCommutable = 1;
+}
+
+class CallITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins TL45imm16:$imm), opcode, opcodestr, "$imm", pattern> {
+  bits<4> base = 0; // r0
+  bits<16> imm;
+  bits<3> mode = 0b000;
+
+  // the encoding of register sp
+  bits<4> dr = 0b1111;
+
+  let isCall = 1;
+  let Inst{26-24} = mode;
+  let Inst{23-20} = dr;
+  let Inst{19-16} = base;
+  let Inst{15-0} = imm;
+  // let isCommutable = 1;
+}
+
 class JRTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$dst), opcode, opcodestr, "$dst", pattern> {
   bits<4> dst;
   bits<3> mode = 0b100;

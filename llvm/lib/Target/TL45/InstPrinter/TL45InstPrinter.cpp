@@ -85,5 +85,5 @@ void TL45InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   }
 
   assert(Op.isExpr() && "unknown operand kind in printOperand");
-  TL45::printExpr(Op.getExpr(), O);
+  ::TL45::printExpr(Op.getExpr(), O);
 }

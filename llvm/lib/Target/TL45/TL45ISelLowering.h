@@ -76,6 +76,7 @@ enum NodeType : unsigned {
   CMP_JMP,
   SELECT_MOVE,
   CMP_SELECT_MOVE,
+  SELECT_CC,
   NAND
 };
 } // namespace TL45ISD
@@ -115,6 +116,9 @@ public:
                                StringRef Constraint,
                                MVT VT) const override;
 
+  MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr &MI,
+                                                  MachineBasicBlock *BB) const override;
+
 private:
   void analyzeInputArgs(MachineFunction &MF, CCState &CCInfo,
                         const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -134,6 +138,8 @@ private:
   SDValue lowerBr(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue lowerSelectCc(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue lowerSELECT(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue lowerAnd(SDValue Op, SelectionDAG &DAG) const; // can't believe this god damn method exist -.-
   SDValue lowerOr(SDValue Op, SelectionDAG &DAG) const;

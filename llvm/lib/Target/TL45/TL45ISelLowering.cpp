@@ -1,4 +1,7 @@
 
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "TL45ISelLowering.h"
 #include "TL45TargetMachine.h"
 
@@ -49,7 +52,8 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Custom);
 
-//  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+  setOperationAction(ISD::SELECT, MVT::i32, Custom);
 
   setOperationAction(ISD::BasicBlock, MVT::Other, Expand);
 
@@ -682,6 +686,8 @@ SDValue TL45TargetLowering::LowerOperation(SDValue Op,
     return lowerBrCc(Op, DAG);
 //  case ISD::BR:
 //    return lowerBr(Op, DAG);
+  case ISD::SELECT:
+    return lowerSELECT(Op, DAG);
   case ISD::SELECT_CC:
     return lowerSelectCc(Op, DAG);
   case ISD::AND:
@@ -851,6 +857,25 @@ SDValue TL45TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   return Cmp;
 }
 
+SDValue TL45TargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
+  SDValue CondV = Op.getOperand(0);
+  SDValue TrueV = Op.getOperand(1);
+  SDValue FalseV = Op.getOperand(2);
+  SDLoc DL(Op);
+  MVT XLenVT = MVT::i32;
+
+  // Otherwise:
+  // (select condv, truev, falsev)
+  // -> (riscvisd::select_cc condv, zero, setne, truev, falsev)
+  SDValue Zero = DAG.getConstant(0, DL, XLenVT);
+  SDValue SetNE = DAG.getConstant(ISD::SETNE, DL, XLenVT);
+
+  SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Glue);
+  SDValue Ops[] = {CondV, Zero, SetNE, TrueV, FalseV};
+
+  return DAG.getNode(TL45ISD::SELECT_CC, DL, VTs, Ops);
+}
+
 SDValue TL45TargetLowering::lowerSelectCc(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DagLoc(Op);
@@ -867,8 +892,8 @@ SDValue TL45TargetLowering::lowerSelectCc(SDValue Op,
     llvm_unreachable("mismatched types of select_cc true and false nodes");
   }
 
-  SDValue SelectMove = DAG.getNode(TL45ISD::CMP_SELECT_MOVE, DL, TrueType,
-                                   DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, TrueValue, FalseValue);
+  SDValue SelectMove = DAG.getNode(TL45ISD::SELECT_CC, DL, TrueType,
+                                   LHS, RHS, DAG.getConstant(CC, DL, MVT::i32), TrueValue, FalseValue);
   return SelectMove;
 }
 
@@ -981,3 +1006,184 @@ const char *TL45TargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
   return nullptr;
 }
+
+static bool isSelectPseudo(MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  default:
+    return false;
+  case TL45::Select_GRRegs_Using_CC_GRRegs:
+    return true;
+  }
+}
+
+// Return the RISC-V branch opcode that matches the given DAG integer
+// condition code. The CondCode must be one of those supported by the RISC-V
+// ISA (see normaliseSetCC).
+static unsigned getBranchOpcodeForIntCondCode(ISD::CondCode CC) {
+  switch (CC) {
+  default:
+    llvm_unreachable("Unsupported CondCode");
+  case ISD::SETEQ:
+    return TL45::JEI;
+  case ISD::SETNE:
+    return TL45::JNEI;
+  case ISD::SETLT:
+    return TL45::JLI;
+  case ISD::SETGE:
+    return TL45::JGI;
+  case ISD::SETULT:
+    return TL45::JBI;
+  case ISD::SETUGE:
+    return TL45::JAI;
+  }
+}
+
+static MachineBasicBlock *emitSelectPseudo(MachineInstr &MI,
+                                           MachineBasicBlock *BB) {
+  // To "insert" Select_* instructions, we actually have to insert the triangle
+  // control-flow pattern.  The incoming instructions know the destination vreg
+  // to set, the condition code register to branch on, the true/false values to
+  // select between, and the condcode to use to select the appropriate branch.
+  //
+  // We produce the following control flow:
+  //     HeadMBB
+  //     |  \
+  //     |  IfFalseMBB
+  //     | /
+  //    TailMBB
+  //
+  // When we find a sequence of selects we attempt to optimize their emission
+  // by sharing the control flow. Currently we only handle cases where we have
+  // multiple selects with the exact same condition (same LHS, RHS and CC).
+  // The selects may be interleaved with other instructions if the other
+  // instructions meet some requirements we deem safe:
+  // - They are debug instructions. Otherwise,
+  // - They do not have side-effects, do not access memory and their inputs do
+  //   not depend on the results of the select pseudo-instructions.
+  // The TrueV/FalseV operands of the selects cannot depend on the result of
+  // previous selects in the sequence.
+  // These conditions could be further relaxed. See the X86 target for a
+  // related approach and more information.
+  Register LHS = MI.getOperand(1).getReg();
+  Register RHS = MI.getOperand(2).getReg();
+  auto CC = static_cast<ISD::CondCode>(MI.getOperand(3).getImm());
+
+  SmallVector<MachineInstr *, 4> SelectDebugValues;
+  SmallSet<Register, 4> SelectDests;
+  SelectDests.insert(MI.getOperand(0).getReg());
+
+  MachineInstr *LastSelectPseudo = &MI;
+
+  for (auto E = BB->end(), SequenceMBBI = MachineBasicBlock::iterator(MI);
+       SequenceMBBI != E; ++SequenceMBBI) {
+    if (SequenceMBBI->isDebugInstr())
+      continue;
+    else if (isSelectPseudo(*SequenceMBBI)) {
+      if (SequenceMBBI->getOperand(1).getReg() != LHS ||
+          SequenceMBBI->getOperand(2).getReg() != RHS ||
+          SequenceMBBI->getOperand(3).getImm() != CC ||
+          SelectDests.count(SequenceMBBI->getOperand(4).getReg()) ||
+          SelectDests.count(SequenceMBBI->getOperand(5).getReg()))
+        break;
+      LastSelectPseudo = &*SequenceMBBI;
+      SequenceMBBI->collectDebugValues(SelectDebugValues);
+      SelectDests.insert(SequenceMBBI->getOperand(0).getReg());
+    } else {
+      if (SequenceMBBI->hasUnmodeledSideEffects() ||
+          SequenceMBBI->mayLoadOrStore())
+        break;
+      if (llvm::any_of(SequenceMBBI->operands(), [&](MachineOperand &MO) {
+        return MO.isReg() && MO.isUse() && SelectDests.count(MO.getReg());
+      }))
+        break;
+    }
+  }
+
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  const BasicBlock *LLVM_BB = BB->getBasicBlock();
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction::iterator I = ++BB->getIterator();
+
+  MachineBasicBlock *HeadMBB = BB;
+  MachineFunction *F = BB->getParent();
+  MachineBasicBlock *TailMBB = F->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *IfFalseMBB = F->CreateMachineBasicBlock(LLVM_BB);
+
+  F->insert(I, IfFalseMBB);
+  F->insert(I, TailMBB);
+
+  // Transfer debug instructions associated with the selects to TailMBB.
+  for (MachineInstr *DebugInstr : SelectDebugValues) {
+    TailMBB->push_back(DebugInstr->removeFromParent());
+  }
+
+  // Move all instructions after the sequence to TailMBB.
+  TailMBB->splice(TailMBB->end(), HeadMBB,
+                  std::next(LastSelectPseudo->getIterator()), HeadMBB->end());
+  // Update machine-CFG edges by transferring all successors of the current
+  // block to the new block which will contain the Phi nodes for the selects.
+  TailMBB->transferSuccessorsAndUpdatePHIs(HeadMBB);
+  // Set the successors for HeadMBB.
+  HeadMBB->addSuccessor(IfFalseMBB);
+  HeadMBB->addSuccessor(TailMBB);
+
+  // Insert appropriate branch.
+  unsigned Opcode = getBranchOpcodeForIntCondCode(CC);
+
+  BuildMI(HeadMBB, DL, TII.get(TL45::CMP))
+      .addReg(LHS)
+      .addReg(RHS);
+
+  BuildMI(HeadMBB, DL, TII.get(Opcode))
+      .addMBB(TailMBB);
+
+  // IfFalseMBB just falls through to TailMBB.
+  IfFalseMBB->addSuccessor(TailMBB);
+
+  // Create PHIs for all of the select pseudo-instructions.
+  auto SelectMBBI = MI.getIterator();
+  auto SelectEnd = std::next(LastSelectPseudo->getIterator());
+  auto InsertionPoint = TailMBB->begin();
+  while (SelectMBBI != SelectEnd) {
+    auto Next = std::next(SelectMBBI);
+    if (isSelectPseudo(*SelectMBBI)) {
+      // %Result = phi [ %TrueValue, HeadMBB ], [ %FalseValue, IfFalseMBB ]
+      BuildMI(*TailMBB, InsertionPoint, SelectMBBI->getDebugLoc(),
+              TII.get(TL45::PHI), SelectMBBI->getOperand(0).getReg())
+          .addReg(SelectMBBI->getOperand(4).getReg())
+          .addMBB(HeadMBB)
+          .addReg(SelectMBBI->getOperand(5).getReg())
+          .addMBB(IfFalseMBB);
+      SelectMBBI->eraseFromParent();
+    }
+    SelectMBBI = Next;
+  }
+
+  F->getProperties().reset(MachineFunctionProperties::Property::NoPHIs);
+  return TailMBB;
+}
+
+MachineBasicBlock *
+TL45TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                                 MachineBasicBlock *BB) const {
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("Unexpected instr type to insert");
+//  case RISCV::ReadCycleWide:
+//    assert(!Subtarget.is64Bit() &&
+//           "ReadCycleWrite is only to be used on riscv32");
+//    return emitReadCycleWidePseudo(MI, BB);
+//  case RISCV::Select_GPR_Using_CC_GPR:
+//  case RISCV::Select_FPR32_Using_CC_GPR:
+//  case RISCV::Select_FPR64_Using_CC_GPR:
+//    return emitSelectPseudo(MI, BB);
+//  case RISCV::BuildPairF64Pseudo:
+//    return emitBuildPairF64Pseudo(MI, BB);
+//  case RISCV::SplitF64Pseudo:
+//    return emitSplitF64Pseudo(MI, BB);
+  case TL45::Select_GRRegs_Using_CC_GRRegs:
+    return emitSelectPseudo(MI, BB);
+
+  }
+}
+
