@@ -46,6 +46,7 @@ TL45::TL45() {
   // FIXME add trap instruction
   trapInstr = {0x00, 0x00, 0x00, 0x00};
 
+  execFirst = true;
   config->imageBase = Optional<uint64_t >(0);
 }
 

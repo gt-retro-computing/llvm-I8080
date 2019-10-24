@@ -44,6 +44,9 @@ class TL45AsmParser : public MCTargetAsmParser {
 
   bool ParseSymbolReference(OperandVector &Operands);
 
+
+  bool parseDirectiveValue(StringRef IDVal, unsigned Size);
+
 #define GET_ASSEMBLER_HEADER
 
 #include "TL45GenAsmMatcher.inc"
@@ -361,7 +364,47 @@ bool TL45AsmParser::ParseInstruction(ParseInstructionInfo &Info,
   return false;
 }
 
+bool TL45AsmParser::parseDirectiveValue(StringRef IDVal, unsigned Size) {
+  auto parseOp = [&]() -> bool {
+    const MCExpr *Value;
+    SMLoc ExprLoc = getLexer().getLoc();
+    if (getParser().checkForValidSection() || getParser().parseExpression(Value))
+      return true;
+    // Special case constant expressions to match code generator.
+    if (const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(Value)) {
+      assert(Size <= 8 && "Invalid size");
+      uint64_t IntValue = MCE->getValue();
+      if (!isUIntN(8 * Size, IntValue) && !isIntN(8 * Size, IntValue))
+        return Error(ExprLoc, "out of range literal value");
+      getStreamer().EmitIntValue(IntValue, Size);
+    } else
+      getStreamer().EmitValue(Value, Size, ExprLoc);
+    return false;
+  };
+
+  if (parseMany(parseOp))
+    return addErrorSuffix(" in '" + Twine(IDVal) + "' directive");
+  return false;
+}
+
 bool TL45AsmParser::ParseDirective(AsmToken DirectiveID) {
+
+
+//
+//  const AsmToken &Tok = getLexer().peekTok();
+//  if (Tok.getKind() != AsmToken::Identifier) {
+//    //getLexer().UnLex(Tok);
+//    return true;
+//  }
+//
+//  std::string dir = Tok.getIdentifier();
+//
+//  if (dir == ".byte") {
+//    parseDirectiveValue(dir, 4);
+//    return false;
+//  }
+
+
   return true;
 }
 

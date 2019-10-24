@@ -111,6 +111,7 @@ public:
   unsigned gotHeaderEntriesNum = 0;
 
   bool needsThunks = false;
+  bool execFirst = false;
 
   // A 4-byte field corresponding to one or more trap instructions, used to pad
   // executable OutputSections.

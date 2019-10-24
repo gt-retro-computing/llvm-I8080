@@ -1,4 +1,4 @@
-#include "TL45MCAsmInfo.h"
+ #include "TL45MCAsmInfo.h"
 #include "llvm/ADT/StringRef.h"
 
 using namespace llvm;
@@ -18,6 +18,7 @@ TL45MCAsmInfo::TL45MCAsmInfo(const Triple &TT) {
   PrivateGlobalPrefix = "_lpg";
   PrivateLabelPrefix = "_lp";
   LinkerPrivateGlobalPrefix = "_llp";
+  IsLittleEndian = false;
 
   UsesNonexecutableStackSection = false;
   HasDotTypeDotSizeDirective = false;

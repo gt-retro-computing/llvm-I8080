@@ -66,7 +66,7 @@ class RRITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern, string a
   bits<4> dr;
   bits<4> sr1;
   bits<16> imm;
-  bits<3> mode = 0b100;
+  bits<3> mode = 0b101;
 
   let Inst{26-24} = mode;
   let Inst{23-20} = dr;
@@ -79,7 +79,7 @@ class RRIStoreTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern, str
   bits<4> dr;
   bits<4> sr1;
   bits<16> imm;
-  bits<3> mode = 0b100;
+  bits<3> mode = 0b101;
 
   let Inst{26-24} = mode;
   let Inst{23-20} = dr;
@@ -114,6 +114,31 @@ class RITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL4
   let Inst{26-24} = mode;
   let Inst{23-20} = dr;
   let Inst{19-16} = 0b0000;
+  let Inst{15-0} = imm;
+  // let isCommutable = 1;
+}
+
+class RRCmpTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$sr1, GRRegs:$sr2), opcode, opcodestr, "$sr1, $sr2", pattern> {
+  bits<4> sr1;
+  bits<4> sr2;
+  bits<3> mode = 0b000;
+
+  let Inst{26-24} = mode;
+  let Inst{23-20} = 0b0000;
+  let Inst{19-16} = sr1;
+  let Inst{15-12} = sr2;
+  let Inst{11-0} = 0; // padding
+  // let isCommutable = 1;
+}
+
+class RICmpTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$sr1, TL45imm16:$imm), opcode, opcodestr, "$sr1, $imm", pattern> {
+  bits<4> sr1;
+  bits<16> imm;
+  bits<3> mode = 0b100;
+
+  let Inst{26-24} = mode;
+  let Inst{23-20} = 0b0000;
+  let Inst{19-16} = sr1;
   let Inst{15-0} = imm;
   // let isCommutable = 1;
 }
@@ -222,9 +247,11 @@ multiclass JTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> 
 
 class NoneTypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins), opcode, opcodestr, "", pattern> {
   bits<3> mode = 0b000;
+  bits<4> dr = 0;
 
   let Inst{26-24} = mode;
-  let Inst{23-0} = 0;
+  let Inst{23-20} = dr;
+  let Inst{19-0} = 0;
   // let isCommutable = 1;
 }
 

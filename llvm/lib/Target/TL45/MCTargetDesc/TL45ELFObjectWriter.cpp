@@ -85,6 +85,10 @@ unsigned TL45ELFObjectWriter::getRelocType(MCContext &Ctx,
     return ELF::R_TL45_HI16_I;
   case TL45::fixup_tl45_lo16_i:
     return ELF::R_TL45_LO16_I;
+
+  case FK_Data_1:
+  case FK_Data_2:
+  case FK_Data_4:
   case TL45::fixup_tl45_32:
     return ELF::R_TL45_32;
 

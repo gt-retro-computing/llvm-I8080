@@ -77,9 +77,9 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
   }
 
   let mode = 0b001, isCompare = 1, isTerminator = 1 in
-    def CMP : RRTypeInstr<0x5, "cmp", []>;
+    def CMP : RRCmpTypeInstr<0x5, "cmp", []>;
   let mode = 0b101, isCompare = 1, isTerminator = 1 in
-    def CMPI : RITypeInstr<0x5, "cmpi", []>;
+    def CMPI : RICmpTypeInstr<0x5, "cmpi", []>;
 }
 
 let mode = 0b001, isAsCheapAsAMove = 1 in {
@@ -134,7 +134,7 @@ let Uses = [eflags], isBranch = 1, isTerminator = 1 in {
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
   defm JMP : JTypeInstr<0xC, 0xF, "jmp", [(br bb:$imm)]>;
 
-let isTerminator = 1, isBarrier = 1, isReturn = 1 in
+let isTerminator = 1, isBarrier = 1, isReturn = 1, dr = 0b1111 in
   def RET : NoneTypeInstr<0xE, "ret", [(tl45_ret)]>;
 
 let isBarrier = 1, hasSideEffects = 1 in
@@ -151,6 +151,7 @@ let isCall = 1 in
 /*  Various Patterns and Pseudo */
 
 def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, GRRegs:$rs1, 0)>;
+def : Pat<(truncstorei8 GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, GRRegs:$rs1, 0)>;
 
 /// Predicates
 

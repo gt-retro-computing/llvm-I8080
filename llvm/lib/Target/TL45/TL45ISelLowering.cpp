@@ -21,6 +21,10 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
+  setOperationAction(ISD::STORE, MVT::i8, Promote);
+  setOperationAction(ISD::LOAD, MVT::i8, Promote);
+
+
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
 

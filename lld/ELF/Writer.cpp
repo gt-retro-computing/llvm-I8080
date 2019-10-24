@@ -24,6 +24,7 @@
 #include "lld/Common/Threads.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/SHA1.h"
 #include "llvm/Support/xxhash.h"
@@ -828,8 +829,13 @@ enum RankFlags {
   RF_MIPS_NOT_GOT = 1 << 0
 };
 
-static unsigned getSectionRank(const OutputSection *sec) {
+static unsigned getSectionRank(TargetInfo *target, const OutputSection *sec) {
   unsigned rank = sec->partition * RF_PARTITION;
+
+  // always put exec sections first.
+  if (target->execFirst && (sec->flags & SHF_EXECINSTR)) {
+    return 0;
+  }
 
   // We want to put section specified by -T option first, so we
   // can start assigning VA starting from them later.
@@ -1384,7 +1390,7 @@ template <class ELFT> void Writer<ELFT>::sortSections() {
     auto *os = dyn_cast<OutputSection>(base);
     if (!os)
       continue;
-    os->sortRank = getSectionRank(os);
+    os->sortRank = getSectionRank( getTarget(), os);
 
     // We want to assign rude approximation values to outSecOff fields
     // to know the relative order of the input sections. We use it for

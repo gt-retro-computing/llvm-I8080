@@ -2198,6 +2198,8 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     break;
   }
 
+  T->dump();
+  llvm::outs() << "Align: " << T->getTypeClass() << " "<< Align << "\n";
   assert(llvm::isPowerOf2_32(Align) && "Alignment must be power of 2");
   return TypeInfo(Width, Align, AlignIsRequired);
 }

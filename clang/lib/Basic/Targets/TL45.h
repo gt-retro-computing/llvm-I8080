@@ -30,21 +30,11 @@ public:
 
     PointerWidth = PointerAlign = 32;
     BoolWidth = BoolAlign = 32;
-    CharWidth = CharAlign = 32;
+    CharWidth = 8;
+    CharAlign = 32;
     ShortWidth = ShortAlign = 32;
     IntWidth = IntAlign = 32;
   }
-
-  unsigned getCharWidth() const { return 8; } // FIXME
-  unsigned getCharAlign() const { return 8; } // FIXME
-
-  /// Return the size of 'signed short' and 'unsigned short' for this
-  /// target, in bits.
-  unsigned getShortWidth() const { return 16; } // FIXME
-
-  /// Return the alignment of 'signed short' and 'unsigned short' for
-  /// this target.
-  unsigned getShortAlign() const { return 16; } // FIXME
 
   ArrayRef<const char *> getGCCRegNames() const override;
 

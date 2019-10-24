@@ -1012,7 +1012,7 @@ unsigned StringLiteral::mapCharByteWidth(TargetInfo const &Target,
     break;
   }
   assert((CharByteWidth & 7) == 0 && "Assumes character size is byte multiple");
-  CharByteWidth /= Target.getDataLayout().getBitsPerMemoryUnit();
+  CharByteWidth /= Target.getCharWidth();
   assert((CharByteWidth == 1 || CharByteWidth == 2 || CharByteWidth == 4) &&
          "The only supported character byte widths are 1,2 and 4!");
   return CharByteWidth;
