@@ -146,6 +146,8 @@ private:
 
   SDValue lowerXor(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+
   template <class NodeTy>
   SDValue getAddr(NodeTy *N, SelectionDAG &DAG, bool IsLocal) const;
 

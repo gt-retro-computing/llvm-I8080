@@ -71,7 +71,7 @@ unsigned TL45InstrInfo::resolveComparison(MachineBasicBlock &MBB,
   // a <= b  ==> b >= a    ==>
   // a != b  ==> skpe a, b; jmp dst
 
-  BuildMI(MBB, I, DL, get(TL45::CMP)).addReg(a.getReg()).addReg(b.getReg());
+  BuildMI(MBB, I, DL, get(TL45::SUB)).addReg(TL45::r0).addReg(a.getReg()).addReg(b.getReg());
   bytesAdded += 1;
 
   switch (ConditionCode) {
@@ -127,6 +127,24 @@ bool TL45InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     unsigned int JmpOpcode;
     resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2), JmpOpcode);
     BuildMI(MBB, MI, DL, get(JmpOpcode)).add(MI.getOperand(3));
+    break;
+  }
+
+  case TL45::ADD32: {
+    MachineOperand &dst = MI.getOperand(0);
+    MachineOperand &src = MI.getOperand(1);
+    MachineOperand &imm = MI.getOperand(2);
+
+    assert(src.getReg() == TL45::r0 && "src must be r0");
+    assert(imm.isImm() && "imm must be immediate");
+
+    uint64_t val = (uint32_t) imm.getImm();
+
+    uint64_t low = val & 0xffffu;
+    uint64_t high = (val >> 16u) & 0xffffu;
+
+    BuildMI(MBB, MI, DL, get(TL45::ADDIZ)).add(dst).add(src).addImm(low);
+    BuildMI(MBB, MI, DL, get(TL45::ADDHI)).add(dst).add(dst).addImm(high);
     break;
   }
 
@@ -203,7 +221,7 @@ unsigned TL45InstrInfo::insertBranch(
 
   if (Cond.empty()) {
     assert(!FBB && "Unconditional branch with multiple successors!");
-    auto &MI = *BuildMI(&MBB, DL, get(TL45::JMP)).addMBB(TBB);
+    auto &MI = *BuildMI(&MBB, DL, get(TL45::JMPI)).addMBB(TBB);
     if (BytesAdded)
       *BytesAdded += 4;
     return 1;

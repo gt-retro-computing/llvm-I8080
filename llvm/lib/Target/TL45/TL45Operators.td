@@ -30,6 +30,17 @@ def TL45imm16 : Operand<i32>, ImmLeaf<i32, [{return isInt<16>(Imm);}]> {
   }];
 }
 
+def TL45imm32 : Operand<i32>, ImmLeaf<i32, [{return isInt<32>(Imm);}]> {
+  let EncoderMethod = "getImmOpValue";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isInt<32>(Imm);
+    return MCOp.isBareSymbolRef();
+  }];
+}
+
+
 def jmptarget : Operand<OtherVT> {
   let EncoderMethod = "getJumpTargetOpValue";
   // let ParserMatchClass = MipsJumpTargetAsmOperand;

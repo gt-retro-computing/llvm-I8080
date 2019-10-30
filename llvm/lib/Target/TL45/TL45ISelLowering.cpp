@@ -4,6 +4,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "TL45ISelLowering.h"
 #include "TL45TargetMachine.h"
+#include <TL45MachineFunctionInfo.h>
 
 #define DEBUG_TYPE "lc2200-target-lowering"
 
@@ -38,19 +39,20 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
 
   setOperationAction(ISD::BRCOND, MVT::i32, Expand);
 
-  setOperationAction(ISD::SUB, MVT::i32, Expand);
+//  setOperationAction(ISD::SUB, MVT::i32, Expand);
 
+  setOperationAction(ISD::SRA, MVT::i32, Custom);
   setOperationAction(ISD::SHL, MVT::i32, Custom);
   setOperationAction(ISD::SRL, MVT::i32, Custom);
 
   setOperationAction(ISD::MUL, MVT::i32, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
-  setOperationAction(ISD::SDIV, MVT::i32, Expand);
-  setOperationAction(ISD::UDIV, MVT::i32, Expand);
-  setOperationAction(ISD::SREM, MVT::i32, Expand);
+//  setOperationAction(ISD::SDIV, MVT::i32, Expand);
+//  setOperationAction(ISD::UDIV, MVT::i32, Expand);
+//  setOperationAction(ISD::SREM, MVT::i32, Expand);
   setOperationAction(ISD::SDIVREM, MVT::i32, Expand);
-  setOperationAction(ISD::UREM, MVT::i32, Expand);
+//  setOperationAction(ISD::UREM, MVT::i32, Expand);
 
 
   setOperationAction(ISD::BR_CC, MVT::Other, Custom);
@@ -60,6 +62,11 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
 
   setOperationAction(ISD::BasicBlock, MVT::Other, Expand);
+
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Expand);
+  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
 //  setOperationAction(ISD::SETCC, MVT::i32, Expand);
 //  setOperationAction(ISD::SETCC, MVT::Other, Expand);
@@ -220,13 +227,17 @@ static SDValue unpackFromMemLoc(SelectionDAG &DAG, SDValue Chain,
   return Val;
 }
 
+static const MCPhysReg ArgGPRs[] = {
+    TL45::r2, TL45::r3, TL45::r4, TL45::r5, TL45::r6
+};
+
 // Transform physical registers into virtual registers.
 SDValue TL45TargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
-  assert(!IsVarArg && "var arg not yet supported");
+  // assert(!IsVarArg && "var arg not yet supported");
   // TODO Vararg
 
   switch (CallConv) {
@@ -294,70 +305,52 @@ SDValue TL45TargetLowering::LowerFormalArguments(
     InVals.push_back(ArgValue);
   }
 
-  //  if (IsVarArg) {
-  //    ArrayRef<MCPhysReg> ArgRegs = makeArrayRef(ArgGPRs);
-  //    unsigned Idx = CCInfo.getFirstUnallocated(ArgRegs);
-  //    const TargetRegisterClass *RC = &RISCV::GPRRegClass;
-  //    MachineFrameInfo &MFI = MF.getFrameInfo();
-  //    MachineRegisterInfo &RegInfo = MF.getRegInfo();
-  ////    RISCVMachineFunctionInfo *RVFI =
-  /// MF.getInfo<RISCVMachineFunctionInfo>();
-  //
-  //    // Offset of the first variable argument from stack pointer, and size of
-  //    // the vararg save area. For now, the varargs save area is either zero
-  //    or
-  //    // large enough to hold a0-a7.
-  //    int VaArgOffset, VarArgsSaveSize;
-  //
-  //    // If all registers are allocated, then all varargs must be passed on
-  //    the
-  //    // stack and we don't need to save any argregs.
-  //    if (ArgRegs.size() == Idx) {
-  //      VaArgOffset = CCInfo.getNextStackOffset();
-  //      VarArgsSaveSize = 0;
-  //    } else {
-  //      VarArgsSaveSize = XLenInBytes * (ArgRegs.size() - Idx);
-  //      VaArgOffset = -VarArgsSaveSize;
-  //    }
-  //
-  //    // Record the frame index of the first variable argument
-  //    // which is a value necessary to VASTART.
-  //    int FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
-  ////    RVFI->setVarArgsFrameIndex(FI);
-  //
-  //    // If saving an odd number of registers then create an extra stack slot
-  //    to
-  //    // ensure that the frame pointer is 2*XLEN-aligned, which in turn
-  //    ensures
-  //    // offsets to even-numbered registered remain 2*XLEN-aligned.
-  //    if (Idx % 2) {
-  //      FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset -
-  //      (int)XLenInBytes,
-  //                                 true);
-  //      VarArgsSaveSize += XLenInBytes;
-  //    }
-  //
-  //    // Copy the integer registers that may have been used for passing
-  //    varargs
-  //    // to the vararg save area.
-  //    for (unsigned I = Idx; I < ArgRegs.size();
-  //         ++I, VaArgOffset += XLenInBytes) {
-  //      const Register Reg = RegInfo.createVirtualRegister(RC);
-  //      RegInfo.addLiveIn(ArgRegs[I], Reg);
-  //      SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, Reg, XLenVT);
-  //      FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
-  //      SDValue PtrOff = DAG.getFrameIndex(FI,
-  //      getPointerTy(DAG.getDataLayout())); SDValue Store =
-  //      DAG.getStore(Chain, DL, ArgValue, PtrOff,
-  //                                   MachinePointerInfo::getFixedStack(MF,
-  //                                   FI));
-  //      cast<StoreSDNode>(Store.getNode())
-  //              ->getMemOperand()
-  //              ->setValue((Value *)nullptr);
-  //      OutChains.push_back(Store);
-  //    }
-  ////    RVFI->setVarArgsSaveSize(VarArgsSaveSize);
-  //  }
+  if (IsVarArg) {
+    ArrayRef<MCPhysReg> ArgRegs = makeArrayRef(ArgGPRs);
+    unsigned Idx = CCInfo.getFirstUnallocated(ArgRegs);
+    const TargetRegisterClass *RC = &TL45::GRRegsRegClass;
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    MachineRegisterInfo &RegInfo = MF.getRegInfo();
+    TL45MachineFunctionInfo *RVFI = MF.getInfo<TL45MachineFunctionInfo>();
+
+    // Offset of the first variable argument from stack pointer, and size of
+    // the vararg save area. For now, the varargs save area is either zero or
+    // large enough to hold a0-a7.
+    int VaArgOffset, VarArgsSaveSize;
+
+    // If all registers are allocated, then all varargs must be passed on the
+    // stack and we don't need to save any argregs.
+//    if (ArgRegs.size() == Idx) {
+      VaArgOffset = CCInfo.getNextStackOffset();
+      VarArgsSaveSize = 0;
+//    } else {
+//      VarArgsSaveSize = XLenInBytes * (ArgRegs.size() - Idx);
+//      VaArgOffset = -VarArgsSaveSize;
+//    }
+
+    // Record the frame index of the first variable argument
+    // which is a value necessary to VASTART.
+    int FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
+    RVFI->setVarArgsFrameIndex(FI);
+
+    // Copy the integer registers that may have been used for passing varargs
+    // to the vararg save area.
+//    for (unsigned I = Idx; I < ArgRegs.size();
+//         ++I, VaArgOffset += XLenInBytes) {
+//      const Register Reg = RegInfo.createVirtualRegister(RC);
+//      RegInfo.addLiveIn(ArgRegs[I], Reg);
+//      SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, Reg, XLenVT);
+//      FI = MFI.CreateFixedObject(XLenInBytes, VaArgOffset, true);
+//      SDValue PtrOff = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+//      SDValue Store = DAG.getStore(Chain, DL, ArgValue, PtrOff,
+//                                   MachinePointerInfo::getFixedStack(MF, FI));
+//      cast<StoreSDNode>(Store.getNode())
+//          ->getMemOperand()
+//          ->setValue((Value *)nullptr);
+//      OutChains.push_back(Store);
+//    }
+    RVFI->setVarArgsSaveSize(VarArgsSaveSize);
+  }
 
   // All stores are grouped in one node to allow the matching between
   // the size of Ins and InVals. This only happens for vararg functions.
@@ -367,6 +360,21 @@ SDValue TL45TargetLowering::LowerFormalArguments(
   }
 
   return Chain;
+}
+
+SDValue TL45TargetLowering::lowerVASTART(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  TL45MachineFunctionInfo *FuncInfo = MF.getInfo<TL45MachineFunctionInfo>();
+
+  SDLoc DL(Op);
+  SDValue FI = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(),
+                                 getPointerTy(MF.getDataLayout()));
+
+  // vastart just stores the address of the VarArgsFrameIndex slot into the
+  // memory location argument.
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, FI, Op.getOperand(1),
+                      MachinePointerInfo(SV));
 }
 
 SDValue
@@ -700,11 +708,15 @@ SDValue TL45TargetLowering::LowerOperation(SDValue Op,
     return lowerOr(Op, DAG);
   case ISD::XOR:
     return lowerXor(Op, DAG);
+  case ISD::VASTART:
+    return lowerVASTART(Op, DAG);
   case ISD::GlobalAddress:
     return lowerGlobalAddress(Op, DAG);
 
   case ISD::SRL:
     return ExpandLibCall("__srlu", Op, false, DAG);
+  case ISD::SRA:
+    return ExpandLibCall("__srau", Op, false, DAG);
   }
 }
 

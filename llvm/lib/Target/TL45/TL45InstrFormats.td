@@ -218,7 +218,7 @@ class CallITypeInstr<bits<5> opcode, string opcodestr, list<dag> pattern> : Inst
 
 class JRTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins GRRegs:$dst), opcode, opcodestr, "$dst", pattern> {
   bits<4> dst;
-  bits<3> mode = 0b100;
+  bits<3> mode = 0b101;
 
   let Inst{26-24} = mode;
   let Inst{23-20} = flag;
@@ -231,7 +231,7 @@ class JRTypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> patt
 
 class JITypeInstr<bits<5> opcode, bits<4> flag, string opcodestr, list<dag> pattern> : InstTL45<(outs), (ins jmptarget:$imm), opcode, opcodestr, "$imm", pattern> {
   bits<16> imm;
-  bits<3> mode = 0b100;
+  bits<3> mode = 0b101;
 
   let Inst{26-24} = mode;
   let Inst{23-20} = flag;

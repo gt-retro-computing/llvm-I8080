@@ -67,14 +67,14 @@ void TL45::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
 //    break;
   case R_TL45_LO16_I:
     checkIntValid(loc, val, type);
-    val >>= 2;
+//    val >>= 2;
 
     checkIntUInt(loc, val, 32, type);
     write16be(loc+2, val & 0xFFFF);
     break;
   case R_TL45_HI16_I:
     checkIntValid(loc, val, type);
-    val >>= 2;
+//    val >>= 2;
 
     checkIntUInt(loc, val, 32, type);
     val >>= 16;
@@ -82,7 +82,7 @@ void TL45::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
     break;
   case R_TL45_32:
     checkIntValid(loc, val, type);
-    val >>= 2;
+//    val >>= 2;
 
     checkIntUInt(loc, val, 32, type);
     write32be(loc, val);

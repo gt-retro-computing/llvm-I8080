@@ -19,7 +19,6 @@ public:
   TL45TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts) : TargetInfo(Triple) {
     resetDataLayout("e" // Little Endian
                     "-m:e"
-                    "-b32" // Byte Size ??? Like mim accessibility
                     "-S32" // Stack Align 32bits
                     "-p:32:32:32" // Pointer Type 32bits, 32bits aligned, (Not sure what that last is for)
                     "-i32:32:32"
@@ -31,9 +30,12 @@ public:
     PointerWidth = PointerAlign = 32;
     BoolWidth = BoolAlign = 32;
     CharWidth = 8;
-    CharAlign = 32;
+    //CharWidth = 32;
+    CharAlign = 8;
     ShortWidth = ShortAlign = 32;
     IntWidth = IntAlign = 32;
+
+    MinimumAddressableBits = 32;
   }
 
   ArrayRef<const char *> getGCCRegNames() const override;

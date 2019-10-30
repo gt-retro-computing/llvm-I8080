@@ -73,6 +73,8 @@ struct TransferrableTargetInfo {
   unsigned char FractWidth, FractAlign;
   unsigned char LongFractWidth, LongFractAlign;
 
+  unsigned char MinimumAddressableBits;
+
   // If true, unsigned fixed point types have the same number of fractional bits
   // as their signed counterparts, forcing the unsigned types to have one extra
   // bit of padding. Otherwise, unsigned fixed point types have
@@ -760,6 +762,10 @@ public:
   /// not for language specific address spaces
   bool useAddressSpaceMapMangling() const {
     return UseAddrSpaceMapMangling;
+  }
+
+  unsigned char getMinimumAddressableBits() const {
+    return MinimumAddressableBits;
   }
 
   ///===---- Other target property query methods --------------------------===//

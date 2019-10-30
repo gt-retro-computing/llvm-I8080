@@ -44,6 +44,10 @@ static SDNode *selectImm(SelectionDAG *CurDAG, const SDLoc &DL, int64_t Imm,
     SDValue SDImm = CurDAG->getTargetConstant(Imm, DL, XLenVT);
 
     return CurDAG->getMachineNode(TL45::ADDI, DL, XLenVT, ZeroReg, SDImm);
+  } else if (isInt<32>(Imm)) {
+    SDValue SDImm = CurDAG->getTargetConstant(Imm, DL, XLenVT);
+
+    return CurDAG->getMachineNode(TL45::ADD32, DL, XLenVT, ZeroReg, SDImm);
   }
 
   llvm_unreachable("cannot select immediate that doesn't fit in imm20");

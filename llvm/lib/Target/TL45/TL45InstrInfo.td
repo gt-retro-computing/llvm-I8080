@@ -67,7 +67,18 @@ def tl45_cmp_jmp       : SDNode<"TL45ISD::CMP_JMP", SDT_TL45CmpJmp, [SDNPHasChai
 let Defs = [eflags], isAsCheapAsAMove = 1 in {
   let isAdd = 1, isCommutable = 1 in
     defm ADD : ALUTypeInstr<0x1, "add", add>;
-  defm SUB : ALUTypeInstr<0x2, "sub", sub>;
+
+  let isAdd = 1, isCommutable = 1, mode = 0b100 in
+    def ADDIZ : RRITypeInstr<0x1, "addiz", []>;
+
+  let isAdd = 1, isCommutable = 1, mode = 0b110 in
+    def ADDHI : RRITypeInstr<0x1, "addhi", []>;
+
+  let isAdd = 1, isPseudo = 1 in
+    def ADD32 : RRITypeInstr<0x1, "add32", [(set i32:$dr, (add i32:$sr1, TL45imm32:$imm))]>;
+
+  let isTerminator = 1 in
+    defm SUB : ALUTypeInstr<0x2, "sub", sub>;
   // defm MUL : ALUTypeInstr<0x3, "mul", mul>;
 
   let isCommutable = 1 in {
@@ -76,9 +87,9 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
     defm AND : ALUTypeInstr<0x8, "and", and>;
   }
 
-  let mode = 0b001, isCompare = 1, isTerminator = 1 in
+  let mode = 0b001, isCompare = 1, isTerminator = 1, isPseudo = 1 in
     def CMP : RRCmpTypeInstr<0x5, "cmp", []>;
-  let mode = 0b101, isCompare = 1, isTerminator = 1 in
+  let mode = 0b101, isCompare = 1, isTerminator = 1, isPseudo = 1 in
     def CMPI : RICmpTypeInstr<0x5, "cmpi", []>;
 }
 
@@ -89,21 +100,37 @@ let mode = 0b001, isAsCheapAsAMove = 1 in {
     def NOT : RRTypeInstr<0x9, "not", []>;
 }
 
-def IN : RITypeInstr<0x10, "in", []>;
-def OUT : RIOutTypeInstr<0x11, "out", []>;
+let mode = 0b000 in
+  def IN : RITypeInstr<0x10, "in", []>;
+
+let mode = 0b000 in
+  def OUT : RIOutTypeInstr<0x11, "out", []>;
 
 let mode = 0b001 in {
   let mayLoad = 1 in
-    def LW : RRITypeInstr<0x16, "lw", [
+    def LW : RRITypeInstr<0x14, "lw", [
       (set (i32 GRRegs:$dr), (load (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
     ]>;
 
   // yes it's backward for SW. MEM[$sr1+imm] = $dr
   let mayStore = 1 in
-    def SW : RRIStoreTypeInstr<0x17, "sw", [
+    def SW : RRIStoreTypeInstr<0x15, "sw", [
       (store i32:$dr, (add (i32 GRRegs:$sr1), TL45imm16:$imm)),
       (store i32:$dr, (i32 GRRegs:$sr1))
     ]>;
+
+  let mayLoad = 1 in
+      def LB : RRITypeInstr<0x12, "lb", [
+        (set (i32 GRRegs:$dr), (zextloadi8 (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
+        // (set (i32 GRRegs:$dr), (extloadi8 (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
+      ]>;
+
+    // yes it's backward for SW. MEM[$sr1+imm] = $dr
+    let mayStore = 1 in
+      def SB : RRIStoreTypeInstr<0x13, "sb", [
+        (truncstorei8 i32:$dr, (add (i32 GRRegs:$sr1), TL45imm16:$imm)),
+        (truncstorei8 i32:$dr, (i32 GRRegs:$sr1))
+      ]>;
 }
 
 def PUSH : RRITypeInstr<0x14, "push", [], "$dr">;
@@ -143,7 +170,6 @@ let isBarrier = 1, hasSideEffects = 1 in
 let isCall = 1 in
   def CALL : CallTypeInstr<0xD, "call", [(tl45_call GRRegs:$base, TL45imm16:$imm)]>;
 
-
 // let isCall = 1 in
 //   def CALLI : CallITypeInstr<0xD, "calli", [(tl45_call TL45imm16:$imm)]>;
 
@@ -162,6 +188,8 @@ def IsOrAdd: PatFrag<(ops node:$A, node:$B), (or node:$A, node:$B), [{
 /// Immediates
 
 def : Pat<(TL45imm16:$imm), (ADDI r0, TL45imm16:$imm)>;
+
+def : Pat<(TL45imm32:$imm), (ADD32 r0, TL45imm32:$imm)>;
 
 // Addressing modes.
 // Necessary because a frameindex can't be matched directly in a pattern.
@@ -190,6 +218,9 @@ multiclass LdPat<PatFrag LoadOp, InstTL45 Inst> {
 }
 
 defm : LdPat<load, LW>;
+
+defm : LdPat<zextloadi8, LB>;
+defm : LdPat<extloadi8, LB>;
 
 
 /*
