@@ -74,6 +74,7 @@ enum NodeType : unsigned {
   JMP,
   CMP_SKIP,
   CMP_JMP,
+  CMPI_JMP,
   SELECT_MOVE,
   CMP_SELECT_MOVE,
   SELECT_CC,

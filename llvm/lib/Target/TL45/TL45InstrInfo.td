@@ -56,6 +56,8 @@ def tl45_selectcc  : SDNode<"TL45ISD::SELECT_CC", SDT_TL45SelectCC,
 // Operands: [CC, A, B]
 def tl45_cmp_jmp       : SDNode<"TL45ISD::CMP_JMP", SDT_TL45CmpJmp, [SDNPHasChain, SDNPOptInGlue]>;
 
+def tl45_cmpi_jmp       : SDNode<"TL45ISD::CMPI_JMP", SDT_TL45CmpJmp, [SDNPHasChain, SDNPOptInGlue]>;
+
 
 
 //===----------------------------------------------------------------------===//
@@ -68,17 +70,19 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
   let isAdd = 1, isCommutable = 1 in
     defm ADD : ALUTypeInstr<0x1, "add", add>;
 
-  let isAdd = 1, isCommutable = 1, mode = 0b100 in
+  let isAdd = 1, mode = 0b100 in
     def ADDIZ : RRITypeInstr<0x1, "addiz", []>;
 
-  let isAdd = 1, isCommutable = 1, mode = 0b110 in
+  let isAdd = 1, mode = 0b110 in
     def ADDHI : RRITypeInstr<0x1, "addhi", []>;
 
-  let isAdd = 1, isPseudo = 1 in
+  let isAdd = 1, isPseudo = 1, isAsCheapAsAMove = 0 in
     def ADD32 : RRITypeInstr<0x1, "add32", [(set i32:$dr, (add i32:$sr1, TL45imm32:$imm))]>;
 
-  let isTerminator = 1 in
+  // SUB is sometimes used in a conditional branch comparison.
+  let isTerminator = 1, isCompare = 1 in
     defm SUB : ALUTypeInstr<0x2, "sub", sub>;
+
   // defm MUL : ALUTypeInstr<0x3, "mul", mul>;
 
   let isCommutable = 1 in {
@@ -86,6 +90,10 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
     defm XOR : ALUTypeInstr<0x7, "xor", xor>;
     defm AND : ALUTypeInstr<0x8, "and", and>;
   }
+
+  defm SHL : ALUTypeInstr<0xA, "shl", shl>;
+  defm SHR : ALUTypeInstr<0xB, "shr", srl>;
+  defm SHRA : ALUTypeInstr<0x5, "shra", sra>;
 
   let mode = 0b001, isCompare = 1, isTerminator = 1, isPseudo = 1 in
     def CMP : RRCmpTypeInstr<0x5, "cmp", []>;
@@ -125,6 +133,11 @@ let mode = 0b001 in {
         // (set (i32 GRRegs:$dr), (extloadi8 (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
       ]>;
 
+   let mayLoad = 1 in
+         def LBSE : RRITypeInstr<0x0f, "lbse", [
+           (set (i32 GRRegs:$dr), (sextloadi8 (add (i32 GRRegs:$sr1), TL45imm16:$imm)))
+         ]>;
+
     // yes it's backward for SW. MEM[$sr1+imm] = $dr
     let mayStore = 1 in
       def SB : RRIStoreTypeInstr<0x13, "sb", [
@@ -132,9 +145,6 @@ let mode = 0b001 in {
         (truncstorei8 i32:$dr, (i32 GRRegs:$sr1))
       ]>;
 }
-
-def PUSH : RRITypeInstr<0x14, "push", [], "$dr">;
-def POP : RRITypeInstr<0x15, "pop", [], "$dr">;
 
 // multiclass JTypeInstr<bits<5> opcode, string opcodestr>
 
@@ -221,6 +231,7 @@ defm : LdPat<load, LW>;
 
 defm : LdPat<zextloadi8, LB>;
 defm : LdPat<extloadi8, LB>;
+defm : LdPat<sextloadi8, LBSE>;
 
 
 /*
@@ -254,40 +265,24 @@ def CMP_JMP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, GRRegs:$b, b_target:$ds
   let isCompare    = 1;
 }
 
+def CMPI_JMP : Pseudo<(outs), (ins cc_val:$cc, GRRegs:$a, TL45imm16:$b, b_target:$dst),
+                     [(tl45_cmpi_jmp (i32 cc_val:$cc), (i32 GRRegs:$a), (i32 TL45imm16:$b), bb:$dst)]> {
+  let hasSideEffects = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let isCompare    = 1;
+}
+
 
 
 // 9 == the CC for not equal
 // def : Pat<(brcond GRRegs:$a, bb:$dst), (JNEI 9, $a, zero, bb:$dst)>;
 
-/*
-class BccPat<PatFrag CondOp, InstTL45 Inst>
-    : Pat<(brcond (CondOp GRRegs:$rs1, GRRegs:$rs2), bb:$imm12),
-          (Inst GRRegs:$rs1, GRRegs:$rs2, TL45imm16:$imm12)>;
-
-def : BccPat<seteq, JEI>;
-def : BccPat<setne, JNEI>;
-def : BccPat<setlt, JLI>;
-def : BccPat<setge, JGEI>;
-def : BccPat<setult, JBI>;
-def : BccPat<setuge, JNBI>;
-*/
 
 
 def : Pat<(int_tl45_out i32:$a, TL45imm16:$b), (OUT i32:$a, TL45imm16:$b)>;
 def : Pat<(int_tl45_in TL45imm16:$b), (IN TL45imm16:$b)>;
 
-
-/*
-
-
-    ins_class_call("CALL", 0xD),
-    ins_class_ret("RET", 0xE),
-
-    # HALT
-    ins_class_none("HALT", 0x0)
-
-
-*/
 
 
 let usesCustomInserter = 1 in

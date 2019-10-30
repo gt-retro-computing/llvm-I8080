@@ -41,9 +41,9 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
 
 //  setOperationAction(ISD::SUB, MVT::i32, Expand);
 
-  setOperationAction(ISD::SRA, MVT::i32, Custom);
-  setOperationAction(ISD::SHL, MVT::i32, Custom);
-  setOperationAction(ISD::SRL, MVT::i32, Custom);
+//  setOperationAction(ISD::SRA, MVT::i32, Custom);
+//  setOperationAction(ISD::SHL, MVT::i32, Custom);
+//  setOperationAction(ISD::SRL, MVT::i32, Custom);
 
   setOperationAction(ISD::MUL, MVT::i32, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
@@ -867,10 +867,17 @@ SDValue TL45TargetLowering::lowerBrCc(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
 
   SDLoc DL(Op);
-  SDValue Cmp = DAG.getNode(TL45ISD::CMP_JMP, DL, MVT::Glue, Chain,
-                            DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, Dest);
 
-  return Cmp;
+  if (isa<ConstantSDNode>(RHS)) {
+    return DAG.getNode(TL45ISD::CMPI_JMP, DL, MVT::Glue, Chain,
+                       DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, Dest);
+  }else if (isa<ConstantSDNode>(LHS)) {
+    return DAG.getNode(TL45ISD::CMPI_JMP, DL, MVT::Glue, Chain,
+                       DAG.getConstant(ISD::getSetCCSwappedOperands(CC), DL, MVT::i32), RHS, LHS, Dest);
+  } else {
+    return DAG.getNode(TL45ISD::CMP_JMP, DL, MVT::Glue, Chain,
+                       DAG.getConstant(CC, DL, MVT::i32), LHS, RHS, Dest);
+  }
 }
 
 SDValue TL45TargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {

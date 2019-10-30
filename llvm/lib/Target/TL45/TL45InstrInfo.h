@@ -51,7 +51,7 @@ public:
   // if the comparison (a CC b) was true. Returns number of instructions added
   unsigned resolveComparison(MachineBasicBlock &MBB, MachineBasicBlock::iterator I, const DebugLoc &DL,
                              ISD::CondCode ConditionCode, MachineOperand &a,
-                             MachineOperand &b, unsigned int &JmpOpcode) const;
+                             MachineOperand &b, unsigned int &JmpOpcode, bool isImm) const;
 
   // Overrides
   void storeRegToStackSlot(MachineBasicBlock &MBB,

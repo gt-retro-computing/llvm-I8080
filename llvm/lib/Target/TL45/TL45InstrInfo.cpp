@@ -61,7 +61,7 @@ unsigned TL45InstrInfo::resolveComparison(MachineBasicBlock &MBB,
                                             ISD::CondCode ConditionCode,
                                             MachineOperand &a,
                                             MachineOperand &b,
-                                            unsigned int &JmpOpcode) const {
+                                            unsigned int &JmpOpcode, bool isImm) const {
   unsigned bytesAdded;
   // Recursive rewrite rules :^)))
   // a =  b  ==> !(a != b) ==> skpe a, b; jmp 1; jmp dst
@@ -71,7 +71,12 @@ unsigned TL45InstrInfo::resolveComparison(MachineBasicBlock &MBB,
   // a <= b  ==> b >= a    ==>
   // a != b  ==> skpe a, b; jmp dst
 
-  BuildMI(MBB, I, DL, get(TL45::SUB)).addReg(TL45::r0).addReg(a.getReg()).addReg(b.getReg());
+  if (isImm) {
+    BuildMI(MBB, I, DL, get(TL45::SUBI)).addReg(TL45::r0).addReg(a.getReg()).addImm(b.getImm());
+  } else {
+    BuildMI(MBB, I, DL, get(TL45::SUB)).addReg(TL45::r0).addReg(a.getReg()).addReg(b.getReg());
+  }
+
   bytesAdded += 1;
 
   switch (ConditionCode) {
@@ -125,7 +130,15 @@ bool TL45InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case TL45::CMP_JMP: {
     auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
     unsigned int JmpOpcode;
-    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2), JmpOpcode);
+    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2), JmpOpcode, false);
+    BuildMI(MBB, MI, DL, get(JmpOpcode)).add(MI.getOperand(3));
+    break;
+  }
+
+  case TL45::CMPI_JMP: {
+    auto ConditionCode = ISD::CondCode(MI.getOperand(0).getImm());
+    unsigned int JmpOpcode;
+    resolveComparison(MBB, MI, DL, ConditionCode, MI.getOperand(1), MI.getOperand(2), JmpOpcode, true);
     BuildMI(MBB, MI, DL, get(JmpOpcode)).add(MI.getOperand(3));
     break;
   }
@@ -235,7 +248,7 @@ unsigned TL45InstrInfo::insertBranch(
 
   unsigned FirstJmpOpcode;
 
-  unsigned Count = resolveComparison(MBB, MBB.end(), DL, ConditionCode, a, b, FirstJmpOpcode);
+  unsigned Count = resolveComparison(MBB, MBB.end(), DL, ConditionCode, a, b, FirstJmpOpcode, b.isImm());
   if (BytesAdded)
     *BytesAdded += (int)Count * 4;
 
