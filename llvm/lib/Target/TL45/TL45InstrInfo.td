@@ -187,7 +187,7 @@ let isCall = 1 in
 /*  Various Patterns and Pseudo */
 
 def : Pat<(store GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, GRRegs:$rs1, 0)>;
-def : Pat<(truncstorei8 GRRegs:$rs2, GRRegs:$rs1), (SW GRRegs:$rs2, GRRegs:$rs1, 0)>;
+def : Pat<(truncstorei8 GRRegs:$rs2, GRRegs:$rs1), (SB GRRegs:$rs2, GRRegs:$rs1, 0)>;
 
 /// Predicates
 

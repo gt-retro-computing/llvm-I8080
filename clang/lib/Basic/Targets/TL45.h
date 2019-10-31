@@ -17,7 +17,7 @@ class LLVM_LIBRARY_VISIBILITY TL45TargetInfo : public TargetInfo {
   static const Builtin::Info BuiltinInfo[];
 public:
   TL45TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts) : TargetInfo(Triple) {
-    resetDataLayout("e" // Little Endian
+    resetDataLayout("E" // Little Endian
                     "-m:e"
                     "-S32" // Stack Align 32bits
                     "-p:32:32:32" // Pointer Type 32bits, 32bits aligned, (Not sure what that last is for)
@@ -34,6 +34,7 @@ public:
     CharAlign = 8;
     ShortWidth = ShortAlign = 32;
     IntWidth = IntAlign = 32;
+    BigEndian = true;
 
     MinimumAddressableBits = 32;
   }
