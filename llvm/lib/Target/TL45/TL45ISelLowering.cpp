@@ -22,8 +22,14 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
-  setOperationAction(ISD::STORE, MVT::i8, Promote);
-  setOperationAction(ISD::LOAD, MVT::i8, Promote);
+  for (auto N : {ISD::EXTLOAD, ISD::SEXTLOAD, ISD::ZEXTLOAD})
+    setLoadExtAction(N, MVT::i32, MVT::i1, Promote);
+
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Expand);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Expand);
+
+//  setOperationAction(ISD::STORE, MVT::i8, Legal);
+//  setOperationAction(ISD::LOAD, MVT::i8, Legal);
 
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
@@ -44,6 +50,8 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
 //  setOperationAction(ISD::SRA, MVT::i32, Custom);
 //  setOperationAction(ISD::SHL, MVT::i32, Custom);
 //  setOperationAction(ISD::SRL, MVT::i32, Custom);
+  setOperationAction(ISD::ROTL, MVT::i32, Expand);
+  setOperationAction(ISD::ROTR, MVT::i32, Expand);
 
   setOperationAction(ISD::MUL, MVT::i32, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
@@ -68,8 +76,8 @@ TL45TargetLowering::TL45TargetLowering(const TL45TargetMachine &TM,
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
-//  setOperationAction(ISD::SETCC, MVT::i32, Expand);
-//  setOperationAction(ISD::SETCC, MVT::Other, Expand);
+  setOperationAction(ISD::SETCC, MVT::i32, Expand);
+  setOperationAction(ISD::SETCC, MVT::Other, Expand);
 }
 
 void TL45TargetLowering::analyzeInputArgs(
@@ -1153,7 +1161,7 @@ static MachineBasicBlock *emitSelectPseudo(MachineInstr &MI,
   // Insert appropriate branch.
   unsigned Opcode = getBranchOpcodeForIntCondCode(CC);
 
-  BuildMI(HeadMBB, DL, TII.get(TL45::CMP))
+  BuildMI(HeadMBB, DL, TII.get(TL45::SUB), TL45::r0)
       .addReg(LHS)
       .addReg(RHS);
 
@@ -1208,5 +1216,14 @@ TL45TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitSelectPseudo(MI, BB);
 
   }
+}
+
+bool TL45TargetLowering::shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT) const {
+  // we don't support i16 loads right now, so don't merge into one.
+  if (NewVT == MVT::i16) {
+    return false;
+  }
+
+  return TargetLoweringBase::shouldReduceLoadWidth(Load, ExtTy, NewVT);
 }
 

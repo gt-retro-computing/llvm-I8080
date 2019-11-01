@@ -1,6 +1,7 @@
     .globl _start
 _start:
-    addi sp, r0, 0x1000
+    ; 0x38 0000
+    addhi sp, r0, 0x0038
     call r0, main
     halt
     

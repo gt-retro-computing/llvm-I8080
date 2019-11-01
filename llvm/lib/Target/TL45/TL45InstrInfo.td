@@ -80,7 +80,7 @@ let Defs = [eflags], isAsCheapAsAMove = 1 in {
     def ADD32 : RRITypeInstr<0x1, "add32", [(set i32:$dr, (add i32:$sr1, TL45imm32:$imm))]>;
 
   // SUB is sometimes used in a conditional branch comparison.
-  let isTerminator = 1, isCompare = 1 in
+  let isCompare = 1 in
     defm SUB : ALUTypeInstr<0x2, "sub", sub>;
 
   // defm MUL : ALUTypeInstr<0x3, "mul", mul>;
@@ -148,7 +148,7 @@ let mode = 0b001 in {
 
 // multiclass JTypeInstr<bits<5> opcode, string opcodestr>
 
-let Uses = [eflags], isBranch = 1, isTerminator = 1 in {
+let Uses = [eflags], isBranch = 1, isTerminator = 1, isPredicable = 1 in {
   defm JO : JTypeInstr<0xC, 0x0, "jo">;
   defm JNO : JTypeInstr<0xC, 0x1, "jno">;
   defm JS : JTypeInstr<0xC, 0x2, "js">;

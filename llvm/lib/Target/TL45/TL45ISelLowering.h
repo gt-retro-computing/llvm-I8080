@@ -120,6 +120,8 @@ public:
   MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr &MI,
                                                   MachineBasicBlock *BB) const override;
 
+  bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT) const override;
+
 private:
   void analyzeInputArgs(MachineFunction &MF, CCState &CCInfo,
                         const SmallVectorImpl<ISD::InputArg> &Ins,

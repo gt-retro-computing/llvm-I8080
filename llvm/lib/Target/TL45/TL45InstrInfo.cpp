@@ -148,7 +148,7 @@ bool TL45InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineOperand &src = MI.getOperand(1);
     MachineOperand &imm = MI.getOperand(2);
 
-    assert(src.getReg() == TL45::r0 && "src must be r0");
+    // assert(src.getReg() == TL45::r0 && "src must be r0");
     assert(imm.isImm() && "imm must be immediate");
 
     uint64_t val = (uint32_t) imm.getImm();
@@ -240,32 +240,24 @@ unsigned TL45InstrInfo::insertBranch(
     return 1;
   }
 
-  // Conditional branch, do the skips
-  auto ConditionCode = (ISD::CondCode)Cond[0].getImm();
-  auto a = Cond[1];
-  auto b = Cond[2];
-  // TODO Might not work
+  unsigned Count = 0;
 
-  unsigned FirstJmpOpcode;
-
-  unsigned Count = resolveComparison(MBB, MBB.end(), DL, ConditionCode, a, b, FirstJmpOpcode, b.isImm());
-  if (BytesAdded)
-    *BytesAdded += (int)Count * 4;
+  // condition
+  BuildMI(MBB, MBB.end(), DL, get(Cond[1].getImm()), TL45::r0).add(Cond[2]).add(Cond[3]);
+  Count++;
 
   // True branch instruction
-  BuildMI(MBB, MBB.end(), DL, get(FirstJmpOpcode)).addMBB(TBB);
-  if (BytesAdded)
-    *BytesAdded += 4;
+  BuildMI(MBB, MBB.end(), DL, get(Cond[0].getImm())).addMBB(TBB);
   Count++;
 
   if (FBB) {
     // Two-way Conditional branch. Insert the second branch.
     BuildMI(MBB, MBB.end(), DL, get(TL45::JMPI)).addMBB(FBB);
-    if (BytesAdded)
-      *BytesAdded += 4;
     Count++;
   }
 
+  if (BytesAdded)
+    *BytesAdded += (int)Count * 4;
   return Count;
 }
 
@@ -290,7 +282,8 @@ static bool getAnalyzableBrOpc(unsigned Opc) {
 
 static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
                                   MachineBasicBlock *&BB,
-                                  SmallVectorImpl<MachineOperand> &Cond) {
+                                  SmallVectorImpl<MachineOperand> &Cond,
+                                  MachineInstr &LastInst) {
   assert(getAnalyzableBrOpc(Opc) && "Not an analyzable branch");
   int NumOp = Inst->getNumExplicitOperands();
 
@@ -301,6 +294,22 @@ static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
 
   for (int i = 0; i < NumOp-1; i++)
     Cond.push_back(Inst->getOperand(i));
+
+  assert((LastInst.getOpcode() == TL45::SUB || LastInst.getOpcode() == TL45::SUBI) && "unknown predicate");
+
+  // This is based heavily off of RISCV parseCondBranch()
+
+  // jump opcode
+  Cond.push_back(MachineOperand::CreateImm(Inst->getOpcode()));
+
+  // SUB/SUBI
+  Cond.push_back(MachineOperand::CreateImm(LastInst.getOpcode()));
+
+  // SUBI r0, r5, 4
+  //           ^  ^
+  Cond.push_back(LastInst.getOperand(1));
+  Cond.push_back(LastInst.getOperand(2));
+
 }
 
 /// Copied From TargetInstrInfo.h:
@@ -335,6 +344,16 @@ static void AnalyzeCondBr(const MachineInstr *Inst, unsigned Opc,
 bool TL45InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
                                     SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const {
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
+
+  static int foo = 0;
+
+  if (MBB.getFullName() == "SHA1Update:entry") {
+    foo++;
+    llvm::errs() << "foo " << foo << "\n";
+    if (foo == 44) {
+      llvm::errs() << "foo\n";
+    }
+  }
 
   // Skip all the debug instructions.
   while (I != REnd && I->isDebugInstr())
@@ -386,7 +405,7 @@ bool TL45InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TB
     }
 
     // Conditional branch
-    AnalyzeCondBr(LastInst, LastOpc, TBB, Cond);
+    AnalyzeCondBr(LastInst, LastOpc, TBB, Cond, *I);
     return false;
   }
 
@@ -415,7 +434,7 @@ bool TL45InstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TB
   if (!LastInst->isUnconditionalBranch())
     return true;
 
-  AnalyzeCondBr(SecondLastInst, SecondLastOpc, TBB, Cond);
+  AnalyzeCondBr(SecondLastInst, SecondLastOpc, TBB, Cond, *I);
   FBB = LastInst->getOperand(0).getMBB();
 
   return false;
@@ -438,6 +457,28 @@ unsigned TL45InstrInfo::removeBranch(MachineBasicBlock &MBB,
     }
     if (!getAnalyzableBrOpc(I->getOpcode()))
       break;
+    // Remove the branch.
+    I->eraseFromParent();
+    I = MBB.rbegin();
+    ++removed;
+  }
+
+  // remove the last instruction if it is a set flags subtract.
+  while (I != REnd) {
+    // Skip past debug instructions.
+    if (I->isDebugInstr()) {
+      ++I;
+      continue;
+    }
+
+    // Not a subtract
+    if ((*I).getOpcode() != TL45::SUB && (*I).getOpcode() != TL45::SUBI)
+      break;
+
+    // Return value isn't discarded.
+    if ((*I).getOperand(0).getReg() != TL45::r0)
+      break;
+
     // Remove the branch.
     I->eraseFromParent();
     I = MBB.rbegin();
